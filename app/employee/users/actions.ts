@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { assignActiveRequiredHrDocuments } from "@/lib/hr-onboarding";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
 import { createClient } from "@/lib/supabase/server";
@@ -84,31 +85,7 @@ async function createEmployeeProfileAndAssignments(
     return profileError;
   }
 
-  const { data: templates, error: templateError } = await admin
-    .from("hr_document_templates")
-    .select("id")
-    .eq("active", true)
-    .eq("required", true);
-
-  if (templateError) {
-    return templateError;
-  }
-
-  if (!templates || templates.length === 0) {
-    return null;
-  }
-
-  const { error: assignmentError } = await admin.from("employee_document_assignments").upsert(
-    templates.map((template) => ({
-      user_id: userId,
-      template_id: template.id,
-      status: "pending",
-      assigned_by: assignedBy,
-    })),
-    { onConflict: "user_id,template_id" },
-  );
-
-  return assignmentError;
+  return assignActiveRequiredHrDocuments(admin, [userId], assignedBy);
 }
 
 async function upsertEmployeeChatProfile(

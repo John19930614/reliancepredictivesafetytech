@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { updateEmployeeOnboardingCompletion } from "@/lib/hr-onboarding";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -74,31 +75,9 @@ function getAdminClientOrRedirect() {
 async function updateProfileCompletion(userId: string) {
   const admin = createAdminClient();
 
-  if (!admin) return;
+  if (!admin) return null;
 
-  const { data: assignments } = await admin
-    .from("employee_document_assignments")
-    .select("template_id, status")
-    .eq("user_id", userId);
-
-  const templateIds = [...new Set((assignments ?? []).map((assignment) => assignment.template_id))];
-  const { data: templates } =
-    templateIds.length > 0
-      ? await admin.from("hr_document_templates").select("id, required").in("id", templateIds)
-      : { data: [] };
-
-  const requiredTemplateIds = new Set((templates ?? []).filter((template) => template.required).map((template) => template.id));
-  const hasPendingRequired = (assignments ?? []).some(
-    (assignment) => requiredTemplateIds.has(assignment.template_id) && assignment.status === "pending",
-  );
-
-  await admin
-    .from("employee_profiles")
-    .upsert({
-      user_id: userId,
-      onboarding_status: hasPendingRequired ? "in_progress" : "complete",
-      onboarding_completed_at: hasPendingRequired ? null : new Date().toISOString(),
-    });
+  return updateEmployeeOnboardingCompletion(admin, userId);
 }
 
 export async function saveEmployeeProfile(formData: FormData) {
@@ -125,7 +104,11 @@ export async function saveEmployeeProfile(formData: FormData) {
     redirect(onboardingPath({ error: error.message, next }));
   }
 
-  await updateProfileCompletion(user.id);
+  const completionError = await updateProfileCompletion(user.id);
+
+  if (completionError) {
+    redirect(onboardingPath({ error: completionError.message, next }));
+  }
 
   revalidatePath("/employee/hr-onboarding");
   redirect(onboardingPath({ message: "Profile saved.", next }));
@@ -218,7 +201,11 @@ export async function signEmployeeDocument(formData: FormData) {
     redirect(onboardingPath({ error: updateError.message, next }));
   }
 
-  await updateProfileCompletion(user.id);
+  const completionError = await updateProfileCompletion(user.id);
+
+  if (completionError) {
+    redirect(onboardingPath({ error: completionError.message, next }));
+  }
 
   revalidatePath("/employee/hr-onboarding");
   revalidatePath("/employee/users");

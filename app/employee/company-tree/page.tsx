@@ -1,5 +1,5 @@
 import { AlertCircle, Network } from "lucide-react";
-import { CompanyTreeManager } from "@/components/CompanyTreeManager";
+import { CompanyTreeManager, type CurrentEmployeeOption } from "@/components/CompanyTreeManager";
 import { companyPositionSeed, type CompanyPosition } from "@/lib/company-data";
 import { createClient } from "@/lib/supabase/server";
 import { isPortalAdminRole, isPortalOwnerRole } from "@/lib/user-management";
@@ -33,6 +33,17 @@ function normalizePosition(position: Partial<CompanyPosition>): CompanyPosition 
   };
 }
 
+function normalizeEmployeeOption(profile: Partial<CurrentEmployeeOption>): CurrentEmployeeOption {
+  return {
+    user_id: String(profile.user_id),
+    legal_name: profile.legal_name ?? null,
+    display_name: profile.display_name ?? null,
+    email: profile.email ?? null,
+    phone: profile.phone ?? null,
+    profile_status: profile.profile_status ?? null,
+  };
+}
+
 export default async function CompanyTreePage() {
   const supabase = await createClient();
   const {
@@ -60,6 +71,14 @@ export default async function CompanyTreePage() {
           .order("sort_order")
           .order("title")
       : { data: null, error: null };
+  const { data: employeeProfiles } =
+    supabase && user && canManagePositions
+      ? await supabase
+          .from("employee_profiles")
+          .select("user_id,legal_name,display_name,email,phone,profile_status")
+          .eq("profile_status", "active")
+          .order("display_name")
+      : { data: [] };
   const initialPositions =
     positions && positions.length > 0
       ? positions.map((position) => normalizePosition(position as Partial<CompanyPosition>))
@@ -130,6 +149,7 @@ export default async function CompanyTreePage() {
       <CompanyTreeManager
         canManagePositions={Boolean(supabase && !positionsError && canManagePositions)}
         canViewCompensation={canViewCompensation}
+        employeeOptions={(employeeProfiles ?? []).map((profile) => normalizeEmployeeOption(profile as Partial<CurrentEmployeeOption>))}
         initialPositions={initialPositions}
       />
     </>

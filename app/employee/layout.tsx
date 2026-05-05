@@ -6,6 +6,7 @@ import { COMPANY_NAME, TAGLINE } from "@/lib/company-data";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/types";
+import { isPortalAdminRole } from "@/lib/user-management";
 
 type EmployeeChatProfile = Database["public"]["Tables"]["employee_chat_profiles"]["Row"];
 type EmployeeChatThread = Database["public"]["Tables"]["employee_chat_threads"]["Row"];
@@ -50,6 +51,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
   } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
   let chatProps: React.ComponentProps<typeof EmployeePresenceChat> | null = null;
   let onboardingLocked = false;
+  let currentRole: { role: string; account_status: string } | null = null;
 
   if (supabase && user) {
     const { data: role } = await supabase
@@ -58,12 +60,8 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
       .eq("user_id", user.id)
       .eq("account_status", "active")
       .maybeSingle();
-    const isAdminRole = [
-      "platform_admin",
-      "super_admin",
-      "admin",
-      "company_admin",
-    ].includes(role?.role ?? "");
+    currentRole = role;
+    const isAdminRole = isPortalAdminRole(role?.role);
 
     onboardingLocked = !isAdminRole && (await hasPendingRequiredOnboarding(supabase, user.id));
 
@@ -137,7 +135,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
 
   return (
     <div className="portal-shell">
-      <EmployeeSidebar />
+      <EmployeeSidebar accountStatus={currentRole?.account_status} currentRole={currentRole?.role} />
       <main className="portal-main">{children}</main>
       {chatProps ? <EmployeePresenceChat {...chatProps} /> : null}
     </div>

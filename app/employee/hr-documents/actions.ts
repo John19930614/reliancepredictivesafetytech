@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { assignActiveRequiredHrDocuments } from "@/lib/hr-onboarding";
 import { requiredHrDocumentTemplates } from "@/lib/hr-document-templates";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -85,7 +86,7 @@ export async function createHrDocumentTemplate(formData: FormData) {
 }
 
 export async function upsertRequiredHrDocumentTemplates() {
-  await getAuthorizedAdmin();
+  const currentUser = await getAuthorizedAdmin();
   const admin = getAdminClientOrRedirect();
 
   const { error } = await admin.from("hr_document_templates").upsert(
@@ -106,10 +107,29 @@ export async function upsertRequiredHrDocumentTemplates() {
     redirect(hrDocumentsPath({ error: error.message }));
   }
 
+  const { data: profiles, error: profilesError } = await admin
+    .from("employee_profiles")
+    .select("user_id")
+    .eq("profile_status", "active");
+
+  if (profilesError) {
+    redirect(hrDocumentsPath({ error: profilesError.message }));
+  }
+
+  const assignmentError = await assignActiveRequiredHrDocuments(
+    admin,
+    (profiles ?? []).map((profile) => profile.user_id),
+    currentUser.id,
+  );
+
+  if (assignmentError) {
+    redirect(hrDocumentsPath({ error: assignmentError.message }));
+  }
+
   revalidatePath("/employee/hr-documents");
   revalidatePath("/employee/hr-onboarding");
   revalidatePath("/employee/users");
-  redirect(hrDocumentsPath({ message: "Required HR forms installed." }));
+  redirect(hrDocumentsPath({ message: "Required HR forms installed and assigned to active employees." }));
 }
 
 export async function updateHrDocumentTemplate(formData: FormData) {

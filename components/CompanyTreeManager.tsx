@@ -15,7 +15,17 @@ import { createClient } from "@/lib/supabase/client";
 type CompanyTreeManagerProps = {
   canManagePositions: boolean;
   canViewCompensation: boolean;
+  employeeOptions: CurrentEmployeeOption[];
   initialPositions: CompanyPosition[];
+};
+
+export type CurrentEmployeeOption = {
+  user_id: string;
+  legal_name: string | null;
+  display_name: string | null;
+  email: string | null;
+  phone: string | null;
+  profile_status: string | null;
 };
 
 type PositionStatusFilter = "All" | (typeof companyPositionStatuses)[number];
@@ -51,11 +61,25 @@ function formatSalary(position: CompanyPosition) {
   return `${range}${position.salary_period ? ` ${position.salary_period.toLowerCase()}` : ""}`;
 }
 
-export function CompanyTreeManager({ canManagePositions, canViewCompensation, initialPositions }: CompanyTreeManagerProps) {
+function getEmployeeName(employee: CurrentEmployeeOption) {
+  return employee.display_name || employee.legal_name || employee.email || "Employee";
+}
+
+function getEmployeeLabel(employee: CurrentEmployeeOption) {
+  const name = getEmployeeName(employee);
+
+  return employee.email && employee.email !== name ? `${name} - ${employee.email}` : name;
+}
+
+export function CompanyTreeManager({ canManagePositions, canViewCompensation, employeeOptions, initialPositions }: CompanyTreeManagerProps) {
   const [positions, setPositions] = useState(initialPositions);
   const [message, setMessage] = useState("");
   const [statusFilter, setStatusFilter] = useState<PositionStatusFilter>("All");
   const [query, setQuery] = useState("");
+  const employeesByUserId = useMemo(
+    () => new Map(employeeOptions.map((employee) => [employee.user_id, employee])),
+    [employeeOptions],
+  );
   const sortedPositions = useMemo(
     () => [...positions].sort((a, b) => a.sort_order - b.sort_order || a.title.localeCompare(b.title)),
     [positions],
@@ -143,6 +167,52 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, in
   }, [filteredPositions, positionsById, sortedPositions]);
   const filterTabs: PositionStatusFilter[] = ["All", ...companyPositionStatuses];
 
+  function getEmployeeAssignmentPatch(selectedUserId: string, existingPosition?: CompanyPosition) {
+    if (
+      selectedUserId.startsWith("legacy:") ||
+      (existingPosition?.portal_user_id && selectedUserId === existingPosition.portal_user_id && !employeesByUserId.has(selectedUserId))
+    ) {
+      return {
+        portal_user_id: existingPosition?.portal_user_id ?? null,
+        employee_name: existingPosition?.employee_name ?? null,
+        employee_email: existingPosition?.employee_email ?? null,
+        employee_phone: existingPosition?.employee_phone ?? null,
+      };
+    }
+
+    const selectedEmployee = employeesByUserId.get(selectedUserId);
+
+    if (!selectedEmployee) {
+      return {
+        portal_user_id: null,
+        employee_name: null,
+        employee_email: null,
+        employee_phone: null,
+      };
+    }
+
+    return {
+      portal_user_id: selectedEmployee.user_id,
+      employee_name: getEmployeeName(selectedEmployee),
+      employee_email: selectedEmployee.email,
+      employee_phone: selectedEmployee.phone,
+    };
+  }
+
+  function renderEmployeeSelect(id: string, defaultValue: string, legacyLabel?: string | null) {
+    return (
+      <select id={id} name="portal_user_id" defaultValue={defaultValue} disabled={!canManagePositions}>
+        <option value="">Unassigned</option>
+        {legacyLabel ? <option value={defaultValue}>{legacyLabel} (not linked)</option> : null}
+        {employeeOptions.map((employee) => (
+          <option key={employee.user_id} value={employee.user_id}>
+            {getEmployeeLabel(employee)}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
   async function createPosition(formData: FormData) {
     setMessage("");
     const supabase = createClient();
@@ -161,9 +231,7 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, in
       department: String(formData.get("department") ?? "Operations"),
       parent_position_id: String(formData.get("parent_position_id") ?? "") || null,
       status: String(formData.get("status") ?? "Needed"),
-      employee_name: String(formData.get("employee_name") ?? "").trim() || null,
-      employee_email: String(formData.get("employee_email") ?? "").trim() || null,
-      employee_phone: String(formData.get("employee_phone") ?? "").trim() || null,
+      ...getEmployeeAssignmentPatch(String(formData.get("portal_user_id") ?? "")),
       job_description: String(formData.get("job_description") ?? "").trim() || null,
       employment_type: String(formData.get("employment_type") ?? "Full-time"),
       location: String(formData.get("location") ?? "").trim() || null,
@@ -205,9 +273,7 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, in
 
     const patch: Partial<CompanyPosition> = {
       status: String(formData.get("status") ?? position.status),
-      employee_name: String(formData.get("employee_name") ?? "").trim() || null,
-      employee_email: String(formData.get("employee_email") ?? "").trim() || null,
-      employee_phone: String(formData.get("employee_phone") ?? "").trim() || null,
+      ...getEmployeeAssignmentPatch(String(formData.get("portal_user_id") ?? ""), position),
       job_description: String(formData.get("job_description") ?? "").trim() || null,
       employment_type: String(formData.get("employment_type") ?? position.employment_type ?? "Full-time"),
       location: String(formData.get("location") ?? "").trim() || null,
@@ -237,6 +303,13 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, in
     const reportsTo = position.parent_position_id ? positionsById.get(position.parent_position_id)?.title : null;
     const isHiringRole = position.status === "Open" || position.status === "Needed";
     const directReportCount = childCountByPositionId.get(position.id) ?? 0;
+    const hasUnlinkedEmployee = !position.portal_user_id && Boolean(position.employee_name);
+    const linkedEmployeeMissing = Boolean(position.portal_user_id && !employeesByUserId.has(position.portal_user_id));
+    const employeeSelectDefault = position.portal_user_id ?? (hasUnlinkedEmployee ? `legacy:${position.id}` : "");
+    const preservedEmployeeLabel =
+      hasUnlinkedEmployee || linkedEmployeeMissing
+        ? position.employee_name || position.employee_email || "Assigned employee"
+        : null;
 
     return (
       <li className="org-tree-item" key={position.id}>
@@ -310,15 +383,7 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, in
                 </div>
                 <div className="field">
                   <label>Employee</label>
-                  <input name="employee_name" defaultValue={position.employee_name ?? ""} disabled={!canManagePositions} />
-                </div>
-                <div className="field">
-                  <label>Email</label>
-                  <input name="employee_email" defaultValue={position.employee_email ?? ""} disabled={!canManagePositions} type="email" />
-                </div>
-                <div className="field">
-                  <label>Phone</label>
-                  <input name="employee_phone" defaultValue={position.employee_phone ?? ""} disabled={!canManagePositions} />
+                  {renderEmployeeSelect(`employee-${position.id}`, employeeSelectDefault, preservedEmployeeLabel)}
                 </div>
                 {canViewCompensation ? (
                   <>
@@ -425,15 +490,7 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, in
           </div>
           <div className="field">
             <label htmlFor="employee_name">Employee</label>
-            <input id="employee_name" name="employee_name" disabled={!canManagePositions} />
-          </div>
-          <div className="field">
-            <label htmlFor="employee_email">Email</label>
-            <input id="employee_email" name="employee_email" disabled={!canManagePositions} type="email" />
-          </div>
-          <div className="field">
-            <label htmlFor="employee_phone">Phone</label>
-            <input id="employee_phone" name="employee_phone" disabled={!canManagePositions} />
+            {renderEmployeeSelect("employee_name", "")}
           </div>
           {canViewCompensation ? (
             <>

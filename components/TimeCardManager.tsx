@@ -105,10 +105,6 @@ export function TimeCardManager({
 
   const currentRole = profile?.time_card_role_id ? roleById.get(profile.time_card_role_id) : null;
   const allowedCategoryIds = useMemo(() => {
-    if (isAdmin) {
-      return new Set(categories.map((category) => category.id));
-    }
-
     if (!profile?.time_card_role_id) {
       return new Set<string>();
     }
@@ -118,19 +114,15 @@ export function TimeCardManager({
         .filter((item) => item.role_id === profile.time_card_role_id)
         .map((item) => item.category_id),
     );
-  }, [categories, isAdmin, profile?.time_card_role_id, roleCategories]);
+  }, [profile?.time_card_role_id, roleCategories]);
 
   const allowedTaskIds = useMemo(() => {
-    if (isAdmin) {
-      return new Set(tasks.map((task) => task.id));
-    }
-
     if (!profile?.time_card_role_id) {
       return new Set<string>();
     }
 
     return new Set(roleTasks.filter((item) => item.role_id === profile.time_card_role_id).map((item) => item.task_id));
-  }, [isAdmin, profile?.time_card_role_id, roleTasks, tasks]);
+  }, [profile?.time_card_role_id, roleTasks]);
 
   const allowedTasks = useMemo(
     () => tasks.filter((task) => allowedTaskIds.has(task.id) && allowedCategoryIds.has(task.category_id)),
@@ -337,6 +329,149 @@ export function TimeCardManager({
     return item?.display_name || item?.email || userId.slice(0, 8);
   }
 
+  function renderOwnTimeCardPanel() {
+    if (!profile?.time_card_role_id) {
+      return (
+        <section className="portal-card">
+          <UserCheck color="#c9932b" size={28} />
+          <h3>Time-card role required</h3>
+          <p>An admin must assign your employee profile to a time-card role before you can enter or submit hours.</p>
+        </section>
+      );
+    }
+
+    return (
+      <>
+        <div className="portal-grid">
+          <section className="portal-card">
+            <h3>Your time-card role</h3>
+            <div className="metric" style={{ fontSize: "1.4rem" }}>
+              {currentRole?.name ?? "Assigned"}
+            </div>
+          </section>
+          <section className="portal-card">
+            <h3>Current week hours</h3>
+            <div className="metric">{sumHours(currentWeekEntries).toFixed(2)}</div>
+          </section>
+          <section className="portal-card">
+            <h3>Current week status</h3>
+            <div className="metric" style={{ fontSize: "1.4rem" }}>
+              {currentWeekCard?.status ?? "Not created"}
+            </div>
+          </section>
+        </div>
+
+        <section className="table-card time-card-panel">
+          <div className="time-card-toolbar">
+            <div>
+              <h2>Weekly time card</h2>
+              <p>
+                {formatDate(weekStart)} to {formatDate(weekEnd)}
+              </p>
+            </div>
+            <div className="time-card-create">
+              <input value={weekStart} onChange={(event) => setWeekStart(event.target.value)} type="date" />
+              <button className="button button-primary" onClick={createWeeklyCard} type="button">
+                <Plus size={17} />
+                Create Week
+              </button>
+            </div>
+          </div>
+
+          {!currentCard ? (
+            <div className="empty-state time-card-create-empty">
+              <span>Create this week&apos;s time card to start logging hours.</span>
+              <button className="button button-primary" onClick={createWeeklyCard} type="button">
+                <Plus size={17} />
+                Create Week
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="time-entry-table">
+                {weeklyEntries.length === 0 ? (
+                  <div className="empty-state">No entries yet.</div>
+                ) : (
+                  weeklyEntries.map((entry) => (
+                    <div className="time-entry-row" key={entry.id}>
+                      <span>{formatDate(entry.work_date)}</span>
+                      <span>{categoryById.get(entry.category_id)?.name ?? "Category"}</span>
+                      <span>{taskById.get(entry.task_id)?.title ?? "Task"}</span>
+                      <strong>{Number(entry.hours).toFixed(2)}</strong>
+                      {canEditCurrentCard ? (
+                        <button className="icon-button" onClick={() => deleteEntry(entry)} type="button" aria-label="Delete time entry">
+                          <Trash2 size={16} />
+                        </button>
+                      ) : null}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {canEditCurrentCard ? (
+                <form className="form-panel time-entry-form" onSubmit={addEntry}>
+                  <h2>Add entry</h2>
+                  <div className="form-grid">
+                    <div className="field">
+                      <label htmlFor="work_date">Date</label>
+                      <input id="work_date" min={currentCard.week_start} max={currentCard.week_end} name="work_date" required type="date" defaultValue={currentCard.week_start} />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="category_id">Category</label>
+                      <select
+                        id="category_id"
+                        value={selectedCategoryId}
+                        onChange={(event) => setSelectedCategoryId(event.target.value)}
+                      >
+                        {allowedCategories.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="field-full">
+                      <label htmlFor="task_id">Task</label>
+                      <select id="task_id" value={selectedTaskId} onChange={(event) => setSelectedTaskId(event.target.value)}>
+                        {tasksForSelectedCategory.map((task) => (
+                          <option key={task.id} value={task.id}>
+                            {task.title}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="hours">Hours</label>
+                      <input id="hours" max="24" min="0.25" name="hours" required step="0.25" type="number" />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="notes">Notes</label>
+                      <input id="notes" name="notes" />
+                    </div>
+                    <button className="button button-primary" disabled={!selectedTaskId} type="submit">
+                      <Plus size={17} />
+                      Add Entry
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="empty-state">This time card is locked because it has been submitted or approved.</div>
+              )}
+
+              <div className="time-card-submit">
+                <strong>Total: {sumHours(weeklyEntries).toFixed(2)} hours</strong>
+                <button className="button button-primary" disabled={!canEditCurrentCard || weeklyEntries.length === 0} onClick={() => submitCard(currentCard)} type="button">
+                  <Send size={17} />
+                  Submit Time Card
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      </>
+    );
+  }
+
   if (isAdmin) {
     const submittedCount = cards.filter((card) => card.status === "submitted").length;
     const totalApprovedHours = payroll
@@ -501,6 +636,14 @@ export function TimeCardManager({
             )}
           </div>
         </section>
+
+        <div className="portal-topline" style={{ marginTop: 8 }}>
+          <div>
+            <div className="eyebrow">My Time Card</div>
+            <h2>Enter your weekly hours</h2>
+          </div>
+        </div>
+        {renderOwnTimeCardPanel()}
       </div>
     );
   }
@@ -508,142 +651,7 @@ export function TimeCardManager({
   return (
     <div className="time-card-stack">
       {message ? <div className="success-box portal-alert">{message}</div> : null}
-      {!profile?.time_card_role_id ? (
-        <section className="portal-card">
-          <UserCheck color="#c9932b" size={28} />
-          <h3>Time-card role required</h3>
-          <p>An admin must assign your employee profile to a time-card role before you can enter or submit hours.</p>
-        </section>
-      ) : (
-        <>
-          <div className="portal-grid">
-            <section className="portal-card">
-              <h3>Your time-card role</h3>
-              <div className="metric" style={{ fontSize: "1.4rem" }}>
-                {currentRole?.name ?? "Assigned"}
-              </div>
-            </section>
-            <section className="portal-card">
-              <h3>Current week hours</h3>
-              <div className="metric">{sumHours(currentWeekEntries).toFixed(2)}</div>
-            </section>
-            <section className="portal-card">
-              <h3>Current week status</h3>
-              <div className="metric" style={{ fontSize: "1.4rem" }}>
-                {currentWeekCard?.status ?? "Not created"}
-              </div>
-            </section>
-          </div>
-
-          <section className="table-card time-card-panel">
-            <div className="time-card-toolbar">
-              <div>
-                <h2>Weekly time card</h2>
-                <p>
-                  {formatDate(weekStart)} to {formatDate(weekEnd)}
-                </p>
-              </div>
-              <div className="time-card-create">
-                <input value={weekStart} onChange={(event) => setWeekStart(event.target.value)} type="date" />
-                <button className="button button-primary" onClick={createWeeklyCard} type="button">
-                  <Plus size={17} />
-                  Create Week
-                </button>
-              </div>
-            </div>
-
-            {!currentCard ? (
-              <div className="empty-state time-card-create-empty">
-                <span>Create this week&apos;s time card to start logging hours.</span>
-                <button className="button button-primary" onClick={createWeeklyCard} type="button">
-                  <Plus size={17} />
-                  Create Week
-                </button>
-              </div>
-            ) : (
-              <>
-                <div className="time-entry-table">
-                  {weeklyEntries.length === 0 ? (
-                    <div className="empty-state">No entries yet.</div>
-                  ) : (
-                    weeklyEntries.map((entry) => (
-                      <div className="time-entry-row" key={entry.id}>
-                        <span>{formatDate(entry.work_date)}</span>
-                        <span>{categoryById.get(entry.category_id)?.name ?? "Category"}</span>
-                        <span>{taskById.get(entry.task_id)?.title ?? "Task"}</span>
-                        <strong>{Number(entry.hours).toFixed(2)}</strong>
-                        {canEditCurrentCard ? (
-                          <button className="icon-button" onClick={() => deleteEntry(entry)} type="button" aria-label="Delete time entry">
-                            <Trash2 size={16} />
-                          </button>
-                        ) : null}
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                {canEditCurrentCard ? (
-                  <form className="form-panel time-entry-form" onSubmit={addEntry}>
-                    <h2>Add entry</h2>
-                    <div className="form-grid">
-                      <div className="field">
-                        <label htmlFor="work_date">Date</label>
-                        <input id="work_date" min={currentCard.week_start} max={currentCard.week_end} name="work_date" required type="date" defaultValue={currentCard.week_start} />
-                      </div>
-                      <div className="field">
-                        <label htmlFor="category_id">Category</label>
-                        <select
-                          id="category_id"
-                          value={selectedCategoryId}
-                          onChange={(event) => setSelectedCategoryId(event.target.value)}
-                        >
-                          {allowedCategories.map((category) => (
-                            <option key={category.id} value={category.id}>
-                              {category.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="field-full">
-                        <label htmlFor="task_id">Task</label>
-                        <select id="task_id" value={selectedTaskId} onChange={(event) => setSelectedTaskId(event.target.value)}>
-                          {tasksForSelectedCategory.map((task) => (
-                            <option key={task.id} value={task.id}>
-                              {task.title}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="field">
-                        <label htmlFor="hours">Hours</label>
-                        <input id="hours" max="24" min="0.25" name="hours" required step="0.25" type="number" />
-                      </div>
-                      <div className="field">
-                        <label htmlFor="notes">Notes</label>
-                        <input id="notes" name="notes" />
-                      </div>
-                      <button className="button button-primary" disabled={!selectedTaskId} type="submit">
-                        <Plus size={17} />
-                        Add Entry
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <div className="empty-state">This time card is locked because it has been submitted or approved.</div>
-                )}
-
-                <div className="time-card-submit">
-                  <strong>Total: {sumHours(weeklyEntries).toFixed(2)} hours</strong>
-                  <button className="button button-primary" disabled={!canEditCurrentCard || weeklyEntries.length === 0} onClick={() => submitCard(currentCard)} type="button">
-                    <Send size={17} />
-                    Submit Time Card
-                  </button>
-                </div>
-              </>
-            )}
-          </section>
-        </>
-      )}
+      {renderOwnTimeCardPanel()}
     </div>
   );
 }

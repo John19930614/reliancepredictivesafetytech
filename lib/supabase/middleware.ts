@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/lib/supabase/types";
+import { canAccessEmployeePath, isPortalAdminRole } from "@/lib/user-management";
 
 async function hasPendingRequiredOnboarding(
   supabase: ReturnType<typeof createServerClient<Database>>,
@@ -21,6 +22,7 @@ async function hasPendingRequiredOnboarding(
     .from("hr_document_templates")
     .select("id", { count: "exact", head: true })
     .in("id", pendingTemplateIds)
+    .eq("active", true)
     .eq("required", true);
 
   return (count ?? 0) > 0;
@@ -95,12 +97,7 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(loginUrl);
     }
 
-    const isAdminRole = [
-      "platform_admin",
-      "super_admin",
-      "admin",
-      "company_admin",
-    ].includes(role.role);
+    const isAdminRole = isPortalAdminRole(role.role);
     const isHrOnboardingRoute = request.nextUrl.pathname === "/employee/hr-onboarding";
 
     if (!isAdminRole) {
@@ -115,6 +112,13 @@ export async function updateSession(request: NextRequest) {
         );
         return NextResponse.redirect(onboardingUrl);
       }
+    }
+
+    if (!canAccessEmployeePath(role.role, role.account_status, request.nextUrl.pathname)) {
+      const dashboardUrl = request.nextUrl.clone();
+      dashboardUrl.pathname = "/employee";
+      dashboardUrl.searchParams.set("message", "role-access-required");
+      return NextResponse.redirect(dashboardUrl);
     }
   }
 

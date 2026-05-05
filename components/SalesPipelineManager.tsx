@@ -2,7 +2,20 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ArrowRight, Plus } from "lucide-react";
+import {
+  ArrowRight,
+  BriefcaseBusiness,
+  Building2,
+  CalendarDays,
+  CheckCircle2,
+  ClipboardList,
+  Mail,
+  Phone,
+  Plus,
+  Target,
+  TrendingUp,
+  UserRound,
+} from "lucide-react";
 import {
   defaultClientOnboardingItems,
   lifecycleStages,
@@ -28,6 +41,24 @@ type SalesPipelineManagerProps = {
   demoRequests: DemoRequest[];
 };
 
+const negotiatingStages = new Set(["Proposal Sent", "Legal Review", "Contract Sent", "Signed / Won"]);
+const liveStages = new Set(["Active Company", "Renewal / Expansion"]);
+
+const stageDetails: Record<string, { lane: string; summary: string }> = {
+  Lead: { lane: "Intake", summary: "New account fit and ownership" },
+  "First Pitch": { lane: "Engaged", summary: "Initial conversation complete" },
+  "Demo Scheduled": { lane: "Calendar", summary: "Demo date and attendee prep" },
+  "Demo Completed": { lane: "Qualified", summary: "Demo recap and next action" },
+  "Proposal Sent": { lane: "Proposal", summary: "Commercial package delivered" },
+  "Legal Review": { lane: "Review", summary: "Terms, security, and approvals" },
+  "Contract Sent": { lane: "Signature", summary: "Final documents in circulation" },
+  "Signed / Won": { lane: "Won", summary: "Ready for activation handoff" },
+  Onboarding: { lane: "Launch", summary: "Admin setup and kickoff" },
+  "Pilot / Setup": { lane: "Deploy", summary: "Pilot workspace configuration" },
+  "Active Company": { lane: "Live", summary: "Operational account" },
+  "Renewal / Expansion": { lane: "Growth", summary: "Expansion and renewal motion" },
+};
+
 export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipelineManagerProps) {
   const [clients, setClients] = useState(initialClients);
   const [requests, setRequests] = useState(demoRequests);
@@ -41,6 +72,21 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
       return accumulator;
     }, {});
   }, [clients]);
+
+  const pipelineMetrics = useMemo(() => {
+    const negotiatingCount = clients.filter((client) => negotiatingStages.has(client.lifecycle_stage)).length;
+    const liveCount = clients.filter((client) => liveStages.has(client.lifecycle_stage)).length;
+    const nextUpCount = clients.filter((client) =>
+      ["First Pitch", "Demo Scheduled", "Demo Completed"].includes(client.lifecycle_stage),
+    ).length;
+
+    return [
+      { label: "Total prospects", value: clients.length, icon: BriefcaseBusiness },
+      { label: "Demo requests", value: requests.length, icon: ClipboardList },
+      { label: "Active pursuits", value: nextUpCount + negotiatingCount, icon: Target },
+      { label: "Live or renewal", value: liveCount, icon: CheckCircle2 },
+    ];
+  }, [clients, requests.length]);
 
   async function seedOnboarding(clientId: string, owner: string) {
     const supabase = createClient();
@@ -174,38 +220,45 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
   }
 
   return (
-    <div className="lifecycle-layout">
-      <aside className="form-panel">
+    <div className="sales-pipeline-workspace">
+      <aside className="sales-intake-panel">
+        <div className="sales-panel-kicker">
+          <span>
+            <Plus size={15} />
+          </span>
+          Manual entry
+        </div>
         <h2>Add company card</h2>
-        {message ? <div className="success-box">{message}</div> : null}
-        <form className="form-grid" onSubmit={createLead} style={{ gridTemplateColumns: "1fr", marginTop: 16 }}>
+        <p>Create a lead, seed its onboarding checklist, and place it into the commercial workflow.</p>
+        {message ? <div className="sales-status-box">{message}</div> : null}
+        <form className="sales-intake-form" onSubmit={createLead}>
           <div className="field">
             <label htmlFor="name">Company name</label>
-            <input id="name" name="name" required />
+            <input id="name" name="name" placeholder="Acme Industrial" required />
           </div>
           <div className="field">
             <label htmlFor="contact_name">Primary contact</label>
-            <input id="contact_name" name="contact_name" />
+            <input id="contact_name" name="contact_name" placeholder="Name and role" />
           </div>
           <div className="field">
             <label htmlFor="email">Email</label>
-            <input id="email" name="email" type="email" />
+            <input id="email" name="email" placeholder="contact@company.com" type="email" />
           </div>
           <div className="field">
             <label htmlFor="phone">Phone</label>
-            <input id="phone" name="phone" />
+            <input id="phone" name="phone" placeholder="(555) 000-0000" />
           </div>
           <div className="field">
             <label htmlFor="company_type">Company type</label>
-            <input id="company_type" name="company_type" />
+            <input id="company_type" name="company_type" placeholder="Construction, industrial, energy" />
           </div>
           <div className="field">
             <label htmlFor="owner">Owner</label>
-            <input id="owner" name="owner" />
+            <input id="owner" name="owner" placeholder="Account owner" />
           </div>
           <div className="field">
             <label htmlFor="notes">Notes</label>
-            <textarea id="notes" name="notes" />
+            <textarea id="notes" name="notes" placeholder="Buying signals, meeting context, next step" />
           </div>
           <button className="button button-primary" type="submit">
             <Plus size={18} />
@@ -214,28 +267,62 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
         </form>
       </aside>
 
-      <section>
+      <section className="sales-board-area">
+        <div className="sales-metric-strip">
+          {pipelineMetrics.map((metric) => {
+            const Icon = metric.icon;
+            return (
+              <article className="sales-metric-card" key={metric.label}>
+                <span>
+                  <Icon size={18} />
+                </span>
+                <div>
+                  <strong>{metric.value}</strong>
+                  <p>{metric.label}</p>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+
         {requests.length > 0 ? (
-          <div className="table-card" style={{ marginBottom: 18 }}>
-            <section className="checklist-section">
-              <h2>New demo requests</h2>
-              <div className="doc-list">
-                {requests.map((request) => (
-                  <article className="doc-card" key={request.id}>
+          <div className="demo-request-panel">
+            <div className="demo-request-head">
+              <div>
+                <span className="eyebrow">Request inbox</span>
+                <h2>New demo requests</h2>
+              </div>
+              <span className="badge">{requests.length}</span>
+            </div>
+            <div className="demo-request-grid">
+              {requests.map((request) => (
+                <article className="demo-request-card" key={request.id}>
+                  <div>
                     <h3>{request.company || request.name}</h3>
                     <p>{request.name} - {request.email}</p>
-                    <button className="button button-light" onClick={() => convertDemoRequest(request)} type="button">
-                      Convert to lead
-                    </button>
-                  </article>
-                ))}
-              </div>
-            </section>
+                  </div>
+                  <button className="button button-light" onClick={() => convertDemoRequest(request)} type="button">
+                    Convert to lead
+                  </button>
+                </article>
+              ))}
+            </div>
           </div>
         ) : null}
 
+        <div className="sales-board-head">
+          <div>
+            <span className="eyebrow">Lifecycle board</span>
+            <h2>Pipeline movement</h2>
+          </div>
+          <div className="sales-board-trend">
+            <TrendingUp size={18} />
+            <span>{clients.length} account cards</span>
+          </div>
+        </div>
+
         <div className="pipeline-grid">
-          {lifecycleStages.map((stage) => (
+          {lifecycleStages.map((stage, index) => (
             <section
               className={`pipeline-column ${dropStage === stage ? "pipeline-column-active" : ""}`}
               key={stage}
@@ -247,37 +334,72 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
               onDrop={() => handleDrop(stage)}
             >
               <div className="pipeline-column-head">
-                <h2>{stage}</h2>
-                <span className="badge">{groupedClients[stage]?.length ?? 0}</span>
+                <div>
+                  <span>{stageDetails[stage]?.lane ?? `Stage ${index + 1}`}</span>
+                  <h2>{stage}</h2>
+                </div>
+                <span className="pipeline-count">{groupedClients[stage]?.length ?? 0}</span>
               </div>
-              <div className="doc-list">
-                {(groupedClients[stage] ?? []).map((client) => (
-                  <article
-                    className={`doc-card pipeline-card ${draggingClientId === client.id ? "pipeline-card-dragging" : ""}`}
-                    draggable
-                    key={client.id}
-                    onDragEnd={() => {
-                      setDraggingClientId(null);
-                      setDropStage(null);
-                    }}
-                    onDragStart={(event) => {
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData("text/plain", client.id);
-                      setDraggingClientId(client.id);
-                    }}
-                  >
-                    <h3>{client.name}</h3>
-                    <p>{client.contact_name || "No contact"} {client.email ? `- ${client.email}` : client.phone ? `- ${client.phone}` : ""}</p>
-                    <div className="pipeline-card-meta">
-                      <span>{client.owner || "Unassigned"}</span>
-                      <span>{client.source || "Manual"}</span>
-                      <span>{formatDate(client.updated_at)}</span>
-                    </div>
-                    <Link className="button button-light" href={`/employee/clients/${client.id}`}>
-                      Open record <ArrowRight size={16} />
-                    </Link>
-                  </article>
-                ))}
+              <p className="pipeline-column-summary">{stageDetails[stage]?.summary}</p>
+              <div className="pipeline-card-list">
+                {(groupedClients[stage] ?? []).length > 0 ? (
+                  (groupedClients[stage] ?? []).map((client) => (
+                    <article
+                      className={`pipeline-card ${draggingClientId === client.id ? "pipeline-card-dragging" : ""}`}
+                      draggable
+                      key={client.id}
+                      onDragEnd={() => {
+                        setDraggingClientId(null);
+                        setDropStage(null);
+                      }}
+                      onDragStart={(event) => {
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", client.id);
+                        setDraggingClientId(client.id);
+                      }}
+                    >
+                      <div className="pipeline-card-top">
+                        <span>
+                          <Building2 size={16} />
+                        </span>
+                        <div>
+                          <h3>{client.name}</h3>
+                          <p>{client.company_type || "Company account"}</p>
+                        </div>
+                      </div>
+                      <div className="pipeline-contact-lines">
+                        <span>
+                          <UserRound size={14} />
+                          {client.contact_name || "No contact assigned"}
+                        </span>
+                        {client.email ? (
+                          <span>
+                            <Mail size={14} />
+                            {client.email}
+                          </span>
+                        ) : client.phone ? (
+                          <span>
+                            <Phone size={14} />
+                            {client.phone}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="pipeline-card-meta">
+                        <span>{client.owner || "Unassigned"}</span>
+                        <span>{client.source || "Manual"}</span>
+                        <span>
+                          <CalendarDays size={13} />
+                          {formatDate(client.updated_at)}
+                        </span>
+                      </div>
+                      <Link className="button button-light" href={`/employee/clients/${client.id}`}>
+                        Open record <ArrowRight size={16} />
+                      </Link>
+                    </article>
+                  ))
+                ) : (
+                  <div className="pipeline-empty-state">No cards in this stage</div>
+                )}
               </div>
             </section>
           ))}

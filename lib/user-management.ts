@@ -36,6 +36,90 @@ export function isPortalSuperAdminRole(role: string | null | undefined) {
   return role === "super_admin";
 }
 
+const employeeSelfServicePaths = [
+  "/employee",
+  "/employee/company-tree",
+  "/employee/hr-onboarding",
+  "/employee/time-cards",
+] as const;
+
+const commercialPaths = [
+  "/employee/demo-showcase",
+  "/employee/inbox",
+  "/employee/sales",
+  "/employee/active-companies",
+  "/employee/clients",
+] as const;
+
+const operationsPaths = [
+  "/employee/operations",
+  "/employee/checklist",
+  "/employee/launch-gate",
+] as const;
+
+const governancePaths = [
+  "/employee/documents",
+  "/employee/legal-issues",
+  "/employee/required-documents",
+] as const;
+
+const adminPaths = [
+  "/employee/hr-documents",
+  "/employee/users",
+  "/employee/settings",
+] as const;
+
+const allPortalPaths = [
+  ...employeeSelfServicePaths,
+  ...commercialPaths,
+  ...operationsPaths,
+  ...governancePaths,
+  ...adminPaths,
+] as const;
+
+export const portalRolePathAccess: Record<PortalUserRole, readonly string[]> = {
+  platform_admin: allPortalPaths,
+  super_admin: allPortalPaths,
+  company_admin: allPortalPaths,
+  admin: allPortalPaths,
+  internal_reviewer: [
+    ...employeeSelfServicePaths,
+    ...operationsPaths,
+    ...governancePaths,
+    "/employee/active-companies",
+  ],
+  marketing: [
+    ...employeeSelfServicePaths,
+    ...commercialPaths,
+    "/employee/documents",
+    "/employee/required-documents",
+  ],
+  employee: employeeSelfServicePaths,
+};
+
+function normalizePortalPath(pathname: string) {
+  if (pathname.length > 1 && pathname.endsWith("/")) {
+    return pathname.slice(0, -1);
+  }
+
+  return pathname;
+}
+
+export function canAccessEmployeePath(
+  role: string | null | undefined,
+  accountStatus: string | null | undefined,
+  pathname: string,
+) {
+  if (accountStatus !== "active" || !portalUserRoles.includes(role as PortalUserRole)) {
+    return false;
+  }
+
+  const normalizedPath = normalizePortalPath(pathname);
+  const allowedPaths = portalRolePathAccess[role as PortalUserRole];
+
+  return allowedPaths.some((allowedPath) => normalizedPath === allowedPath || normalizedPath.startsWith(`${allowedPath}/`));
+}
+
 export function formatPortalRole(role: string | null | undefined) {
   if (!role) {
     return "Unassigned";

@@ -30,6 +30,7 @@ import {
   type DemoRequest,
 } from "@/lib/company-data";
 import { createClient } from "@/lib/supabase/server";
+import { canAccessEmployeePath } from "@/lib/user-management";
 
 const moduleGroups = [
   {
@@ -108,6 +109,19 @@ function buildPipelineCounts(clients: Pick<CompanyClient, "lifecycle_stage">[]) 
 
 export default async function EmployeeDashboardPage() {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
+  const { data: currentRole } =
+    supabase && user
+      ? await supabase
+          .from("user_roles")
+          .select("role, account_status")
+          .eq("user_id", user.id)
+          .maybeSingle()
+      : { data: null };
+  const canOpenPath = (href: string) =>
+    !supabase || canAccessEmployeePath(currentRole?.role, currentRole?.account_status, href);
   const [
     { count: checklistCount },
     { count: blockedChecklistCount },
@@ -213,7 +227,7 @@ export default async function EmployeeDashboardPage() {
       meta: `${record.status} - ${record.owner || "Unassigned"}`,
       tone: record.priority === "Critical" ? "danger" : "gold",
     })),
-  ].slice(0, 8);
+  ].filter((item) => canOpenPath(item.href)).slice(0, 8);
 
   const kpis = [
     {
@@ -251,7 +265,13 @@ export default async function EmployeeDashboardPage() {
       icon: ShieldCheck,
       href: "/employee/documents",
     },
-  ];
+  ].filter((kpi) => canOpenPath(kpi.href));
+  const visibleModuleGroups = moduleGroups
+    .map((group) => ({
+      ...group,
+      modules: group.modules.filter((module) => canOpenPath(module.href)),
+    }))
+    .filter((group) => group.modules.length > 0);
 
   return (
     <div className="command-center">
@@ -419,7 +439,7 @@ export default async function EmployeeDashboardPage() {
           </div>
         </div>
         <div className="module-group-grid">
-          {moduleGroups.map((group) => (
+          {visibleModuleGroups.map((group) => (
             <section className="module-group" key={group.label}>
               <h3>{group.label}</h3>
               <p>{group.description}</p>

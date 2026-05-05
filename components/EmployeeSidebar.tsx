@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { logout } from "@/app/employee-login/actions";
 import { COMPANY_NAME, TAGLINE } from "@/lib/company-data";
+import { canAccessEmployeePath } from "@/lib/user-management";
 
 const navGroups = [
   {
@@ -78,8 +79,19 @@ function isActivePath(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function EmployeeSidebar() {
+type EmployeeSidebarProps = {
+  accountStatus?: string | null;
+  currentRole?: string | null;
+};
+
+export function EmployeeSidebar({ accountStatus = "active", currentRole = "employee" }: EmployeeSidebarProps) {
   const pathname = usePathname();
+  const visibleGroups = navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => canAccessEmployeePath(currentRole, accountStatus, item.href)),
+    }))
+    .filter((group) => group.items.length > 0);
 
   return (
     <aside className="portal-sidebar">
@@ -94,7 +106,7 @@ export function EmployeeSidebar() {
       </div>
 
       <nav className="portal-nav" aria-label="Employee navigation">
-        {navGroups.map((group) => (
+        {visibleGroups.map((group) => (
           <section className="portal-nav-group" key={group.label} aria-label={group.label}>
             <div className="portal-nav-heading">{group.label}</div>
             {group.items.map((item) => {

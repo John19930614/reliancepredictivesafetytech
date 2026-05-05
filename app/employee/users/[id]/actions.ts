@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { updateEmployeeOnboardingCompletion } from "@/lib/hr-onboarding";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { isPortalAdminRole } from "@/lib/user-management";
@@ -52,22 +53,10 @@ async function updateProfileCompletion(userId: string) {
   const admin = createAdminClient();
 
   if (!admin) {
-    return;
+    return null;
   }
 
-  const { count } = await admin
-    .from("employee_document_assignments")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .eq("status", "pending");
-
-  await admin
-    .from("employee_profiles")
-    .update({
-      onboarding_status: (count ?? 0) > 0 ? "in_progress" : "complete",
-      onboarding_completed_at: (count ?? 0) > 0 ? null : new Date().toISOString(),
-    })
-    .eq("user_id", userId);
+  return updateEmployeeOnboardingCompletion(admin, userId);
 }
 
 export async function attachExistingEmployeeDocument(formData: FormData) {
@@ -121,7 +110,11 @@ export async function attachExistingEmployeeDocument(formData: FormData) {
     redirect(`/employee/users/${profileUserId}?error=${encodeURIComponent(error.message)}`);
   }
 
-  await updateProfileCompletion(profileUserId);
+  const completionError = await updateProfileCompletion(profileUserId);
+
+  if (completionError) {
+    redirect(`/employee/users/${profileUserId}?error=${encodeURIComponent(completionError.message)}`);
+  }
 
   revalidatePath("/employee/users");
   revalidatePath(`/employee/users/${profileUserId}`);
