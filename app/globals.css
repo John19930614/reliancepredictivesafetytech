@@ -1276,6 +1276,58 @@ textarea {
   padding-top: 14px;
 }
 
+.hr-form-meta,
+.hr-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.hr-form-meta span {
+  border: 1px solid #ece4d6;
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: #fffaf0;
+  color: #4b3a18;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.hr-field-section {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  border: 1px solid #ece4d6;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fffdf8;
+}
+
+.hr-field-section legend,
+.hr-choice-field legend {
+  padding: 0 6px;
+  color: #2f2b22;
+  font-weight: 900;
+}
+
+.hr-choice-field {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.form-grid-address {
+  grid-template-columns: 1fr;
+}
+
+.audit-event-list {
+  border-top: 1px solid #ececec;
+  padding-top: 12px;
+}
+
 .source-link {
   display: inline-flex;
   width: fit-content;

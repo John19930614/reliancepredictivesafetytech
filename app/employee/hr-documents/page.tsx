@@ -57,6 +57,12 @@ export default async function HrDocumentsPage({ searchParams }: HrDocumentsPageP
 
       {params.message ? <div className="success-box portal-alert">{params.message}</div> : null}
       {params.error ? <div className="success-box portal-alert portal-alert-error">{params.error}</div> : null}
+      {canManageHrDocuments ? (
+        <div className="success-box portal-alert">
+          These forms support compliance workflows but do not replace legal, payroll, or HR review. Verify official government form
+          versions and company policy language before relying on the packet as the official HR system of record.
+        </div>
+      ) : null}
 
       {!canManageHrDocuments ? (
         <section className="portal-card">

@@ -8,6 +8,7 @@ import { updateEmployeeOnboardingCompletion } from "@/lib/hr-onboarding";
 import type { HrFormAnswers, HrFormDefinition, HrFormField, HrDocumentTemplate } from "@/lib/company-data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import type { Json } from "@/lib/supabase/types";
 
 function cleanText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
@@ -228,7 +229,7 @@ async function addAuditEvent(values: {
   userId: string;
   actorUserId: string;
   eventType: string;
-  eventDetails?: Record<string, unknown>;
+  eventDetails?: Json;
   signerIp?: string | null;
   signerUserAgent?: string | null;
 }) {

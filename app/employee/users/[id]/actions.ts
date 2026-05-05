@@ -116,7 +116,15 @@ export async function attachExistingEmployeeDocument(formData: FormData) {
     redirect(`/employee/users/${profileUserId}?error=${encodeURIComponent(completionError.message)}`);
   }
 
+  await admin.from("employee_onboarding_audit_events").insert({
+    assignment_id: assignment.id,
+    user_id: profileUserId,
+    actor_user_id: currentUser.id,
+    event_type: "satisfied_by_uploaded_record",
+    event_details: { document_id: document.id, document_title: document.title, notes },
+  });
+
   revalidatePath("/employee/users");
   revalidatePath(`/employee/users/${profileUserId}`);
-  redirect(`/employee/users/${profileUserId}?message=Existing document attached and requirement bypassed.`);
+  redirect(`/employee/users/${profileUserId}?message=Requirement satisfied by uploaded record.`);
 }

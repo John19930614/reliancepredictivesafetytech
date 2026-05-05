@@ -4,7 +4,11 @@ import { attachExistingEmployeeDocument } from "@/app/employee/users/[id]/action
 import type {
   CompanyDocument,
   EmployeeDocumentAssignment,
+  EmployeeFormResponse,
+  EmployeeOnboardingAuditEvent,
+  EmployeeSignedDocument,
   EmployeeDocumentSignature,
+  HrFormDefinition,
   HrDocumentTemplate,
   HrEmployeeProfile,
 } from "@/lib/company-data";
@@ -51,11 +55,23 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
     );
   }
 
-  const [{ data: authData }, { data: profile }, { data: assignments }, { data: signatures }, { data: allDocuments }] = await Promise.all([
+  const [
+    { data: authData },
+    { data: profile },
+    { data: assignments },
+    { data: signatures },
+    { data: formResponses },
+    { data: signedDocuments },
+    { data: auditEvents },
+    { data: allDocuments },
+  ] = await Promise.all([
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
     admin.from("employee_profiles").select("*").eq("user_id", id).maybeSingle(),
     admin.from("employee_document_assignments").select("*").eq("user_id", id).order("created_at"),
     admin.from("employee_document_signatures").select("*").eq("user_id", id).order("signed_at", { ascending: false }),
+    admin.from("employee_form_responses").select("*").eq("user_id", id).order("updated_at", { ascending: false }),
+    admin.from("employee_signed_documents").select("*").eq("user_id", id).order("signed_at", { ascending: false }),
+    admin.from("employee_onboarding_audit_events").select("*").eq("user_id", id).order("created_at", { ascending: false }).limit(100),
     admin.from("company_documents").select("*").order("updated_at", { ascending: false }),
   ]);
 
@@ -63,6 +79,9 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
   const typedProfile = profile as HrEmployeeProfile | null;
   const typedAssignments = (assignments ?? []) as EmployeeDocumentAssignment[];
   const typedSignatures = (signatures ?? []) as EmployeeDocumentSignature[];
+  const typedFormResponses = (formResponses ?? []) as EmployeeFormResponse[];
+  const typedSignedDocuments = (signedDocuments ?? []) as EmployeeSignedDocument[];
+  const typedAuditEvents = (auditEvents ?? []) as EmployeeOnboardingAuditEvent[];
   const typedAllDocuments = (allDocuments ?? []) as CompanyDocument[];
   const templateIds = [...new Set(typedAssignments.map((assignment) => assignment.template_id))];
   const { data: templates } =
@@ -71,6 +90,9 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
       : { data: [] };
 
   const typedTemplates = (templates ?? []) as HrDocumentTemplate[];
+  const formDefinitionIds = [...new Set(typedTemplates.map((template) => template.form_definition_id).filter(Boolean) as string[])];
+  const { data: formDefinitions } =
+    formDefinitionIds.length > 0 ? await admin.from("hr_form_definitions").select("*").in("id", formDefinitionIds) : { data: [] };
   const sourceDocumentIds = [
     ...new Set(
       [
@@ -84,9 +106,21 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
     sourceDocumentIds.length > 0 ? await admin.from("company_documents").select("*").in("id", sourceDocumentIds) : { data: [] };
 
   const templatesById = new Map(typedTemplates.map((template) => [template.id, template]));
+  const formDefinitionsById = new Map((formDefinitions ?? []).map((definition) => [definition.id, definition as HrFormDefinition]));
   const signaturesByAssignmentId = new Map(typedSignatures.map((signature) => [signature.assignment_id, signature]));
+  const responsesByAssignmentId = new Map(typedFormResponses.map((response) => [response.assignment_id, response]));
+  const signedDocumentsByAssignmentId = new Map(typedSignedDocuments.map((document) => [document.assignment_id, document]));
+  const auditEventsByAssignmentId = new Map<string, EmployeeOnboardingAuditEvent[]>();
   const sourceDocumentMap = new Map((sourceDocuments ?? []).map((document) => [document.id, document as CompanyDocument]));
   const signedUrls = new Map<string, string>();
+  const signedPdfUrls = new Map<string, string>();
+
+  for (const event of typedAuditEvents) {
+    if (!event.assignment_id) {
+      continue;
+    }
+    auditEventsByAssignmentId.set(event.assignment_id, [...(auditEventsByAssignmentId.get(event.assignment_id) ?? []), event]);
+  }
 
   for (const document of sourceDocumentMap.values()) {
     if (!document.file_path) {
@@ -96,6 +130,13 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
     const { data } = await admin.storage.from("company-documents").createSignedUrl(document.file_path, 60);
     if (data?.signedUrl) {
       signedUrls.set(document.id, data.signedUrl);
+    }
+  }
+
+  for (const document of typedSignedDocuments) {
+    const { data } = await admin.storage.from(document.file_bucket).createSignedUrl(document.file_path, 60);
+    if (data?.signedUrl) {
+      signedPdfUrls.set(document.assignment_id, data.signedUrl);
     }
   }
 
@@ -143,6 +184,11 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
             typedAssignments.map((assignment) => {
               const template = templatesById.get(assignment.template_id);
               const signature = signaturesByAssignmentId.get(assignment.id);
+              const response = responsesByAssignmentId.get(assignment.id);
+              const signedDocument = signedDocumentsByAssignmentId.get(assignment.id);
+              const formDefinition = template?.form_definition_id ? formDefinitionsById.get(template.form_definition_id) : null;
+              const signedPdfUrl = signedPdfUrls.get(assignment.id);
+              const assignmentAuditEvents = auditEventsByAssignmentId.get(assignment.id) ?? [];
               const sourceDocumentId = assignment.existing_document_id ?? signature?.source_document_id ?? template?.source_document_id ?? null;
               const sourceDocument = sourceDocumentId ? sourceDocumentMap.get(sourceDocumentId) : null;
               const sourceUrl = sourceDocument?.id ? signedUrls.get(sourceDocument.id) : null;
@@ -164,18 +210,28 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
 
                   {signature ? (
                     <div className="profile-facts">
-                      <p><strong>Signed by:</strong> {signature.typed_legal_name}</p>
-                      <p><strong>Signed at:</strong> {formatDate(signature.signed_at)}</p>
-                      <p><strong>Signer email:</strong> {signature.signer_email ?? "Not captured"}</p>
+                      <p><strong>Signed by:</strong> {signedDocument?.typed_legal_name ?? signature.typed_legal_name}</p>
+                      <p><strong>Signed at:</strong> {formatDate(signedDocument?.signed_at ?? signature.signed_at)}</p>
+                      <p><strong>Signer email:</strong> {signedDocument?.signer_email ?? signature.signer_email ?? "Not captured"}</p>
+                      {formDefinition ? <p><strong>Fillable form:</strong> {formDefinition.title}</p> : null}
+                      {response ? <p><strong>Response status:</strong> {response.status}</p> : null}
+                      {signedDocument ? <p><strong>PDF SHA-256:</strong> {signedDocument.file_sha256}</p> : null}
                     </div>
                   ) : assignment.status === "waived" ? (
                     <div className="success-box">
-                      Requirement bypassed with an existing document on {formatDate(assignment.waived_at)}.
+                      Satisfied by uploaded record on {formatDate(assignment.waived_at)}.
                       {assignment.notes ? ` ${assignment.notes}` : ""}
                     </div>
                   ) : (
                     <p>Waiting for employee signature.</p>
                   )}
+
+                  {signedPdfUrl ? (
+                    <a className="source-link" href={signedPdfUrl} target="_blank" rel="noreferrer">
+                      <ExternalLink size={16} />
+                      View completed signed PDF
+                    </a>
+                  ) : null}
 
                   {sourceUrl ? (
                     <a className="source-link" href={sourceUrl} target="_blank" rel="noreferrer">
@@ -184,6 +240,17 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
                     </a>
                   ) : sourceDocument ? (
                     <p>Linked source file: {sourceDocument.title}</p>
+                  ) : null}
+
+                  {assignmentAuditEvents.length > 0 ? (
+                    <div className="profile-facts audit-event-list">
+                      <p><strong>Audit trail:</strong></p>
+                      {assignmentAuditEvents.slice(0, 4).map((event) => (
+                        <p key={event.id}>
+                          {event.event_type.replace(/_/g, " ")} - {formatDate(event.created_at)}
+                        </p>
+                      ))}
+                    </div>
                   ) : null}
 
                   {assignment.status === "pending" ? (
@@ -211,7 +278,7 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
                       </div>
                       <button className="button button-secondary" type="submit">
                         <ExternalLink size={16} />
-                        Attach and Bypass
+                        Satisfy with Uploaded Record
                       </button>
                     </form>
                   ) : null}
