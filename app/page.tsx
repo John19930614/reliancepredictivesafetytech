@@ -22,6 +22,9 @@ export default function HomePage() {
             <a href="#why">Why Reliance</a>
             <a href="#demo">Demo Request</a>
             <a href="#contact">Contact</a>
+            <a href="https://safety360docs.com" rel="noreferrer" target="_blank">
+              SafetyDocs360 Platform
+            </a>
             <Link href="/employee-login">Employee Login</Link>
           </div>
         </nav>
@@ -31,19 +34,28 @@ export default function HomePage() {
         <section className="hero" id="home">
           <div className="container hero-grid">
             <div>
-              <div className="eyebrow">AI-assisted safety intelligence</div>
+              <div className="eyebrow">Prevention-first AI safety intelligence</div>
               <h1>{COMPANY_NAME}</h1>
               <h2>{TAGLINE}</h2>
               <p>
-                AI-powered safety technology built to help contractors, safety teams, and project owners generate
-                better safety documents, track field risk, and use real data to prevent injuries before they happen.
+                Reliance is a prevention tool built to help contractors, safety teams, and project owners reduce risk
+                before injuries happen. We collect safety data with AI-assisted workflows, turn field signals into
+                usable trends, and make risk more predictable for safer decisions.
               </p>
+              <div className="prevention-strip" aria-label="Reliance prevention workflow">
+                <span>Collect AI-assisted field data</span>
+                <span>Formulate safety trends</span>
+                <span>Predict risk patterns</span>
+              </div>
               <div className="hero-actions">
                 <a className="button button-primary" href="#demo">
                   Request a Demo <ArrowRight size={18} />
                 </a>
                 <a className="button button-secondary" href="#products">
                   View Products
+                </a>
+                <a className="button button-secondary" href="https://safety360docs.com" rel="noreferrer" target="_blank">
+                  Open SafetyDocs360 Platform
                 </a>
                 <Link className="button button-secondary" href="/employee-login">
                   <LockKeyhole size={18} /> Employee Login
@@ -61,11 +73,11 @@ export default function HomePage() {
             <div className="section-heading">
               <div>
                 <div className="eyebrow">Products / Platform</div>
-                <h2>Safety work, made visible.</h2>
+                <h2>Prevention work, made visible.</h2>
               </div>
               <p>
-                Reliance brings document generation, field tracking, review workflows, and predictive visibility into a
-                professional safety technology suite.
+                Reliance brings document generation, AI-assisted data collection, field tracking, review workflows, and
+                predictive visibility into a professional safety technology suite focused on measurable risk reduction.
               </p>
             </div>
             <div className="product-grid">
@@ -90,11 +102,11 @@ export default function HomePage() {
             <div className="section-heading">
               <div>
                 <div className="eyebrow">Why Reliance</div>
-                <h2>Built for safety teams that need speed and control.</h2>
+                <h2>Built for safety teams that want fewer surprises.</h2>
               </div>
               <p>
-                The platform is designed to reduce repetitive admin work while preserving review discipline for
-                safety-critical documents and forecasts.
+                The platform is designed to reduce repetitive admin work while preserving review discipline, so safety
+                leaders can identify recurring signals, compare trends, and act before risk turns into loss.
               </p>
             </div>
             <div className="value-grid">
@@ -112,10 +124,11 @@ export default function HomePage() {
           <div className="container contact-layout">
             <aside className="contact-panel" id="contact">
               <div className="eyebrow">Demo Request / Contact</div>
-              <h2>See how predictive safety work can move faster.</h2>
+              <h2>See how prevention-focused safety work can move faster.</h2>
               <p>
-                Tell us what you want to solve first: CSEP/PSHSEP generation, SOR scoring, incident tracking,
-                corrective actions, permit/JSA workflows, training matrices, or document control.
+                Tell us what you want to solve first: AI-assisted data collection, CSEP/PSHSEP generation, SOR scoring,
+                incident and near-miss trend analysis, corrective actions, permit/JSA workflows, training matrices, or
+                document control.
               </p>
               <p>
                 Contact email placeholder:
@@ -143,6 +156,9 @@ export default function HomePage() {
             <Link href="/privacy">Privacy Policy</Link>
             <Link href="/terms">Terms of Use</Link>
             <Link href="/ai-output-disclaimer">AI Output Disclaimer</Link>
+            <a href="https://safety360docs.com" rel="noreferrer" target="_blank">
+              SafetyDocs360 Platform
+            </a>
             <Link href="/employee-login">Employee Login</Link>
           </div>
         </div>

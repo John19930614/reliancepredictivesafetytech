@@ -1,4 +1,8 @@
 .env*.local
 .next
 node_modules
+supabase/.temp
 tsconfig.tsbuildinfo
+next-dev*.log
+next-smoke*.log
+next-*.log

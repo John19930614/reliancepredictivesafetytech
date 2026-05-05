@@ -8,6 +8,7 @@ import {
   FolderLock,
   Gauge,
   HardHat,
+  Handshake,
   ListChecks,
   ShieldCheck,
   Sparkles,
@@ -36,7 +37,7 @@ export const products = [
   {
     title: "SOR Field Observation Tracking",
     description:
-      "Capture safety observations in a consistent format so field data becomes searchable, scored, and useful.",
+      "Capture AI-assisted safety observations in a consistent format so field data becomes searchable, scored, and useful for prevention.",
     icon: ClipboardCheck,
   },
   {
@@ -66,7 +67,7 @@ export const products = [
   {
     title: "Predictive Injury Forecasting",
     description:
-      "Use field signals and historical records to surface risk trends before they become injuries.",
+      "Use field signals, observations, near misses, and historical records to formulate trends and predict risk before injuries happen.",
     icon: BarChart3,
   },
   {
@@ -84,11 +85,12 @@ export const products = [
 ];
 
 export const whyReliance = [
+  "Positions safety as prevention, not reaction",
   "Saves time creating safety documents",
   "Reduces manual safety admin work",
   "Improves consistency and compliance",
-  "Uses field data to identify trends",
-  "Supports predictive risk visibility",
+  "Uses AI-assisted data collection to identify trends",
+  "Supports predictive risk visibility and risk reduction",
   "Helps companies prepare better safety plans",
   "Requires human review for safety-critical outputs",
 ];
@@ -96,6 +98,7 @@ export const whyReliance = [
 export const documentCategories = [
   "Business Formation",
   "Legal / Customer",
+  "People / HR",
   "Operations",
   "Product",
   "Safety Document Library",
@@ -112,6 +115,7 @@ export const documentStatuses = [
   "Uploaded",
   "In Review",
   "Approved",
+  "Signed / Executed",
   "Needs Revision",
   "Retired",
 ] as const;
@@ -123,6 +127,137 @@ export const checklistStatuses = [
   "Approved",
   "Blocked",
   "Complete",
+] as const;
+
+export const demoRequestStatuses = [
+  "new",
+  "contacted",
+  "demo scheduled",
+  "information sent",
+  "closed",
+] as const;
+
+export const lifecycleStages = [
+  "Lead",
+  "First Pitch",
+  "Demo Scheduled",
+  "Demo Completed",
+  "Proposal Sent",
+  "Legal Review",
+  "Contract Sent",
+  "Signed / Won",
+  "Onboarding",
+  "Pilot / Setup",
+  "Active Company",
+  "Renewal / Expansion",
+] as const;
+
+export const recordTypes = [
+  "Master Template",
+  "Company Record",
+  "Client Record",
+  "Employee Record",
+] as const;
+
+export const hrOnboardingStatuses = ["not_started", "in_progress", "complete"] as const;
+export const employeeDocumentStatuses = ["pending", "signed", "waived"] as const;
+
+export type HrEmployeeProfile = {
+  user_id: string;
+  legal_name: string | null;
+  phone: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  emergency_contact_relationship: string | null;
+  onboarding_status: string;
+  onboarding_completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type HrDocumentTemplate = {
+  id: string;
+  title: string;
+  category: string;
+  body_text: string;
+  version: number;
+  active: boolean;
+  required: boolean;
+  sort_order: number;
+  source_document_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EmployeeDocumentAssignment = {
+  id: string;
+  user_id: string;
+  template_id: string;
+  status: string;
+  due_date: string | null;
+  assigned_by: string | null;
+  existing_document_id: string | null;
+  signed_at: string | null;
+  waived_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EmployeeDocumentSignature = {
+  id: string;
+  assignment_id: string;
+  user_id: string;
+  template_id: string;
+  template_version: number;
+  document_title: string;
+  document_body: string;
+  source_document_id: string | null;
+  source_file_path: string | null;
+  typed_legal_name: string;
+  consented: boolean;
+  signer_email: string | null;
+  signer_ip: string | null;
+  signer_user_agent: string | null;
+  signed_at: string;
+  created_at: string;
+};
+
+export const legalIssueSeverities = ["Low", "Medium", "High", "Critical"] as const;
+export const legalIssueStatuses = ["Open", "In Review", "Waiting", "Resolved", "Closed"] as const;
+
+export const clientStatuses = ["Active", "Paused", "Lost", "Archived"] as const;
+export const timeCardStatuses = ["draft", "submitted", "approved", "rejected"] as const;
+
+export const operationsRecordCategories = [
+  "Operations",
+  "People / HR",
+  "Finance",
+  "Legal / Compliance",
+  "Technology / Security",
+  "Product",
+  "Safety",
+  "Sales / Customer Success",
+  "Vendor / Asset",
+  "Leadership",
+] as const;
+
+export const operationsRecordStatuses = ["Open", "In Progress", "Waiting", "Complete", "Archived"] as const;
+export const operationsRecordPriorities = ["Low", "Medium", "High", "Critical"] as const;
+
+export const companyPositionStatuses = ["Filled", "Open", "Needed", "On Hold"] as const;
+export const companyPositionSalaryPeriods = ["Annual", "Hourly", "Monthly", "Contract"] as const;
+export const companyPositionEmploymentTypes = ["Full-time", "Part-time", "Contract", "Part-time / Full-time", "Internship"] as const;
+export const companyPositionHiringPriorities = ["Low", "Medium", "High", "Critical"] as const;
+export const companyPositionDepartments = [
+  "Leadership",
+  "Technology / Product",
+  "Sales / Marketing",
+  "Safety",
+  "Customer Success",
+  "Legal / Compliance",
+  "Finance",
+  "Operations",
 ] as const;
 
 export type CompanyChecklistItem = {
@@ -146,6 +281,10 @@ export type CompanyDocument = {
   title: string;
   category: string;
   checklist_item_id: string | null;
+  requirement_id?: string | null;
+  client_id?: string | null;
+  record_type?: string | null;
+  lifecycle_stage?: string | null;
   file_path: string | null;
   file_name: string | null;
   file_type: string | null;
@@ -153,9 +292,528 @@ export type CompanyDocument = {
   owner: string | null;
   revision: string | null;
   notes: string | null;
+  effective_date?: string | null;
+  executed_date?: string | null;
+  expiration_date?: string | null;
+  renewal_date?: string | null;
+  legal_hold?: boolean;
   created_at: string;
   updated_at: string;
 };
+
+export type DemoRequest = {
+  id: string;
+  name: string;
+  company: string | null;
+  email: string;
+  phone: string | null;
+  role: string | null;
+  company_type: string | null;
+  interested_products: string[] | null;
+  message: string | null;
+  status: string;
+  created_at: string;
+};
+
+export type CompanyClient = {
+  id: string;
+  name: string;
+  contact_name: string | null;
+  email: string | null;
+  phone: string | null;
+  company_type: string | null;
+  lifecycle_stage: string;
+  status: string;
+  owner: string | null;
+  source: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CompanySalesActivity = {
+  id: string;
+  client_id: string;
+  activity_type: string;
+  title: string;
+  notes: string | null;
+  activity_date: string | null;
+  owner: string | null;
+  outcome: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CompanyDocumentRequirement = {
+  id: string;
+  title: string;
+  category: string;
+  lifecycle_stage: string;
+  required_for_active: boolean;
+  description: string | null;
+  sort_order: number;
+  created_at: string;
+};
+
+export type ClientOnboardingItem = {
+  id: string;
+  client_id: string;
+  title: string;
+  section: string;
+  lifecycle_stage: string;
+  status: string;
+  owner: string | null;
+  due_date: string | null;
+  completed: boolean;
+  linked_document_id: string | null;
+  notes: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CompanyLegalIssue = {
+  id: string;
+  title: string;
+  severity: string;
+  status: string;
+  owner: string | null;
+  due_date: string | null;
+  client_id: string | null;
+  linked_document_id: string | null;
+  description: string | null;
+  resolution_notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TimeCardRole = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  sort_order: number;
+  created_at: string;
+};
+
+export type EmployeeProfile = {
+  user_id: string;
+  display_name?: string | null;
+  email?: string | null;
+  profile_status?: string;
+  time_card_role_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TimeCardCategory = {
+  id: string;
+  slug: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
+};
+
+export type TimeCardTask = {
+  id: string;
+  slug: string;
+  category_id: string;
+  title: string;
+  sort_order: number;
+  is_review_task: boolean;
+  created_at: string;
+};
+
+export type TimeCardRoleCategory = {
+  role_id: string;
+  category_id: string;
+  created_at: string;
+};
+
+export type TimeCardRoleTask = {
+  role_id: string;
+  task_id: string;
+  created_at: string;
+};
+
+export type EmployeeTimeCard = {
+  id: string;
+  employee_user_id: string | null;
+  week_start: string;
+  week_end: string;
+  status: (typeof timeCardStatuses)[number];
+  source: string;
+  import_key: string | null;
+  submitted_at: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  review_notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EmployeeTimeEntry = {
+  id: string;
+  time_card_id: string;
+  work_date: string;
+  category_id: string;
+  task_id: string;
+  hours: number;
+  notes: string | null;
+  source_status: string | null;
+  import_key: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EmployeeTimeCardPayroll = {
+  time_card_id: string;
+  hourly_rate: number;
+  total_hours: number;
+  paid_value: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CompanyOperationsRecord = {
+  id: string;
+  title: string;
+  category: string;
+  record_type: string;
+  status: string;
+  priority: string;
+  owner: string | null;
+  due_date: string | null;
+  description: string | null;
+  notes: string | null;
+  related_client_id: string | null;
+  related_document_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CompanyPosition = {
+  id: string;
+  title: string;
+  department: string;
+  parent_position_id: string | null;
+  status: string;
+  employee_name: string | null;
+  employee_email: string | null;
+  employee_phone: string | null;
+  portal_user_id: string | null;
+  job_description: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_period: string | null;
+  employment_type: string | null;
+  location: string | null;
+  hiring_priority: string | null;
+  sort_order: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export const companyPositionSeed: CompanyPosition[] = [
+  {
+    id: "00000000-0000-0000-0000-000000000101",
+    title: "Founder / Managing Member",
+    department: "Leadership",
+    parent_position_id: null,
+    status: "Filled",
+    employee_name: "John",
+    employee_email: null,
+    employee_phone: null,
+    portal_user_id: null,
+    job_description: null,
+    salary_min: null,
+    salary_max: null,
+    salary_period: "Annual",
+    employment_type: "Full-time",
+    location: null,
+    hiring_priority: "High",
+    sort_order: 10,
+    notes: "Seeded founder role. Add email and phone when ready.",
+    created_at: "",
+    updated_at: "",
+  },
+  {
+    id: "00000000-0000-0000-0000-000000000102",
+    title: "Product / Technology Lead",
+    department: "Technology / Product",
+    parent_position_id: "00000000-0000-0000-0000-000000000101",
+    status: "Filled",
+    employee_name: "Steven",
+    employee_email: null,
+    employee_phone: null,
+    portal_user_id: null,
+    job_description: null,
+    salary_min: null,
+    salary_max: null,
+    salary_period: "Annual",
+    employment_type: "Full-time",
+    location: null,
+    hiring_priority: "High",
+    sort_order: 20,
+    notes: "Seeded filled role. Add email and phone when ready.",
+    created_at: "",
+    updated_at: "",
+  },
+  {
+    id: "00000000-0000-0000-0000-000000000103",
+    title: "Sales / Marketing Lead",
+    department: "Sales / Marketing",
+    parent_position_id: "00000000-0000-0000-0000-000000000101",
+    status: "Filled",
+    employee_name: "Ryan",
+    employee_email: null,
+    employee_phone: null,
+    portal_user_id: null,
+    job_description: null,
+    salary_min: null,
+    salary_max: null,
+    salary_period: "Annual",
+    employment_type: "Full-time",
+    location: null,
+    hiring_priority: "High",
+    sort_order: 30,
+    notes: "Seeded filled role. Add email and phone when ready.",
+    created_at: "",
+    updated_at: "",
+  },
+  {
+    id: "00000000-0000-0000-0000-000000000104",
+    title: "Safety Product SME",
+    department: "Safety",
+    parent_position_id: "00000000-0000-0000-0000-000000000102",
+    status: "Open",
+    employee_name: null,
+    employee_email: null,
+    employee_phone: null,
+    portal_user_id: null,
+    job_description:
+      "Support safety product accuracy by reviewing CSEP, PSHSEP, JSA, permit, incident, SOR, and corrective action workflows for field realism and compliance readiness.",
+    salary_min: 75000,
+    salary_max: 110000,
+    salary_period: "Annual",
+    employment_type: "Full-time",
+    location: "Remote / Hybrid",
+    hiring_priority: "High",
+    sort_order: 70,
+    notes: "Use this role when preparing a safety subject matter expert job posting.",
+    created_at: "",
+    updated_at: "",
+  },
+  {
+    id: "00000000-0000-0000-0000-000000000105",
+    title: "Customer Success / Onboarding Manager",
+    department: "Customer Success",
+    parent_position_id: "00000000-0000-0000-0000-000000000101",
+    status: "Open",
+    employee_name: null,
+    employee_email: null,
+    employee_phone: null,
+    portal_user_id: null,
+    job_description:
+      "Own customer onboarding from signed agreement through setup, training, documentation collection, feedback capture, and active company readiness.",
+    salary_min: 65000,
+    salary_max: 90000,
+    salary_period: "Annual",
+    employment_type: "Full-time",
+    location: "Remote / Hybrid",
+    hiring_priority: "High",
+    sort_order: 40,
+    notes: "Use this role for client onboarding and renewal support.",
+    created_at: "",
+    updated_at: "",
+  },
+  {
+    id: "00000000-0000-0000-0000-000000000110",
+    title: "Safety Trainer",
+    department: "Safety",
+    parent_position_id: "00000000-0000-0000-0000-000000000104",
+    status: "Needed",
+    employee_name: null,
+    employee_email: null,
+    employee_phone: null,
+    portal_user_id: null,
+    job_description:
+      "Prepare and deliver safety training content, onboarding training, refresher modules, toolbox talks, and role-based safety learning materials.",
+    salary_min: null,
+    salary_max: null,
+    salary_period: "Annual",
+    employment_type: "Full-time",
+    location: "Remote / Hybrid",
+    hiring_priority: "Medium",
+    sort_order: 72,
+    notes: "Future trainer role for safety content, onboarding, and customer education.",
+    created_at: "",
+    updated_at: "",
+  },
+  {
+    id: "00000000-0000-0000-0000-000000000111",
+    title: "PHSEP / CSEP Review Specialist",
+    department: "Safety",
+    parent_position_id: "00000000-0000-0000-0000-000000000104",
+    status: "Needed",
+    employee_name: null,
+    employee_email: null,
+    employee_phone: null,
+    portal_user_id: null,
+    job_description:
+      "Review PHSEP and CSEP drafts for safety accuracy, completeness, field usability, project alignment, and readiness for admin or owner approval.",
+    salary_min: null,
+    salary_max: null,
+    salary_period: "Annual",
+    employment_type: "Full-time",
+    location: "Remote / Hybrid",
+    hiring_priority: "High",
+    sort_order: 74,
+    notes: "Dedicated review spot for PHSEP and CSEP document quality control.",
+    created_at: "",
+    updated_at: "",
+  },
+  {
+    id: "00000000-0000-0000-0000-000000000106",
+    title: "Sales Development Representative",
+    department: "Sales / Marketing",
+    parent_position_id: "00000000-0000-0000-0000-000000000103",
+    status: "Needed",
+    employee_name: null,
+    employee_email: null,
+    employee_phone: null,
+    portal_user_id: null,
+    job_description:
+      "Prospect contractor, safety, and operations buyers; qualify demo requests; prepare outreach lists; and keep early sales follow-up organized.",
+    salary_min: 45000,
+    salary_max: 65000,
+    salary_period: "Annual",
+    employment_type: "Full-time",
+    location: "Remote",
+    hiring_priority: "Medium",
+    sort_order: 90,
+    notes: "Future sales capacity role.",
+    created_at: "",
+    updated_at: "",
+  },
+  {
+    id: "00000000-0000-0000-0000-000000000107",
+    title: "Compliance / Legal Operations Coordinator",
+    department: "Legal / Compliance",
+    parent_position_id: "00000000-0000-0000-0000-000000000101",
+    status: "Needed",
+    employee_name: null,
+    employee_email: null,
+    employee_phone: null,
+    portal_user_id: null,
+    job_description:
+      "Coordinate legal documents, compliance packets, review dates, renewal records, insurance updates, vendor forms, and audit-ready operating files.",
+    salary_min: 55000,
+    salary_max: 80000,
+    salary_period: "Annual",
+    employment_type: "Full-time",
+    location: "Remote / Hybrid",
+    hiring_priority: "Medium",
+    sort_order: 50,
+    notes: "Future compliance operations support role.",
+    created_at: "",
+    updated_at: "",
+  },
+  {
+    id: "00000000-0000-0000-0000-000000000108",
+    title: "Finance / Accounting Support",
+    department: "Finance",
+    parent_position_id: "00000000-0000-0000-0000-000000000101",
+    status: "Needed",
+    employee_name: null,
+    employee_email: null,
+    employee_phone: null,
+    portal_user_id: null,
+    job_description:
+      "Support invoicing, billing records, cost tracking, bookkeeping coordination, budget reporting, and monthly close preparation.",
+    salary_min: 45000,
+    salary_max: 70000,
+    salary_period: "Annual",
+    employment_type: "Part-time / Full-time",
+    location: "Remote",
+    hiring_priority: "Medium",
+    sort_order: 60,
+    notes: "Future finance support role.",
+    created_at: "",
+    updated_at: "",
+  },
+  {
+    id: "00000000-0000-0000-0000-000000000109",
+    title: "Software Engineer / Platform Support",
+    department: "Technology / Product",
+    parent_position_id: "00000000-0000-0000-0000-000000000102",
+    status: "Needed",
+    employee_name: null,
+    employee_email: null,
+    employee_phone: null,
+    portal_user_id: null,
+    job_description:
+      "Build and maintain the Reliance platform, Supabase-backed workflows, document generation tools, admin dashboards, quality checks, and customer-facing product improvements.",
+    salary_min: 90000,
+    salary_max: 130000,
+    salary_period: "Annual",
+    employment_type: "Full-time",
+    location: "Remote",
+    hiring_priority: "Medium",
+    sort_order: 80,
+    notes: "Future platform engineering role.",
+    created_at: "",
+    updated_at: "",
+  },
+];
+
+export const defaultClientOnboardingItems = [
+  { section: "Sales Pitch", lifecycle_stage: "First Pitch", title: "First pitch completed" },
+  { section: "Demo", lifecycle_stage: "Demo Scheduled", title: "Demo scheduled" },
+  { section: "Demo", lifecycle_stage: "Demo Completed", title: "Demo completed" },
+  { section: "Legal / Contract", lifecycle_stage: "Legal Review", title: "NDA sent" },
+  { section: "Legal / Contract", lifecycle_stage: "Legal Review", title: "NDA signed" },
+  { section: "Proposal", lifecycle_stage: "Proposal Sent", title: "Pricing reviewed" },
+  { section: "Proposal", lifecycle_stage: "Proposal Sent", title: "Proposal sent" },
+  { section: "Legal / Contract", lifecycle_stage: "Contract Sent", title: "MSA/SOW prepared" },
+  { section: "Legal / Contract", lifecycle_stage: "Signed / Won", title: "Contract signed" },
+  { section: "Onboarding", lifecycle_stage: "Onboarding", title: "Billing setup confirmed" },
+  { section: "Onboarding", lifecycle_stage: "Onboarding", title: "Client admin/contact assigned" },
+  { section: "Onboarding", lifecycle_stage: "Onboarding", title: "Sample data received" },
+  { section: "Onboarding", lifecycle_stage: "Onboarding", title: "Onboarding meeting completed" },
+  { section: "Pilot / Setup", lifecycle_stage: "Pilot / Setup", title: "Platform access confirmed" },
+  { section: "Active Company", lifecycle_stage: "Active Company", title: "Active company approval complete" },
+] as const;
+
+export const documentRequirementSeeds = [
+  { category: "Sales / Marketing", lifecycle_stage: "First Pitch", title: "Marketing Deck", required_for_active: false },
+  { category: "Sales / Marketing", lifecycle_stage: "First Pitch", title: "Product Flyer", required_for_active: false },
+  { category: "Sales / Marketing", lifecycle_stage: "Demo Scheduled", title: "Demo Script", required_for_active: false },
+  { category: "Sales / Marketing", lifecycle_stage: "Demo Completed", title: "Buyer FAQ", required_for_active: false },
+  { category: "Sales / Marketing", lifecycle_stage: "Proposal Sent", title: "Proposal Template", required_for_active: true },
+  { category: "Finance", lifecycle_stage: "Proposal Sent", title: "One-Page Pricing Sheet", required_for_active: true },
+  { category: "Legal / Customer", lifecycle_stage: "Legal Review", title: "Mutual NDA", required_for_active: true },
+  { category: "Legal / Customer", lifecycle_stage: "Contract Sent", title: "Master Services Agreement", required_for_active: true },
+  { category: "Legal / Customer", lifecycle_stage: "Contract Sent", title: "Statement of Work Template", required_for_active: true },
+  { category: "Legal / Customer", lifecycle_stage: "Legal Review", title: "Pilot / Beta Agreement", required_for_active: false },
+  { category: "Legal / Customer", lifecycle_stage: "Legal Review", title: "Terms of Use", required_for_active: true },
+  { category: "Legal / Customer", lifecycle_stage: "Legal Review", title: "Privacy Policy", required_for_active: true },
+  { category: "Legal / Customer", lifecycle_stage: "Legal Review", title: "Data Processing Addendum", required_for_active: true },
+  { category: "Legal / Customer", lifecycle_stage: "Legal Review", title: "E-Sign Consent", required_for_active: true },
+  { category: "Legal / Customer", lifecycle_stage: "Legal Review", title: "AI Output Disclaimer", required_for_active: true },
+  { category: "Operations", lifecycle_stage: "Onboarding", title: "Client Contact Sheet", required_for_active: true },
+  { category: "Operations", lifecycle_stage: "Onboarding", title: "Admin Setup Record", required_for_active: true },
+  { category: "Finance", lifecycle_stage: "Onboarding", title: "Billing Confirmation", required_for_active: true },
+  { category: "Product", lifecycle_stage: "Onboarding", title: "Sample Data Request", required_for_active: false },
+  { category: "Operations", lifecycle_stage: "Onboarding", title: "Onboarding Meeting Notes", required_for_active: true },
+  { category: "Operations", lifecycle_stage: "Active Company", title: "Renewal Notes", required_for_active: false },
+  { category: "Legal / Customer", lifecycle_stage: "Active Company", title: "Contract Expiration Record", required_for_active: true },
+  { category: "Compliance / Certifications", lifecycle_stage: "Active Company", title: "Insurance / Legal Updates", required_for_active: false },
+  { category: "Operations", lifecycle_stage: "Active Company", title: "Support Notes", required_for_active: false },
+  { category: "Operations", lifecycle_stage: "Renewal / Expansion", title: "Account Review Record", required_for_active: false },
+] as const;
 
 export const startupChecklistSeed: CompanyChecklistItem[] = [
   {

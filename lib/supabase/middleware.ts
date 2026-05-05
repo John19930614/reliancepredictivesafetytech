@@ -2,6 +2,30 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/lib/supabase/types";
 
+async function hasPendingRequiredOnboarding(
+  supabase: ReturnType<typeof createServerClient<Database>>,
+  userId: string,
+) {
+  const { data: pendingAssignments } = await supabase
+    .from("employee_document_assignments")
+    .select("template_id")
+    .eq("user_id", userId)
+    .eq("status", "pending");
+  const pendingTemplateIds = [...new Set((pendingAssignments ?? []).map((assignment) => assignment.template_id))];
+
+  if (pendingTemplateIds.length === 0) {
+    return false;
+  }
+
+  const { count } = await supabase
+    .from("hr_document_templates")
+    .select("id", { count: "exact", head: true })
+    .in("id", pendingTemplateIds)
+    .eq("required", true);
+
+  return (count ?? 0) > 0;
+}
+
 export async function updateSession(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -69,6 +93,28 @@ export async function updateSession(request: NextRequest) {
       loginUrl.pathname = "/employee-login";
       loginUrl.searchParams.set("message", "employee-role-required");
       return NextResponse.redirect(loginUrl);
+    }
+
+    const isAdminRole = [
+      "platform_admin",
+      "super_admin",
+      "admin",
+      "company_admin",
+    ].includes(role.role);
+    const isHrOnboardingRoute = request.nextUrl.pathname === "/employee/hr-onboarding";
+
+    if (!isAdminRole) {
+      const onboardingLocked = await hasPendingRequiredOnboarding(supabase, user.id);
+
+      if (onboardingLocked && !isHrOnboardingRoute) {
+        const onboardingUrl = request.nextUrl.clone();
+        onboardingUrl.pathname = "/employee/hr-onboarding";
+        onboardingUrl.searchParams.set(
+          "next",
+          `${request.nextUrl.pathname}${request.nextUrl.search}`,
+        );
+        return NextResponse.redirect(onboardingUrl);
+      }
     }
   }
 
