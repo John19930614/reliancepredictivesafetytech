@@ -34,10 +34,23 @@ export function ClientDetailManager({
   legalIssues,
 }: ClientDetailManagerProps) {
   const [currentClient, setCurrentClient] = useState(client);
+  const [profileDraft, setProfileDraft] = useState({
+    name: client.name ?? "",
+    contact_name: client.contact_name ?? "",
+    email: client.email ?? "",
+    phone: client.phone ?? "",
+    company_type: client.company_type ?? "",
+    lifecycle_stage: client.lifecycle_stage,
+    status: client.status ?? "Active",
+    owner: client.owner ?? "",
+    source: client.source ?? "",
+    notes: client.notes ?? "",
+  });
   const [currentActivities, setCurrentActivities] = useState(activities);
   const [currentItems, setCurrentItems] = useState(onboardingItems);
   const [currentDocuments, setCurrentDocuments] = useState(documents);
   const [message, setMessage] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
   const [uploadingRequirementId, setUploadingRequirementId] = useState<string | null>(null);
 
   const activeApprovalComplete = currentItems.some((item) => item.title === "Active company approval complete" && item.completed);
@@ -54,12 +67,60 @@ export function ClientDetailManager({
     }, {});
   }, [currentItems]);
 
-  async function updateClient(patch: Partial<CompanyClient>) {
-    setCurrentClient((current) => ({ ...current, ...patch }));
+  async function saveClientProfile(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage("");
+    setSavingProfile(true);
+
     const supabase = createClient();
-    if (supabase) {
-      await supabase.from("company_clients").update(patch).eq("id", currentClient.id);
+    if (!supabase) {
+      setSavingProfile(false);
+      setMessage("Supabase is required to update company information.");
+      return;
     }
+
+    const patch = {
+      name: profileDraft.name.trim(),
+      contact_name: profileDraft.contact_name.trim() || null,
+      email: profileDraft.email.trim() || null,
+      phone: profileDraft.phone.trim() || null,
+      company_type: profileDraft.company_type.trim() || null,
+      lifecycle_stage: profileDraft.lifecycle_stage,
+      status: profileDraft.status.trim() || "Active",
+      owner: profileDraft.owner.trim() || null,
+      source: profileDraft.source.trim() || null,
+      notes: profileDraft.notes.trim() || null,
+    };
+
+    if (!patch.name) {
+      setSavingProfile(false);
+      setMessage("Company name is required.");
+      return;
+    }
+
+    const { data, error } = await supabase.from("company_clients").update(patch).eq("id", currentClient.id).select("*").single();
+
+    setSavingProfile(false);
+
+    if (error || !data) {
+      setMessage(error?.message ?? "Could not update company information.");
+      return;
+    }
+
+    setCurrentClient(data as CompanyClient);
+    setProfileDraft({
+      name: data.name ?? "",
+      contact_name: data.contact_name ?? "",
+      email: data.email ?? "",
+      phone: data.phone ?? "",
+      company_type: data.company_type ?? "",
+      lifecycle_stage: data.lifecycle_stage,
+      status: data.status ?? "Active",
+      owner: data.owner ?? "",
+      source: data.source ?? "",
+      notes: data.notes ?? "",
+    });
+    setMessage("Company information saved.");
   }
 
   function findClientDocument(requirement: CompanyDocumentRequirement) {
@@ -251,35 +312,105 @@ export function ClientDetailManager({
 
   return (
     <div className="client-detail-grid">
-      <section className="form-panel">
+      <form className="form-panel" onSubmit={saveClientProfile}>
         <h2>Company profile</h2>
         {message ? <div className="success-box">{message}</div> : null}
         <div className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 16 }}>
           <div className="field">
-            <label>Lifecycle stage</label>
-            <select value={currentClient.lifecycle_stage} onChange={(event) => updateClient({ lifecycle_stage: event.target.value })}>
+            <label htmlFor="client-name">Company name</label>
+            <input
+              id="client-name"
+              required
+              value={profileDraft.name}
+              onChange={(event) => setProfileDraft((current) => ({ ...current, name: event.target.value }))}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="client-contact-name">Primary contact</label>
+            <input
+              id="client-contact-name"
+              value={profileDraft.contact_name}
+              onChange={(event) => setProfileDraft((current) => ({ ...current, contact_name: event.target.value }))}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="client-email">Email</label>
+            <input
+              id="client-email"
+              type="email"
+              value={profileDraft.email}
+              onChange={(event) => setProfileDraft((current) => ({ ...current, email: event.target.value }))}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="client-phone">Phone</label>
+            <input
+              id="client-phone"
+              value={profileDraft.phone}
+              onChange={(event) => setProfileDraft((current) => ({ ...current, phone: event.target.value }))}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="client-company-type">Company type</label>
+            <input
+              id="client-company-type"
+              value={profileDraft.company_type}
+              onChange={(event) => setProfileDraft((current) => ({ ...current, company_type: event.target.value }))}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="client-lifecycle-stage">Lifecycle stage</label>
+            <select
+              id="client-lifecycle-stage"
+              value={profileDraft.lifecycle_stage}
+              onChange={(event) => setProfileDraft((current) => ({ ...current, lifecycle_stage: event.target.value }))}
+            >
               {lifecycleStages.map((stage) => (
                 <option key={stage}>{stage}</option>
               ))}
             </select>
           </div>
           <div className="field">
-            <label>Owner</label>
-            <input value={currentClient.owner ?? ""} onChange={(event) => updateClient({ owner: event.target.value })} />
+            <label htmlFor="client-owner">Owner</label>
+            <input
+              id="client-owner"
+              value={profileDraft.owner}
+              onChange={(event) => setProfileDraft((current) => ({ ...current, owner: event.target.value }))}
+            />
           </div>
           <div className="field">
-            <label>Status</label>
-            <input value={currentClient.status} onChange={(event) => updateClient({ status: event.target.value })} />
+            <label htmlFor="client-status">Status</label>
+            <input
+              id="client-status"
+              value={profileDraft.status}
+              onChange={(event) => setProfileDraft((current) => ({ ...current, status: event.target.value }))}
+            />
           </div>
           <div className="field">
-            <label>Notes</label>
-            <textarea value={currentClient.notes ?? ""} onChange={(event) => updateClient({ notes: event.target.value })} />
+            <label htmlFor="client-source">Source</label>
+            <input
+              id="client-source"
+              value={profileDraft.source}
+              onChange={(event) => setProfileDraft((current) => ({ ...current, source: event.target.value }))}
+            />
           </div>
+          <div className="field">
+            <label htmlFor="client-notes">Notes</label>
+            <textarea
+              id="client-notes"
+              value={profileDraft.notes}
+              onChange={(event) => setProfileDraft((current) => ({ ...current, notes: event.target.value }))}
+            />
+          </div>
+          <button className="button button-primary" disabled={savingProfile} type="submit">
+            <Save size={18} />
+            {savingProfile ? "Saving..." : "Save Company Info"}
+          </button>
           <div className="success-box">
             Active readiness: {readyForActive ? "Ready for active company status" : "Contract signed and active approval are still required"}
           </div>
         </div>
-      </section>
+      </form>
 
       <section className="table-card">
         <div className="checklist-section">
