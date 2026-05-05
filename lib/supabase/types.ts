@@ -667,6 +667,7 @@ export type Database = {
           required: boolean;
           sort_order: number;
           source_document_id: string | null;
+          form_definition_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -680,6 +681,7 @@ export type Database = {
           required?: boolean;
           sort_order?: number;
           source_document_id?: string | null;
+          form_definition_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -690,6 +692,208 @@ export type Database = {
             columns: ["source_document_id"];
             isOneToOne: false;
             referencedRelation: "company_documents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "hr_document_templates_form_definition_id_fkey";
+            columns: ["form_definition_id"];
+            isOneToOne: false;
+            referencedRelation: "hr_form_definitions";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      hr_form_definitions: {
+        Row: {
+          id: string;
+          slug: string;
+          title: string;
+          category: string;
+          description: string | null;
+          jurisdiction_type: string;
+          jurisdiction_code: string;
+          applies_to_state: string | null;
+          form_source_url: string | null;
+          official_form_name: string | null;
+          official_form_edition: string | null;
+          official_form_expiration_date: string | null;
+          field_schema: Json;
+          active: boolean;
+          required: boolean;
+          sensitive: boolean;
+          sort_order: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          slug: string;
+          title: string;
+          category?: string;
+          description?: string | null;
+          jurisdiction_type?: string;
+          jurisdiction_code?: string;
+          applies_to_state?: string | null;
+          form_source_url?: string | null;
+          official_form_name?: string | null;
+          official_form_edition?: string | null;
+          official_form_expiration_date?: string | null;
+          field_schema?: Json;
+          active?: boolean;
+          required?: boolean;
+          sensitive?: boolean;
+          sort_order?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["hr_form_definitions"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_form_responses: {
+        Row: {
+          id: string;
+          assignment_id: string;
+          user_id: string;
+          template_id: string;
+          form_definition_id: string;
+          status: string;
+          answers: Json;
+          form_version: number;
+          form_snapshot: Json;
+          signed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          assignment_id: string;
+          user_id: string;
+          template_id: string;
+          form_definition_id: string;
+          status?: string;
+          answers?: Json;
+          form_version: number;
+          form_snapshot: Json;
+          signed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_form_responses"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "employee_form_responses_assignment_id_fkey";
+            columns: ["assignment_id"];
+            isOneToOne: true;
+            referencedRelation: "employee_document_assignments";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "employee_form_responses_form_definition_id_fkey";
+            columns: ["form_definition_id"];
+            isOneToOne: false;
+            referencedRelation: "hr_form_definitions";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      employee_signed_documents: {
+        Row: {
+          id: string;
+          assignment_id: string;
+          response_id: string;
+          user_id: string;
+          template_id: string;
+          form_definition_id: string;
+          file_bucket: string;
+          file_path: string;
+          file_name: string;
+          file_type: string;
+          file_sha256: string;
+          form_snapshot: Json;
+          answer_snapshot: Json;
+          typed_legal_name: string;
+          signer_email: string | null;
+          signer_ip: string | null;
+          signer_user_agent: string | null;
+          signed_at: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          assignment_id: string;
+          response_id: string;
+          user_id: string;
+          template_id: string;
+          form_definition_id: string;
+          file_bucket?: string;
+          file_path: string;
+          file_name: string;
+          file_type?: string;
+          file_sha256: string;
+          form_snapshot: Json;
+          answer_snapshot: Json;
+          typed_legal_name: string;
+          signer_email?: string | null;
+          signer_ip?: string | null;
+          signer_user_agent?: string | null;
+          signed_at?: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_signed_documents"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "employee_signed_documents_assignment_id_fkey";
+            columns: ["assignment_id"];
+            isOneToOne: true;
+            referencedRelation: "employee_document_assignments";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "employee_signed_documents_response_id_fkey";
+            columns: ["response_id"];
+            isOneToOne: false;
+            referencedRelation: "employee_form_responses";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "employee_signed_documents_form_definition_id_fkey";
+            columns: ["form_definition_id"];
+            isOneToOne: false;
+            referencedRelation: "hr_form_definitions";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      employee_onboarding_audit_events: {
+        Row: {
+          id: string;
+          assignment_id: string | null;
+          user_id: string | null;
+          actor_user_id: string | null;
+          event_type: string;
+          event_details: Json;
+          signer_ip: string | null;
+          signer_user_agent: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          assignment_id?: string | null;
+          user_id?: string | null;
+          actor_user_id?: string | null;
+          event_type: string;
+          event_details?: Json;
+          signer_ip?: string | null;
+          signer_user_agent?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_onboarding_audit_events"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "employee_onboarding_audit_events_assignment_id_fkey";
+            columns: ["assignment_id"];
+            isOneToOne: false;
+            referencedRelation: "employee_document_assignments";
             referencedColumns: ["id"];
           },
         ];

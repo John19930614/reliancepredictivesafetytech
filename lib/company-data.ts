@@ -185,8 +185,109 @@ export type HrDocumentTemplate = {
   required: boolean;
   sort_order: number;
   source_document_id: string | null;
+  form_definition_id: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type HrFormFieldType =
+  | "text"
+  | "textarea"
+  | "date"
+  | "phone"
+  | "email"
+  | "ssn"
+  | "number"
+  | "currency"
+  | "checkbox"
+  | "radio"
+  | "select"
+  | "address";
+
+export type HrFormField = {
+  name: string;
+  label: string;
+  type: HrFormFieldType;
+  required?: boolean;
+  section?: string;
+  helpText?: string;
+  placeholder?: string;
+  options?: string[];
+  sensitive?: boolean;
+};
+
+export type HrFormAnswerValue = string | boolean | Record<string, string>;
+export type HrFormAnswers = Record<string, HrFormAnswerValue>;
+
+export type HrFormDefinition = {
+  id: string;
+  slug: string;
+  title: string;
+  category: string;
+  description: string | null;
+  jurisdiction_type: string;
+  jurisdiction_code: string;
+  applies_to_state: string | null;
+  form_source_url: string | null;
+  official_form_name: string | null;
+  official_form_edition: string | null;
+  official_form_expiration_date: string | null;
+  field_schema: HrFormField[];
+  active: boolean;
+  required: boolean;
+  sensitive: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EmployeeFormResponse = {
+  id: string;
+  assignment_id: string;
+  user_id: string;
+  template_id: string;
+  form_definition_id: string;
+  status: string;
+  answers: HrFormAnswers;
+  form_version: number;
+  form_snapshot: Record<string, unknown>;
+  signed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EmployeeSignedDocument = {
+  id: string;
+  assignment_id: string;
+  response_id: string;
+  user_id: string;
+  template_id: string;
+  form_definition_id: string;
+  file_bucket: string;
+  file_path: string;
+  file_name: string;
+  file_type: string;
+  file_sha256: string;
+  form_snapshot: Record<string, unknown>;
+  answer_snapshot: HrFormAnswers;
+  typed_legal_name: string;
+  signer_email: string | null;
+  signer_ip: string | null;
+  signer_user_agent: string | null;
+  signed_at: string;
+  created_at: string;
+};
+
+export type EmployeeOnboardingAuditEvent = {
+  id: string;
+  assignment_id: string | null;
+  user_id: string | null;
+  actor_user_id: string | null;
+  event_type: string;
+  event_details: Record<string, unknown>;
+  signer_ip: string | null;
+  signer_user_agent: string | null;
+  created_at: string;
 };
 
 export type EmployeeDocumentAssignment = {
