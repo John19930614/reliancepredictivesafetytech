@@ -299,11 +299,12 @@ export default async function HrOnboardingPage({ searchParams }: HrOnboardingPag
       uploadsByAssignmentId.set(upload.assignment_id, upload);
     }
   }
-  const requiredAssignments = visibleAssignments.filter((assignment) => templatesById.get(assignment.template_id)?.required);
-  const completeCount = requiredAssignments.filter((assignment) => assignment.status !== "pending").length;
-  const totalRequired = requiredAssignments.length;
-  const allComplete = totalRequired === 0 || completeCount === totalRequired;
-  const completionLabel = totalRequired === 0 ? "No HR packet assigned" : `${completeCount} of ${totalRequired} required forms complete`;
+  const checklistAssignments = visibleAssignments.filter((assignment) => templatesById.get(assignment.template_id)?.required);
+  const completeCount = checklistAssignments.filter((assignment) => assignment.status !== "pending").length;
+  const totalChecklistItems = checklistAssignments.length;
+  const allComplete = totalChecklistItems === 0 || completeCount === totalChecklistItems;
+  const completionLabel =
+    totalChecklistItems === 0 ? "No HR checklist assigned" : `${completeCount} of ${totalChecklistItems} checklist items complete`;
   const nextPath = getSafeNextPath(params.next);
   const activePendingAssignmentId = visibleAssignments.find((assignment) => assignment.status === "pending")?.id ?? null;
   const assignmentGroups = groupAssignmentsByCategory(visibleAssignments, templatesById, requirementsById);
@@ -313,8 +314,8 @@ export default async function HrOnboardingPage({ searchParams }: HrOnboardingPag
       <div className="portal-topline">
         <div>
           <div className="eyebrow">Employee HR Onboarding</div>
-          <h1>Complete your onboarding packet</h1>
-          <p>Complete each fillable form, save drafts as needed, and sign with your legal name.</p>
+          <h1>HR onboarding checklist</h1>
+          <p>Track each onboarding item, save drafts as needed, and sign with your legal name when a form is ready.</p>
         </div>
         <span className="badge">{allComplete ? "Complete" : completionLabel}</span>
       </div>
@@ -324,11 +325,11 @@ export default async function HrOnboardingPage({ searchParams }: HrOnboardingPag
       {allComplete ? (
         <div className="success-box portal-alert onboarding-complete-alert">
           <div>
-            <strong>Onboarding paperwork complete.</strong>
-            <p>You can continue into the employee portal.</p>
+            <strong>Onboarding checklist complete.</strong>
+            <p>Your HR onboarding items are complete.</p>
           </div>
           <Link className="button button-primary" href={nextPath}>
-            Continue to Dashboard
+            Back to Dashboard
           </Link>
         </div>
       ) : null}
@@ -424,7 +425,7 @@ export default async function HrOnboardingPage({ searchParams }: HrOnboardingPag
                             Complete {formatDate(signedDocument?.signed_at ?? signature?.signed_at ?? assignment.signed_at)}
                           </span>
                         ) : (
-                          <span className="badge">{canEditCurrentStep ? "Current step" : "Required"}</span>
+                          <span className="badge">{canEditCurrentStep ? "Current checklist item" : "Checklist item"}</span>
                         )}
                       </div>
 

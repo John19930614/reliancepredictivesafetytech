@@ -1,12 +1,8 @@
-import Image from "next/image";
-import { logout } from "@/app/employee-login/actions";
 import { EmployeePresenceChat } from "@/components/EmployeePresenceChat";
 import { EmployeeSidebar } from "@/components/EmployeeSidebar";
-import { COMPANY_NAME, TAGLINE } from "@/lib/company-data";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/types";
-import { isPortalAdminRole } from "@/lib/user-management";
 
 type EmployeeChatProfile = Database["public"]["Tables"]["employee_chat_profiles"]["Row"];
 type EmployeeChatThread = Database["public"]["Tables"]["employee_chat_threads"]["Row"];
@@ -16,41 +12,12 @@ function getChatDisplayName(profile: EmployeeChatProfile | undefined, email: str
   return profile?.display_name || email || profile?.user_id.slice(0, 8) || "Employee";
 }
 
-async function hasPendingRequiredOnboarding(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-) {
-  if (!supabase) {
-    return false;
-  }
-
-  const { data: pendingAssignments } = await supabase
-    .from("employee_document_assignments")
-    .select("template_id")
-    .eq("user_id", userId)
-    .eq("status", "pending");
-  const pendingTemplateIds = [...new Set((pendingAssignments ?? []).map((assignment) => assignment.template_id))];
-
-  if (pendingTemplateIds.length === 0) {
-    return false;
-  }
-
-  const { count } = await supabase
-    .from("hr_document_templates")
-    .select("id", { count: "exact", head: true })
-    .in("id", pendingTemplateIds)
-    .eq("required", true);
-
-  return (count ?? 0) > 0;
-}
-
 export default async function EmployeeLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
   const {
     data: { user },
   } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
   let chatProps: React.ComponentProps<typeof EmployeePresenceChat> | null = null;
-  let onboardingLocked = false;
   let currentRole: { role: string; account_status: string } | null = null;
   let unreadNotificationCount = 0;
 
@@ -62,31 +29,6 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
       .eq("account_status", "active")
       .maybeSingle();
     currentRole = role;
-    const isAdminRole = isPortalAdminRole(role?.role);
-
-    onboardingLocked = !isAdminRole && (await hasPendingRequiredOnboarding(supabase, user.id));
-
-    if (onboardingLocked) {
-      return (
-        <div className="portal-onboarding-shell">
-          <header className="portal-onboarding-header">
-            <div className="portal-onboarding-brand">
-              <Image className="portal-logo" alt={`${COMPANY_NAME} logo`} height={120} src="/reliance-logo-transparent.png" width={406} />
-              <div>
-                <strong>{COMPANY_NAME}</strong>
-                <p>{TAGLINE}</p>
-              </div>
-            </div>
-            <form action={logout}>
-              <button className="button button-secondary" type="submit">
-                Sign Out
-              </button>
-            </form>
-          </header>
-          <main className="portal-onboarding-main">{children}</main>
-        </div>
-      );
-    }
 
     const [
       { data: profiles, error: profilesError },
