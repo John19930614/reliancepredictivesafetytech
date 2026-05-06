@@ -8,3 +8,4 @@ tsconfig.tsbuildinfo
 next-dev*.log
 next-smoke*.log
 next-*.log
+codex-*.log
