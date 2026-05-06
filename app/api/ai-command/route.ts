@@ -16,6 +16,12 @@ const allowedProposalTables = [
   "employee_document_assignments",
 ] as const;
 
+const aiCommandModel = process.env.AI_COMMAND_MODEL || "openai/gpt-5";
+
+function hasAiGatewayAuth() {
+  return Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || process.env.VERCEL === "1");
+}
+
 async function getAuthenticatedClient() {
   const supabase = await createClient();
 
@@ -91,11 +97,19 @@ async function summarizeRecord(sourceType: string, sourceId: string) {
 export async function POST(req: Request) {
   try {
     const { supabase, user } = await getAuthenticatedClient();
+
+    if (!hasAiGatewayAuth()) {
+      return Response.json(
+        { error: "AI Gateway is not configured. Set AI_GATEWAY_API_KEY for local use, or enable Vercel OIDC in deployment." },
+        { status: 503 },
+      );
+    }
+
     const { messages }: { messages: UIMessage[] } = await req.json();
     const snapshot = await getCommandSnapshot(supabase, user.id);
 
     const result = streamText({
-      model: "openai/gpt-5.4",
+      model: aiCommandModel,
       system:
         "You are the Reliance internal AI command assistant. Help employees triage notifications, workflows, leads, HR review items, time cards, documents, legal issues, and operations records. " +
         "AI output is decision support only. Never claim to provide final safety, legal, HR, payroll, or compliance advice. " +
