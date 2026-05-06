@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://safety360docs.com";
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://reliancepredictivesafetytechnologies.com";
 
 export async function login(formData: FormData) {
   const supabase = await createClient();
