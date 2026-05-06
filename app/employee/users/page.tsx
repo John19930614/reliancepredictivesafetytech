@@ -3,6 +3,7 @@ import Link from "next/link";
 import {
   archivePortalUser,
   deletePortalUser,
+  generateEmployeeAccessLink,
   inviteEmployee,
   updatePortalUserRole,
 } from "@/app/employee/users/actions";
@@ -12,7 +13,7 @@ import type { TimeCardRole } from "@/lib/company-data";
 import { formatPortalRole, getPortalRoleCommandRank, isPortalAdminRole, portalUserRoles } from "@/lib/user-management";
 
 type UsersPageProps = {
-  searchParams: Promise<{ message?: string; error?: string }>;
+  searchParams: Promise<{ message?: string; error?: string; invite_link?: string }>;
 };
 
 type UserRoleRow = {
@@ -109,6 +110,13 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
       </div>
 
       {params.message ? <div className="success-box portal-alert">{params.message}</div> : null}
+      {params.invite_link ? (
+        <div className="success-box portal-alert">
+          <strong>Employee access link</strong>
+          <p>Send this link directly to the employee so they can set their password and enter the portal.</p>
+          <input readOnly value={params.invite_link} />
+        </div>
+      ) : null}
       {params.error ? <div className="success-box portal-alert portal-alert-error">{params.error}</div> : null}
       {usersError ? <div className="success-box portal-alert portal-alert-error">{usersError.message}</div> : null}
 
@@ -232,6 +240,13 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                       <Link className="button button-light" href={`/employee/users/${portalUser.id}`}>
                         Profile
                       </Link>
+                      <form action={generateEmployeeAccessLink}>
+                        <input name="email" type="hidden" value={portalUser.email} />
+                        <button className="button button-light" type="submit">
+                          <Send size={16} />
+                          Access Link
+                        </button>
+                      </form>
                       <form action={archivePortalUser}>
                         <input name="user_id" type="hidden" value={portalUser.id} />
                         <button className="button button-secondary" disabled={portalUser.accountStatus === "archived"} type="submit">

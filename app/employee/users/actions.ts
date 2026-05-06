@@ -253,6 +253,31 @@ export async function createPortalUser(formData: FormData) {
   redirect(usersPath({ message: "User created with HR onboarding assigned." }));
 }
 
+export async function generateEmployeeAccessLink(formData: FormData) {
+  await getAuthorizedAdmin();
+  const admin = getAdminClientOrRedirect();
+  const email = cleanText(formData.get("email")).toLowerCase();
+
+  if (!email) {
+    redirect(usersPath({ error: "Choose a user email before generating an access link." }));
+  }
+
+  const { data, error } = await admin.auth.admin.generateLink({
+    type: "recovery",
+    email,
+    options: {
+      redirectTo: "https://reliancepredictivesafetytechnologies.com/employee",
+    },
+  });
+
+  if (error || !data.properties?.action_link) {
+    redirect(usersPath({ error: error?.message ?? "Could not generate employee access link." }));
+  }
+
+  revalidatePath("/employee/users");
+  redirect(usersPath({ message: `Access link generated for ${email}.`, invite_link: data.properties.action_link }));
+}
+
 export async function updatePortalUserRole(formData: FormData) {
   await getAuthorizedAdmin();
   const admin = getAdminClientOrRedirect();
