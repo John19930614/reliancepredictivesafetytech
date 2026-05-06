@@ -4,6 +4,7 @@ import {
   ArrowRight,
   BarChart3,
   BookOpenCheck,
+  Bot,
   BriefcaseBusiness,
   CheckCircle2,
   Clock3,
@@ -37,6 +38,7 @@ const moduleGroups = [
     label: "Operations",
     description: "Company records, launch readiness, and decision control.",
     modules: [
+      { title: "AI Command Center", href: "/employee/ai", icon: Bot },
       { title: "Operations Database", href: "/employee/operations", icon: Database },
       { title: "Startup Checklist", href: "/employee/checklist", icon: ListChecks },
       { title: "Launch Gate", href: "/employee/launch-gate", icon: BookOpenCheck },

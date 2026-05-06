@@ -49,6 +49,7 @@ export function DocumentLibraryManager({ initialDocuments, checklistItems, clien
     const formData = new FormData(event.currentTarget);
     const file = formData.get("file");
     const title = String(formData.get("title") ?? "");
+    const documentNumber = String(formData.get("document_number") ?? "").trim() || null;
     const category = String(formData.get("category") ?? "");
     const checklistItemId = String(formData.get("checklist_item_id") ?? "") || null;
     const requirementId = String(formData.get("requirement_id") ?? "") || null;
@@ -96,6 +97,7 @@ export function DocumentLibraryManager({ initialDocuments, checklistItems, clien
     const payload = {
       title: title || file.name,
       category,
+      document_number: documentNumber,
       checklist_item_id: checklistItemId,
       requirement_id: requirementId,
       client_id: clientId,
@@ -168,6 +170,10 @@ export function DocumentLibraryManager({ initialDocuments, checklistItems, clien
           <div className="field">
             <label htmlFor="title">Title</label>
             <input id="title" name="title" />
+          </div>
+          <div className="field">
+            <label htmlFor="document_number">Document number</label>
+            <input id="document_number" name="document_number" placeholder="RPS-LEG-001" />
           </div>
           <div className="field">
             <label htmlFor="record_type">Record type</label>
@@ -329,6 +335,7 @@ export function DocumentLibraryManager({ initialDocuments, checklistItems, clien
                 <div className="portal-topline" style={{ marginBottom: 12 }}>
                   <div>
                     <h3>{document.title}</h3>
+                    <p>{document.document_number ? `Document # ${document.document_number}` : "No document number"}</p>
                     <p>{document.record_type ?? "Company Record"} - {document.category} - {document.lifecycle_stage ?? "No stage"}</p>
                     <p>{document.legal_hold ? "Legal hold active" : "No legal hold"} - Expires {document.expiration_date ?? "TBD"}</p>
                   </div>
@@ -338,6 +345,13 @@ export function DocumentLibraryManager({ initialDocuments, checklistItems, clien
                   </button>
                 </div>
                 <div className="form-grid">
+                  <div className="field">
+                    <label>Document number</label>
+                    <input
+                      value={document.document_number ?? ""}
+                      onChange={(event) => updateDocument(document, { document_number: event.target.value || null })}
+                    />
+                  </div>
                   <div className="field">
                     <label>Record type</label>
                     <select

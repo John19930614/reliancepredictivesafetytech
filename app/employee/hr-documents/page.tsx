@@ -1,4 +1,4 @@
-import { FileSignature, Save, Sparkles } from "lucide-react";
+import { FileSignature, Save, Sparkles, UploadCloud } from "lucide-react";
 import {
   createHrDocumentTemplate,
   updateHrDocumentTemplate,
@@ -122,6 +122,11 @@ export default async function HrDocumentsPage({ searchParams }: HrDocumentsPageP
                     ))}
                   </select>
                 </div>
+                <div className="field">
+                  <label htmlFor="source_file">Upload source file</label>
+                  <input id="source_file" name="source_file" type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" />
+                  <p className="muted-copy">Attach a PDF, Word, JPG, or PNG file employees should review before signing.</p>
+                </div>
                 <label className="checkbox-pill">
                   <input name="active" type="checkbox" defaultChecked />
                   Active
@@ -189,6 +194,14 @@ export default async function HrDocumentsPage({ searchParams }: HrDocumentsPageP
                           </option>
                         ))}
                       </select>
+                    </div>
+                    <div className="field-full">
+                      <label htmlFor={`source-file-${template.id}`}>Upload replacement source file</label>
+                      <input id={`source-file-${template.id}`} name="source_file" type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" />
+                      <p className="muted-copy">
+                        <UploadCloud size={14} />
+                        Uploading a file here attaches it to this onboarding signing item before employees sign.
+                      </p>
                     </div>
                     <label className="checkbox-pill">
                       <input name="active" type="checkbox" defaultChecked={template.active} />

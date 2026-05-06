@@ -436,6 +436,7 @@ export type CompanyDocument = {
   id: string;
   title: string;
   category: string;
+  document_number?: string | null;
   checklist_item_id: string | null;
   requirement_id?: string | null;
   client_id?: string | null;
@@ -668,6 +669,58 @@ export type CompanyPosition = {
   hiring_priority: string | null;
   sort_order: number;
   notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PortalNotification = {
+  id: string;
+  recipient_user_id: string;
+  title: string;
+  body: string;
+  priority: string;
+  source_type: string | null;
+  source_id: string | null;
+  action_href: string | null;
+  ai_summary: string | null;
+  dedupe_key: string | null;
+  status: string;
+  created_by_ai: boolean;
+  metadata: Record<string, unknown>;
+  read_at: string | null;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NotificationPreference = {
+  user_id: string;
+  in_app_enabled: boolean;
+  email_digest_enabled: boolean;
+  digest_time: string;
+  digest_timezone: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WorkflowActionProposal = {
+  id: string;
+  created_by_user_id: string | null;
+  target_user_id: string | null;
+  title: string;
+  description: string;
+  action_type: string;
+  target_table: string;
+  target_record_id: string | null;
+  proposed_patch: Record<string, unknown>;
+  risk_level: string;
+  status: string;
+  approval_notes: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  applied_at: string | null;
+  created_by_ai: boolean;
+  metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 };

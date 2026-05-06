@@ -1,7 +1,13 @@
-import { CheckCircle2 } from "lucide-react";
-import { requiredDocuments } from "@/lib/company-data";
+import { RequiredDocumentUploadManager } from "@/components/RequiredDocumentUploadManager";
+import type { CompanyDocument } from "@/lib/company-data";
+import { createClient } from "@/lib/supabase/server";
 
-export default function RequiredDocumentsPage() {
+export default async function RequiredDocumentsPage() {
+  const supabase = await createClient();
+  const { data: documents } = supabase
+    ? await supabase.from("company_documents").select("*").order("updated_at", { ascending: false })
+    : { data: null };
+
   return (
     <>
       <div className="portal-topline">
@@ -12,25 +18,7 @@ export default function RequiredDocumentsPage() {
         </div>
       </div>
 
-      <div className="portal-grid">
-        {requiredDocuments.map((group) => {
-          const Icon = group.icon;
-          return (
-            <section className="doc-card" key={group.section}>
-              <Icon color="#c9932b" size={26} />
-              <h3>{group.section}</h3>
-              <div className="checklist-list" style={{ marginTop: 14 }}>
-                {group.items.map((item) => (
-                  <div key={item} style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <CheckCircle2 color="#c9932b" size={18} />
-                    <span>{item}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          );
-        })}
-      </div>
+      <RequiredDocumentUploadManager initialDocuments={(documents ?? []) as CompanyDocument[]} />
     </>
   );
 }

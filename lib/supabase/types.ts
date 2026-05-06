@@ -3,6 +3,144 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 export type Database = {
   public: {
     Tables: {
+      portal_notifications: {
+        Row: {
+          id: string;
+          recipient_user_id: string;
+          title: string;
+          body: string;
+          priority: string;
+          source_type: string | null;
+          source_id: string | null;
+          action_href: string | null;
+          ai_summary: string | null;
+          dedupe_key: string | null;
+          status: string;
+          created_by_ai: boolean;
+          metadata: Json;
+          read_at: string | null;
+          archived_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          recipient_user_id: string;
+          title: string;
+          body: string;
+          priority?: string;
+          source_type?: string | null;
+          source_id?: string | null;
+          action_href?: string | null;
+          ai_summary?: string | null;
+          dedupe_key?: string | null;
+          status?: string;
+          created_by_ai?: boolean;
+          metadata?: Json;
+          read_at?: string | null;
+          archived_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["portal_notifications"]["Insert"]>;
+        Relationships: [];
+      };
+      notification_preferences: {
+        Row: {
+          user_id: string;
+          in_app_enabled: boolean;
+          email_digest_enabled: boolean;
+          digest_time: string;
+          digest_timezone: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          in_app_enabled?: boolean;
+          email_digest_enabled?: boolean;
+          digest_time?: string;
+          digest_timezone?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["notification_preferences"]["Insert"]>;
+        Relationships: [];
+      };
+      workflow_action_proposals: {
+        Row: {
+          id: string;
+          created_by_user_id: string | null;
+          target_user_id: string | null;
+          title: string;
+          description: string;
+          action_type: string;
+          target_table: string;
+          target_record_id: string | null;
+          proposed_patch: Json;
+          risk_level: string;
+          status: string;
+          approval_notes: string | null;
+          approved_by: string | null;
+          approved_at: string | null;
+          applied_at: string | null;
+          created_by_ai: boolean;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          created_by_user_id?: string | null;
+          target_user_id?: string | null;
+          title: string;
+          description: string;
+          action_type: string;
+          target_table: string;
+          target_record_id?: string | null;
+          proposed_patch?: Json;
+          risk_level?: string;
+          status?: string;
+          approval_notes?: string | null;
+          approved_by?: string | null;
+          approved_at?: string | null;
+          applied_at?: string | null;
+          created_by_ai?: boolean;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["workflow_action_proposals"]["Insert"]>;
+        Relationships: [];
+      };
+      ai_digest_runs: {
+        Row: {
+          id: string;
+          user_id: string;
+          digest_date: string;
+          status: string;
+          notification_count: number;
+          email_to: string | null;
+          resend_email_id: string | null;
+          error_message: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          digest_date: string;
+          status?: string;
+          notification_count?: number;
+          email_to?: string | null;
+          resend_email_id?: string | null;
+          error_message?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["ai_digest_runs"]["Insert"]>;
+        Relationships: [];
+      };
       time_card_roles: {
         Row: {
           id: string;
@@ -244,6 +382,7 @@ export type Database = {
           id: string;
           title: string;
           category: string;
+          document_number: string | null;
           checklist_item_id: string | null;
           requirement_id: string | null;
           client_id: string | null;
@@ -269,6 +408,7 @@ export type Database = {
           id?: string;
           title: string;
           category: string;
+          document_number?: string | null;
           checklist_item_id?: string | null;
           requirement_id?: string | null;
           client_id?: string | null;

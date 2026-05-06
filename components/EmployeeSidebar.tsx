@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BookOpenCheck,
+  Bot,
   BriefcaseBusiness,
   Clock3,
   Database,
@@ -31,6 +32,7 @@ const navGroups = [
     label: "Command",
     items: [
       { href: "/employee", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/employee/ai", label: "AI Command", icon: Bot },
       { href: "/employee/operations", label: "Operations Database", icon: Database },
       { href: "/employee/checklist", label: "Startup Checklist", icon: ListChecks },
     ],
@@ -82,9 +84,10 @@ function isActivePath(pathname: string, href: string) {
 type EmployeeSidebarProps = {
   accountStatus?: string | null;
   currentRole?: string | null;
+  unreadNotificationCount?: number;
 };
 
-export function EmployeeSidebar({ accountStatus = "active", currentRole = "employee" }: EmployeeSidebarProps) {
+export function EmployeeSidebar({ accountStatus = "active", currentRole = "employee", unreadNotificationCount = 0 }: EmployeeSidebarProps) {
   const pathname = usePathname();
   const visibleGroups = navGroups
     .map((group) => ({
@@ -117,6 +120,9 @@ export function EmployeeSidebar({ accountStatus = "active", currentRole = "emplo
                 <Link className={active ? "active" : undefined} href={item.href} key={item.href} aria-current={active ? "page" : undefined}>
                   <Icon size={17} />
                   <span>{item.label}</span>
+                  {item.href === "/employee/ai" && unreadNotificationCount > 0 ? (
+                    <span className="nav-count-badge">{unreadNotificationCount}</span>
+                  ) : null}
                 </Link>
               );
             })}

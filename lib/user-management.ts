@@ -38,6 +38,7 @@ export function isPortalSuperAdminRole(role: string | null | undefined) {
 
 const employeeSelfServicePaths = [
   "/employee",
+  "/employee/ai",
   "/employee/company-tree",
   "/employee/hr-onboarding",
   "/employee/time-cards",

@@ -16,6 +16,15 @@ function cleanText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
 }
 
+const maxSigningSourceUploadBytes = 10 * 1024 * 1024;
+const allowedSigningSourceTypes = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "image/jpeg",
+  "image/png",
+]);
+
 const requiredTemplateFormSlugs: Record<string, string> = {
   "Federal Form I-9 Employment Eligibility Checklist": "federal-i9-section-1",
   "Federal Form W-4 Employee Withholding Checklist": "federal-w4-employee-withholding",
@@ -23,7 +32,6 @@ const requiredTemplateFormSlugs: Record<string, string> = {
   "Employee Personal Information and Emergency Contact Form": "employee-profile-emergency-contact",
   "Offer and Role Acknowledgment": "offer-role-acknowledgment",
   "Direct Deposit Authorization": "direct-deposit-authorization",
-  "Employee Handbook Acknowledgment": "employee-handbook-acknowledgment",
   "Confidentiality and IP Assignment Agreement": "confidentiality-ip-assignment",
   "Acceptable Use and Information Security Policy": "acceptable-use-information-security",
   "Safety-Critical Data and AI Output Acknowledgment": "safety-ai-output-acknowledgment",
@@ -39,7 +47,6 @@ const requiredTemplateRequirementSlugs: Record<string, string> = {
   "Employee Personal Information and Emergency Contact Form": "employee-profile-emergency-contact",
   "Offer and Role Acknowledgment": "offer-role-acknowledgment",
   "Direct Deposit Authorization": "direct-deposit-authorization",
-  "Employee Handbook Acknowledgment": "employee-handbook-acknowledgment",
   "Confidentiality and IP Assignment Agreement": "confidentiality-ip-assignment",
   "Acceptable Use and Information Security Policy": "acceptable-use-information-security",
   "Safety-Critical Data and AI Output Acknowledgment": "safety-ai-output-acknowledgment",
@@ -47,6 +54,19 @@ const requiredTemplateRequirementSlugs: Record<string, string> = {
   "Electronic Records and E-Sign Consent": "electronic-records-esign-consent",
   "Payroll, Benefits, and Required Document Upload Checklist": "payroll-benefits-required-upload-checklist",
 };
+
+const duplicateOnboardingTemplateTitles = [
+  "Offer / Role Acknowledgment",
+  "Employee Handbook Acknowledgment",
+  "Confidentiality / IP Assignment",
+  "Acceptable Use Policy",
+  "Safety / Data Policy Acknowledgment",
+  "AI Output Disclaimer",
+  "Privacy Acknowledgment",
+  "E-Sign Consent",
+  "Emergency Contact Form",
+  "Tax / Payroll Upload Checklist",
+];
 
 async function getAuthorizedAdmin() {
   const supabase = await createClient();
@@ -84,6 +104,63 @@ function getAdminClientOrRedirect() {
   }
 
   return admin;
+}
+
+async function uploadHrSigningSourceDocument(
+  admin: NonNullable<ReturnType<typeof createAdminClient>>,
+  currentUserId: string,
+  formData: FormData,
+  values: { title: string; category: string },
+) {
+  const file = formData.get("source_file");
+
+  if (!(file instanceof File) || !file.name) {
+    return null;
+  }
+
+  if (file.size > maxSigningSourceUploadBytes) {
+    redirect(hrDocumentsPath({ error: "Source document upload is too large. Use a file under 10 MB." }));
+  }
+
+  if (!allowedSigningSourceTypes.has(file.type)) {
+    redirect(hrDocumentsPath({ error: "Only PDF, DOC, DOCX, JPG, and PNG source files are allowed for signing templates." }));
+  }
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+  const filePath = `${currentUserId}/hr-signing-sources/${Date.now()}-${safeName}`;
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const { error: uploadError } = await admin.storage.from("company-documents").upload(filePath, bytes, {
+    contentType: file.type,
+    upsert: false,
+  });
+
+  if (uploadError) {
+    redirect(hrDocumentsPath({ error: uploadError.message }));
+  }
+
+  const { data: document, error: documentError } = await admin
+    .from("company_documents")
+    .insert({
+      title: `${values.title} source file`,
+      category: values.category || "People / HR",
+      record_type: "Master Template",
+      file_path: filePath,
+      file_name: file.name,
+      file_type: file.type,
+      status: "Uploaded",
+      owner: "HR / Onboarding",
+      revision: "1.0",
+      notes: "Uploaded from the HR signing packet setup before employee signing.",
+      uploaded_by: currentUserId,
+    })
+    .select("id")
+    .single();
+
+  if (documentError || !document) {
+    redirect(hrDocumentsPath({ error: documentError?.message ?? "Could not register source document upload." }));
+  }
+
+  return document.id;
 }
 
 async function relinkRequiredTemplatesToFillableForms(admin: NonNullable<ReturnType<typeof createAdminClient>>) {
@@ -144,11 +221,46 @@ async function relinkRequiredTemplatesToComplianceRequirements(admin: NonNullabl
   return null;
 }
 
+async function deactivateDuplicateOnboardingTemplates(admin: NonNullable<ReturnType<typeof createAdminClient>>) {
+  const { data: duplicateTemplates, error: templateError } = await admin
+    .from("hr_document_templates")
+    .select("id")
+    .in("title", duplicateOnboardingTemplateTitles);
+
+  if (templateError) {
+    return templateError;
+  }
+
+  const duplicateTemplateIds = [...new Set((duplicateTemplates ?? []).map((template) => template.id))];
+
+  if (duplicateTemplateIds.length === 0) {
+    return null;
+  }
+
+  const { error: assignmentError } = await admin
+    .from("employee_document_assignments")
+    .delete()
+    .in("template_id", duplicateTemplateIds)
+    .eq("status", "pending");
+
+  if (assignmentError) {
+    return assignmentError;
+  }
+
+  const { error: deactivateError } = await admin
+    .from("hr_document_templates")
+    .update({ active: false, required: false })
+    .in("id", duplicateTemplateIds);
+
+  return deactivateError;
+}
+
 export async function createHrDocumentTemplate(formData: FormData) {
-  await getAuthorizedAdmin();
+  const currentUser = await getAuthorizedAdmin();
   const admin = getAdminClientOrRedirect();
   const title = cleanText(formData.get("title"));
   const bodyText = cleanText(formData.get("body_text"));
+  const category = cleanText(formData.get("category")) || "People / HR";
   const version = Number(cleanText(formData.get("version")) || "1");
   const sortOrder = Number(cleanText(formData.get("sort_order")) || "100");
 
@@ -156,15 +268,18 @@ export async function createHrDocumentTemplate(formData: FormData) {
     redirect(hrDocumentsPath({ error: "Title and document body are required." }));
   }
 
+  const uploadedSourceDocumentId = await uploadHrSigningSourceDocument(admin, currentUser.id, formData, { title, category });
+  const sourceDocumentId = uploadedSourceDocumentId ?? (cleanText(formData.get("source_document_id")) || null);
+
   const { error } = await admin.from("hr_document_templates").insert({
     title,
-    category: cleanText(formData.get("category")) || "People / HR",
+    category,
     body_text: bodyText,
     version: Number.isFinite(version) ? version : 1,
     active: formData.get("active") === "on",
     required: formData.get("required") === "on",
     sort_order: Number.isFinite(sortOrder) ? sortOrder : 100,
-    source_document_id: cleanText(formData.get("source_document_id")) || null,
+    source_document_id: sourceDocumentId,
   });
 
   if (error) {
@@ -209,6 +324,18 @@ export async function upsertRequiredHrDocumentTemplates() {
     redirect(hrDocumentsPath({ error: linkError.message }));
   }
 
+  const requirementLinkError = await relinkRequiredTemplatesToComplianceRequirements(admin);
+
+  if (requirementLinkError) {
+    redirect(hrDocumentsPath({ error: requirementLinkError.message }));
+  }
+
+  const duplicateCleanupError = await deactivateDuplicateOnboardingTemplates(admin);
+
+  if (duplicateCleanupError) {
+    redirect(hrDocumentsPath({ error: duplicateCleanupError.message }));
+  }
+
   const { data: profiles, error: profilesError } = await admin
     .from("employee_profiles")
     .select("user_id")
@@ -235,11 +362,12 @@ export async function upsertRequiredHrDocumentTemplates() {
 }
 
 export async function updateHrDocumentTemplate(formData: FormData) {
-  await getAuthorizedAdmin();
+  const currentUser = await getAuthorizedAdmin();
   const admin = getAdminClientOrRedirect();
   const templateId = cleanText(formData.get("template_id"));
   const title = cleanText(formData.get("title"));
   const bodyText = cleanText(formData.get("body_text"));
+  const category = cleanText(formData.get("category")) || "People / HR";
   const version = Number(cleanText(formData.get("version")) || "1");
   const sortOrder = Number(cleanText(formData.get("sort_order")) || "100");
 
@@ -247,17 +375,20 @@ export async function updateHrDocumentTemplate(formData: FormData) {
     redirect(hrDocumentsPath({ error: "Template, title, and document body are required." }));
   }
 
+  const uploadedSourceDocumentId = await uploadHrSigningSourceDocument(admin, currentUser.id, formData, { title, category });
+  const sourceDocumentId = uploadedSourceDocumentId ?? (cleanText(formData.get("source_document_id")) || null);
+
   const { error } = await admin
     .from("hr_document_templates")
     .update({
       title,
-      category: cleanText(formData.get("category")) || "People / HR",
+      category,
       body_text: bodyText,
       version: Number.isFinite(version) ? version : 1,
       active: formData.get("active") === "on",
       required: formData.get("required") === "on",
       sort_order: Number.isFinite(sortOrder) ? sortOrder : 100,
-      source_document_id: cleanText(formData.get("source_document_id")) || null,
+      source_document_id: sourceDocumentId,
     })
     .eq("id", templateId);
 

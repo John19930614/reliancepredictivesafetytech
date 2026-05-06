@@ -32,6 +32,11 @@ export default function SettingsPage() {
             {CONTACT_EMAIL}
           </div>
         </section>
+        <section className="portal-card">
+          <h3>AI digest schedule</h3>
+          <p>Vercel cron runs `/api/cron/daily-digest` at 13:00 UTC, which is 8:00 AM America/Chicago during daylight time.</p>
+          <div className="metric">Daily</div>
+        </section>
       </div>
     </>
   );

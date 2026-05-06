@@ -284,6 +284,10 @@ export default async function HrOnboardingPage({ searchParams }: HrOnboardingPag
   }
 
   const templatesById = new Map(typedTemplates.map((template) => [template.id, template]));
+  const visibleAssignments = typedAssignments.filter((assignment) => {
+    const template = templatesById.get(assignment.template_id);
+    return template?.active && template.required;
+  });
   const formDefinitionsById = new Map((formDefinitions ?? []).map((definition) => [definition.id, definition as HrFormDefinition]));
   const requirementsById = new Map((requirements ?? []).map((requirement) => [requirement.id, requirement as HrComplianceRequirement]));
   const signaturesByAssignmentId = new Map(typedSignatures.map((signature) => [signature.assignment_id, signature]));
@@ -295,14 +299,14 @@ export default async function HrOnboardingPage({ searchParams }: HrOnboardingPag
       uploadsByAssignmentId.set(upload.assignment_id, upload);
     }
   }
-  const requiredAssignments = typedAssignments.filter((assignment) => templatesById.get(assignment.template_id)?.required);
+  const requiredAssignments = visibleAssignments.filter((assignment) => templatesById.get(assignment.template_id)?.required);
   const completeCount = requiredAssignments.filter((assignment) => assignment.status !== "pending").length;
   const totalRequired = requiredAssignments.length;
   const allComplete = totalRequired === 0 || completeCount === totalRequired;
   const completionLabel = totalRequired === 0 ? "No HR packet assigned" : `${completeCount} of ${totalRequired} required forms complete`;
   const nextPath = getSafeNextPath(params.next);
-  const activePendingAssignmentId = typedAssignments.find((assignment) => assignment.status === "pending")?.id ?? null;
-  const assignmentGroups = groupAssignmentsByCategory(typedAssignments, templatesById, requirementsById);
+  const activePendingAssignmentId = visibleAssignments.find((assignment) => assignment.status === "pending")?.id ?? null;
+  const assignmentGroups = groupAssignmentsByCategory(visibleAssignments, templatesById, requirementsById);
 
   return (
     <>
@@ -371,7 +375,7 @@ export default async function HrOnboardingPage({ searchParams }: HrOnboardingPag
         </form>
 
         <section className="hr-document-stack">
-          {typedAssignments.length === 0 ? (
+          {visibleAssignments.length === 0 ? (
             <div className="empty-state">No HR onboarding documents have been assigned yet.</div>
           ) : (
             assignmentGroups.map(([category, groupAssignments]) => (

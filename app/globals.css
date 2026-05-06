@@ -1218,6 +1218,58 @@ textarea {
   gap: 18px;
 }
 
+.required-documents-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.required-document-folder {
+  display: grid;
+  gap: 18px;
+  align-content: start;
+  padding: 22px;
+}
+
+.required-document-folder-header,
+.required-document-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.required-document-folder-header p,
+.required-document-status p {
+  margin: 3px 0 0;
+}
+
+.required-document-list {
+  display: grid;
+  gap: 16px;
+}
+
+.required-document-row {
+  display: grid;
+  gap: 14px;
+  border-top: 1px solid #ece4d6;
+  padding-top: 16px;
+}
+
+.required-document-row h4 {
+  margin: 0;
+  color: #111;
+  font-size: 1rem;
+}
+
+.required-document-message {
+  padding: 12px;
+}
+
+.required-document-upload-form {
+  display: grid;
+  gap: 12px;
+}
+
 .hr-onboarding-layout,
 .hr-template-layout {
   display: grid;
@@ -2903,6 +2955,7 @@ textarea {
   .hero-grid,
   .contact-layout,
   .document-grid,
+  .required-documents-grid,
   .hr-onboarding-layout,
   .hr-template-layout,
   .operations-layout,
@@ -3154,8 +3207,306 @@ textarea {
     border-bottom: 1px solid #eceff3;
   }
 
-  .employee-chat-conversation {
+.employee-chat-conversation {
     min-height: 360px;
+  }
+}
+
+.nav-count-badge {
+  margin-left: auto;
+  min-width: 22px;
+  border-radius: 999px;
+  background: #c12f2f;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 5px 7px;
+  text-align: center;
+}
+
+.ai-command-workspace {
+  display: grid;
+  gap: 22px;
+}
+
+.ai-command-hero,
+.ai-panel,
+.ai-metric {
+  border: 1px solid rgba(15, 47, 79, 0.16);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
+}
+
+.ai-command-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 22px;
+  padding: 24px;
+}
+
+.ai-command-hero > div {
+  max-width: 780px;
+}
+
+.ai-message-response {
+  display: grid;
+  gap: 8px;
+  color: #354154;
+  line-height: 1.55;
+}
+
+.ai-message-response p {
+  margin: 0;
+}
+
+.ai-message-response code {
+  border-radius: 5px;
+  background: #eef3f8;
+  color: #0f2f4f;
+  padding: 2px 5px;
+}
+
+.ai-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ai-metric {
+  padding: 16px;
+}
+
+.ai-metric span {
+  display: block;
+  color: #657286;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.ai-metric strong {
+  display: block;
+  margin-top: 6px;
+  color: #111827;
+  font-size: 1.75rem;
+}
+
+.ai-command-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 22px;
+}
+
+.ai-panel {
+  min-width: 0;
+  padding: 20px;
+}
+
+.ai-list {
+  display: grid;
+  gap: 12px;
+}
+
+.ai-list-row,
+.ai-notification-row,
+.ai-proposal-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  border: 1px solid #e6ebf1;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 14px;
+}
+
+.ai-list-row strong,
+.ai-notification-row h3,
+.ai-proposal-row h3 {
+  color: #162033;
+}
+
+.ai-list-row small,
+.ai-notification-row small,
+.ai-proposal-row small {
+  display: block;
+  color: #657286;
+  line-height: 1.45;
+}
+
+.ai-notification-row,
+.ai-proposal-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.ai-notification-row p,
+.ai-proposal-row p {
+  margin: 6px 0;
+  color: #354154;
+}
+
+.ai-priority {
+  width: fit-content;
+  height: fit-content;
+  border-radius: 999px;
+  border: 1px solid #d9e0ea;
+  background: #eef3f8;
+  color: #22314a;
+  font-size: 0.7rem;
+  font-weight: 850;
+  padding: 4px 8px;
+  text-transform: uppercase;
+}
+
+.ai-priority-high {
+  border-color: #e2b84c;
+  background: #fff7da;
+  color: #6b4c00;
+}
+
+.ai-priority-critical {
+  border-color: #e09a9a;
+  background: #fff0f0;
+  color: #9b1c1c;
+}
+
+.ai-priority-low {
+  border-color: #a8d0b0;
+  background: #edf8ef;
+  color: #236333;
+}
+
+.ai-chat-panel {
+  display: grid;
+  grid-template-rows: auto minmax(320px, 1fr) auto;
+}
+
+.ai-chat-window {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-height: 320px;
+  max-height: 560px;
+  overflow: auto;
+  border: 1px solid #e6ebf1;
+  border-radius: 8px;
+  background: #f7f9fc;
+  padding: 14px;
+}
+
+.ai-chat-message {
+  max-width: 86%;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.ai-chat-message-user {
+  justify-self: end;
+  background: #0f2f4f;
+}
+
+.ai-chat-message-user .ai-message-response {
+  color: #fff;
+}
+
+.ai-chat-message-assistant {
+  justify-self: start;
+  border: 1px solid #d9e0ea;
+  background: #fff;
+}
+
+.ai-suggestion {
+  width: 100%;
+  border: 1px solid #d9e0ea;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f2f4f;
+  cursor: pointer;
+  padding: 14px;
+  text-align: left;
+}
+
+.ai-chat-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.ai-row-actions,
+.ai-proposal-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ai-proposal-actions {
+  flex-direction: column;
+  min-width: 220px;
+}
+
+.ai-proposal-actions form {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+
+.ai-proposal-row pre {
+  max-width: 100%;
+  overflow: auto;
+  border-radius: 8px;
+  background: #111827;
+  color: #f8fafc;
+  font-size: 0.78rem;
+  margin: 10px 0 0;
+  padding: 12px;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid #d9e0ea;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f2f4f;
+  cursor: pointer;
+}
+
+@media (max-width: 1180px) {
+  .ai-metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ai-command-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .ai-command-hero,
+  .ai-notification-row,
+  .ai-proposal-row,
+  .ai-chat-form {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-command-hero {
+    display: grid;
+  }
+
+  .ai-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ai-row-actions,
+  .ai-proposal-actions {
+    width: 100%;
+    flex-wrap: wrap;
   }
 }
 
