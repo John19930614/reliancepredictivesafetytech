@@ -48,11 +48,23 @@ function priorityClass(priority: string) {
 
 export function AICommandCenter({ snapshot, notifications, proposals, canManageProposals }: AICommandCenterProps) {
   const [input, setInput] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("all");
   const { messages, sendMessage, status, error } = useChat({
     transport: new DefaultChatTransport({ api: "/api/ai-command" }),
   });
 
   const working = status === "submitted" || status === "streaming";
+  const sourceOptions = useMemo(
+    () => ["all", ...Array.from(new Set(snapshot.priorityItems.map((item) => item.sourceLabel)))],
+    [snapshot.priorityItems],
+  );
+  const filteredPriorityItems = useMemo(
+    () =>
+      sourceFilter === "all"
+        ? snapshot.priorityItems
+        : snapshot.priorityItems.filter((item) => item.sourceLabel === sourceFilter),
+    [snapshot.priorityItems, sourceFilter],
+  );
   const suggestedPrompt = useMemo(() => {
     const topItem = snapshot.priorityItems[0];
     return topItem
@@ -111,18 +123,39 @@ export function AICommandCenter({ snapshot, notifications, proposals, canManageP
               <span className="eyebrow">AI-ranked</span>
               <h2>Priority queue</h2>
             </div>
-            <Sparkles size={18} />
+            <div className="ai-filter-control">
+              <Sparkles size={18} />
+              <select
+                aria-label="Filter priority queue source"
+                value={sourceFilter}
+                onChange={(event) => setSourceFilter(event.target.value)}
+              >
+                {sourceOptions.map((source) => (
+                  <option key={source} value={source}>
+                    {source === "all" ? "All sources" : source}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="ai-list">
-            {snapshot.priorityItems.length === 0 ? (
+            {filteredPriorityItems.length === 0 ? (
               <div className="empty-state">No urgent workflow items are currently visible.</div>
             ) : (
-              snapshot.priorityItems.map((item) => (
-                <Link className="ai-list-row" href={item.href} key={`${item.sourceType}-${item.sourceId}`}>
+              filteredPriorityItems.map((item) => (
+                <Link className="ai-list-row" href={item.actionHref} key={`${item.sourceType}-${item.sourceId}`}>
                   <span className={priorityClass(item.priority)}>{item.priority}</span>
                   <span>
                     <strong>{item.title}</strong>
-                    <small>{item.label} - {item.detail}</small>
+                    <small>
+                      {item.sourceLabel} - {item.label} - {item.status}
+                    </small>
+                    <small>{item.detail}</small>
+                    <span className="ai-meta-row">
+                      {item.owner ? <span>Owner {item.owner}</span> : <span>No owner</span>}
+                      {item.dueDate ? <span>Due {formatDate(item.dueDate)}</span> : <span>No due date</span>}
+                      {item.reviewRequired ? <span>Review required</span> : <span>Action item</span>}
+                    </span>
                   </span>
                 </Link>
               ))
@@ -227,7 +260,7 @@ export function AICommandCenter({ snapshot, notifications, proposals, canManageP
                     <h3>{proposal.title}</h3>
                     <p>{proposal.description}</p>
                     <small>
-                      {proposal.action_type} - {proposal.target_table}
+                      {proposal.status} - {proposal.action_type} - {proposal.target_table}
                     </small>
                     <pre>{JSON.stringify(proposal.proposed_patch, null, 2)}</pre>
                   </div>

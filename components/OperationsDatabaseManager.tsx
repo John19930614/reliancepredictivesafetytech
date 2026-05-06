@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Database, Save } from "lucide-react";
+import { AlertTriangle, Database, Save, XCircle } from "lucide-react";
 import {
   operationsRecordCategories,
   operationsRecordPriorities,
@@ -35,15 +35,44 @@ type OperationsRecordPatch = Partial<
   >
 >;
 
+type OperationsFilters = {
+  category: string;
+  status: string;
+  priority: string;
+  owner: string;
+  dueStatus: string;
+  search: string;
+};
+
 function cleanOptional(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
   return text || null;
 }
 
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function dueStatus(record: Pick<CompanyOperationsRecord, "due_date" | "status">) {
+  if (["Archived", "Complete"].includes(record.status)) return "closed";
+  if (!record.due_date) return "no_due";
+  const today = todayIsoDate();
+  if (record.due_date < today) return "overdue";
+  const dueSoon = new Date(`${today}T12:00:00`);
+  dueSoon.setDate(dueSoon.getDate() + 7);
+  return record.due_date <= dueSoon.toISOString().slice(0, 10) ? "due_soon" : "scheduled";
+}
+
+function dueStatusLabel(status: string) {
+  return status.replace("_", " ");
+}
+
 export function OperationsDatabaseManager({ initialRecords, clients, documents }: OperationsDatabaseManagerProps) {
   const [records, setRecords] = useState(initialRecords);
-  const [filters, setFilters] = useState({ category: "", status: "", search: "" });
+  const [drafts, setDrafts] = useState<Record<string, OperationsRecordPatch>>({});
+  const [filters, setFilters] = useState<OperationsFilters>({ category: "", status: "", priority: "", owner: "", dueStatus: "", search: "" });
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -51,18 +80,70 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
     const search = filters.search.toLowerCase();
 
     return records.filter((record) => {
-      const text = `${record.title} ${record.owner ?? ""} ${record.description ?? ""} ${record.notes ?? ""}`.toLowerCase();
+      const view = { ...record, ...(drafts[record.id] ?? {}) };
+      const text = `${view.title} ${view.owner ?? ""} ${view.description ?? ""} ${view.notes ?? ""}`.toLowerCase();
 
       return (
-        (!filters.category || record.category === filters.category) &&
-        (!filters.status || record.status === filters.status) &&
+        (!filters.category || view.category === filters.category) &&
+        (!filters.status || view.status === filters.status) &&
+        (!filters.priority || view.priority === filters.priority) &&
+        (!filters.owner || (filters.owner === "unassigned" ? !view.owner : view.owner === filters.owner)) &&
+        (!filters.dueStatus || dueStatus(view) === filters.dueStatus) &&
         (!search || text.includes(search))
       );
     });
-  }, [filters, records]);
+  }, [drafts, filters, records]);
 
   const clientsById = useMemo(() => new Map(clients.map((client) => [client.id, client.name])), [clients]);
   const documentsById = useMemo(() => new Map(documents.map((document) => [document.id, document.title])), [documents]);
+  const ownerOptions = useMemo(() => {
+    const owners = new Set<string>();
+    records.forEach((record) => {
+      const owner = (drafts[record.id]?.owner ?? record.owner)?.trim();
+      if (owner) owners.add(owner);
+    });
+    return [...owners].sort((first, second) => first.localeCompare(second));
+  }, [drafts, records]);
+
+  function viewRecord(record: CompanyOperationsRecord) {
+    return { ...record, ...(drafts[record.id] ?? {}) };
+  }
+
+  function setStatusMessage(text: string, tone: "success" | "error" = "success") {
+    setMessage(text);
+    setMessageTone(tone);
+  }
+
+  function updateDraft(recordId: string, patch: OperationsRecordPatch) {
+    setDrafts((current) => ({
+      ...current,
+      [recordId]: { ...(current[recordId] ?? {}), ...patch },
+    }));
+  }
+
+  function cancelDraft(recordId: string) {
+    setDrafts((current) => {
+      const next = { ...current };
+      delete next[recordId];
+      return next;
+    });
+    setStatusMessage("Draft changes canceled.");
+  }
+
+  function recordBadges(record: CompanyOperationsRecord) {
+    const view = viewRecord(record);
+    const badges = [
+      { label: view.priority, tone: view.priority === "Critical" ? "danger" : view.priority === "High" ? "gold" : "neutral" },
+      { label: view.status, tone: view.status === "Archived" ? "neutral" : view.status === "Waiting" ? "gold" : "default" },
+    ];
+    const due = dueStatus(view);
+    if (due === "overdue") badges.push({ label: "Overdue", tone: "danger" });
+    if (due === "due_soon") badges.push({ label: "Due soon", tone: "gold" });
+    if (due === "no_due") badges.push({ label: "No due date", tone: "neutral" });
+    if (!view.owner) badges.push({ label: "No owner", tone: "neutral" });
+    if (drafts[record.id]) badges.push({ label: "Unsaved", tone: "gold" });
+    return badges;
+  }
 
   async function createRecord(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -86,7 +167,7 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
 
     if (!payload.title) {
       setCreating(false);
-      setMessage("Add a title before saving the record.");
+      setStatusMessage("Add a title before saving the record.", "error");
       return;
     }
 
@@ -94,7 +175,7 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
 
     if (!supabase) {
       setCreating(false);
-      setMessage("Supabase is required for the operations database.");
+      setStatusMessage("Supabase is required for the operations database.", "error");
       return;
     }
 
@@ -102,34 +183,64 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
     setCreating(false);
 
     if (error) {
-      setMessage(error.message);
+      setStatusMessage(error.message, "error");
       return;
     }
 
     if (data) {
       setRecords((current) => [data as CompanyOperationsRecord, ...current]);
-      setMessage("Operations record added.");
+      setStatusMessage("Operations record added.");
       event.currentTarget.reset();
     }
   }
 
-  async function updateRecord(record: CompanyOperationsRecord, patch: OperationsRecordPatch) {
-    setRecords((current) => current.map((item) => (item.id === record.id ? { ...item, ...patch } : item)));
-    setSavingId(record.id);
-
-    const supabase = createClient();
-    if (supabase) {
-      await supabase.from("company_operations_records").update(patch).eq("id", record.id);
+  async function saveRecord(record: CompanyOperationsRecord) {
+    const patch = drafts[record.id];
+    if (!patch) {
+      setStatusMessage("No changes to save.");
+      return;
     }
 
+    setSavingId(record.id);
+    setMessage("");
+
+    const supabase = createClient();
+    if (!supabase) {
+      setSavingId(null);
+      setStatusMessage("Supabase is required for the operations database.", "error");
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("company_operations_records")
+      .update(patch)
+      .eq("id", record.id)
+      .select("*")
+      .single();
+
     setSavingId(null);
+
+    if (error) {
+      setStatusMessage(error.message, "error");
+      return;
+    }
+
+    if (data) {
+      setRecords((current) => current.map((item) => (item.id === record.id ? (data as CompanyOperationsRecord) : item)));
+      setDrafts((current) => {
+        const next = { ...current };
+        delete next[record.id];
+        return next;
+      });
+      setStatusMessage("Operations record saved.");
+    }
   }
 
   return (
     <div className="operations-layout">
       <form className="form-panel" onSubmit={createRecord}>
         <h2>Add operations record</h2>
-        {message ? <div className="success-box portal-alert">{message}</div> : null}
+        {message ? <div className={`success-box portal-alert ${messageTone === "error" ? "portal-alert-error" : ""}`}>{message}</div> : null}
         <div className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 16 }}>
           <div className="field">
             <label htmlFor="title">Title</label>
@@ -211,7 +322,7 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
       </form>
 
       <section>
-        <div className="filters">
+        <div className="filters operations-filters">
           <select value={filters.category} onChange={(event) => setFilters((current) => ({ ...current, category: event.target.value }))}>
             <option value="">All categories</option>
             {operationsRecordCategories.map((category) => (
@@ -222,6 +333,27 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
             <option value="">All statuses</option>
             {operationsRecordStatuses.map((status) => (
               <option key={status}>{status}</option>
+            ))}
+          </select>
+          <select value={filters.priority} onChange={(event) => setFilters((current) => ({ ...current, priority: event.target.value }))}>
+            <option value="">All priorities</option>
+            {operationsRecordPriorities.map((priority) => (
+              <option key={priority}>{priority}</option>
+            ))}
+          </select>
+          <select value={filters.owner} onChange={(event) => setFilters((current) => ({ ...current, owner: event.target.value }))}>
+            <option value="">All owners</option>
+            <option value="unassigned">No owner</option>
+            {ownerOptions.map((owner) => (
+              <option key={owner}>{owner}</option>
+            ))}
+          </select>
+          <select value={filters.dueStatus} onChange={(event) => setFilters((current) => ({ ...current, dueStatus: event.target.value }))}>
+            <option value="">All due states</option>
+            {["overdue", "due_soon", "scheduled", "no_due", "closed"].map((status) => (
+              <option key={status} value={status}>
+                {dueStatusLabel(status)}
+              </option>
             ))}
           </select>
           <input
@@ -235,23 +367,34 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
           {filteredRecords.length === 0 ? (
             <div className="empty-state">No operations records match the current filters.</div>
           ) : (
-            filteredRecords.map((record) => (
-              <article className="doc-card" key={record.id}>
-                <div className="portal-topline" style={{ marginBottom: 12 }}>
-                  <div>
-                    <h3>{record.title}</h3>
-                    <p>
-                      {record.category} - {record.record_type}
-                    </p>
+            filteredRecords.map((record) => {
+              const draftRecord = viewRecord(record);
+              const dirty = Boolean(drafts[record.id]);
+
+              return (
+                <article className="doc-card operations-record-card" key={record.id}>
+                  <div className="portal-topline" style={{ marginBottom: 12 }}>
+                    <div>
+                      <h3>{draftRecord.title}</h3>
+                      <p>
+                        {draftRecord.category} - {draftRecord.record_type}
+                      </p>
+                      <div className="record-badge-row">
+                        {recordBadges(record).map((badge) => (
+                          <span className={`record-badge record-badge-${badge.tone}`} key={`${record.id}-${badge.label}`}>
+                            {badge.label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <span className="badge">
+                      <Save size={14} /> {savingId === record.id ? "Saving" : dirty ? "Draft" : "Saved"}
+                    </span>
                   </div>
-                  <span className="badge">
-                    <Save size={14} /> {savingId === record.id ? "Saving" : record.status}
-                  </span>
-                </div>
                 <div className="form-grid">
                   <div className="field">
                     <label>Status</label>
-                    <select value={record.status} onChange={(event) => updateRecord(record, { status: event.target.value })}>
+                    <select value={draftRecord.status} onChange={(event) => updateDraft(record.id, { status: event.target.value })}>
                       {operationsRecordStatuses.map((status) => (
                         <option key={status}>{status}</option>
                       ))}
@@ -259,7 +402,7 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
                   </div>
                   <div className="field">
                     <label>Priority</label>
-                    <select value={record.priority} onChange={(event) => updateRecord(record, { priority: event.target.value })}>
+                    <select value={draftRecord.priority} onChange={(event) => updateDraft(record.id, { priority: event.target.value })}>
                       {operationsRecordPriorities.map((priority) => (
                         <option key={priority}>{priority}</option>
                       ))}
@@ -267,15 +410,15 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
                   </div>
                   <div className="field">
                     <label>Owner</label>
-                    <input value={record.owner ?? ""} onChange={(event) => updateRecord(record, { owner: event.target.value || null })} />
+                    <input value={draftRecord.owner ?? ""} onChange={(event) => updateDraft(record.id, { owner: event.target.value || null })} />
                   </div>
                   <div className="field">
                     <label>Due date</label>
-                    <input type="date" value={record.due_date ?? ""} onChange={(event) => updateRecord(record, { due_date: event.target.value || null })} />
+                    <input type="date" value={draftRecord.due_date ?? ""} onChange={(event) => updateDraft(record.id, { due_date: event.target.value || null })} />
                   </div>
                   <div className="field">
                     <label>Related client</label>
-                    <select value={record.related_client_id ?? ""} onChange={(event) => updateRecord(record, { related_client_id: event.target.value || null })}>
+                    <select value={draftRecord.related_client_id ?? ""} onChange={(event) => updateDraft(record.id, { related_client_id: event.target.value || null })}>
                       <option value="">None</option>
                       {clients.map((client) => (
                         <option key={client.id} value={client.id}>
@@ -283,11 +426,11 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
                         </option>
                       ))}
                     </select>
-                    {record.related_client_id ? <p>{clientsById.get(record.related_client_id) ?? "Linked client"}</p> : null}
+                    {draftRecord.related_client_id ? <p>{clientsById.get(draftRecord.related_client_id) ?? "Linked client"}</p> : null}
                   </div>
                   <div className="field">
                     <label>Related document</label>
-                    <select value={record.related_document_id ?? ""} onChange={(event) => updateRecord(record, { related_document_id: event.target.value || null })}>
+                    <select value={draftRecord.related_document_id ?? ""} onChange={(event) => updateDraft(record.id, { related_document_id: event.target.value || null })}>
                       <option value="">None</option>
                       {documents.map((document) => (
                         <option key={document.id} value={document.id}>
@@ -295,19 +438,36 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
                         </option>
                       ))}
                     </select>
-                    {record.related_document_id ? <p>{documentsById.get(record.related_document_id) ?? "Linked document"}</p> : null}
+                    {draftRecord.related_document_id ? <p>{documentsById.get(draftRecord.related_document_id) ?? "Linked document"}</p> : null}
                   </div>
                   <div className="field-full">
                     <label>Description</label>
-                    <textarea value={record.description ?? ""} onChange={(event) => updateRecord(record, { description: event.target.value || null })} />
+                    <textarea value={draftRecord.description ?? ""} onChange={(event) => updateDraft(record.id, { description: event.target.value || null })} />
                   </div>
                   <div className="field-full">
                     <label>Notes</label>
-                    <textarea value={record.notes ?? ""} onChange={(event) => updateRecord(record, { notes: event.target.value || null })} />
+                    <textarea value={draftRecord.notes ?? ""} onChange={(event) => updateDraft(record.id, { notes: event.target.value || null })} />
                   </div>
                 </div>
+                <div className="operations-record-actions">
+                  <button className="button button-primary" disabled={!dirty || savingId === record.id} onClick={() => saveRecord(record)} type="button">
+                    <Save size={17} />
+                    {savingId === record.id ? "Saving..." : "Save"}
+                  </button>
+                  <button className="button button-secondary button-neutral" disabled={!dirty || savingId === record.id} onClick={() => cancelDraft(record.id)} type="button">
+                    <XCircle size={17} />
+                    Cancel
+                  </button>
+                  {messageTone === "error" && dirty ? (
+                    <span className="operation-save-warning">
+                      <AlertTriangle size={15} />
+                      Draft kept until saved.
+                    </span>
+                  ) : null}
+                </div>
               </article>
-            ))
+              );
+            })
           )}
         </div>
       </section>

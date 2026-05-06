@@ -7,10 +7,16 @@ describe("notificationFromPriorityItem", () => {
       title: "Acme Industrial",
       label: "New demo request",
       href: "/employee/inbox",
+      actionHref: "/employee/inbox",
       priority: "high",
       detail: "Taylor - taylor@example.com",
+      owner: null,
+      dueDate: "2026-05-06",
+      status: "new",
+      sourceLabel: "Commercial",
       sourceType: "demo_request",
       sourceId: "request-123",
+      reviewRequired: true,
     });
 
     expect(notification).toMatchObject({
@@ -30,10 +36,16 @@ describe("notificationFromPriorityItem", () => {
       title: "Document review",
       label: "High Priority Operations",
       href: "/employee/operations",
+      actionHref: "/employee/operations",
       priority: "critical",
       detail: "Critical - unassigned",
+      owner: null,
+      dueDate: null,
+      status: "Open",
+      sourceLabel: "Operations",
       sourceType: "company_operations_record",
       sourceId: "ops-456",
+      reviewRequired: false,
     });
 
     expect(notification.dedupe_key).toBe("company_operations_record:ops-456:high-priority-operations");

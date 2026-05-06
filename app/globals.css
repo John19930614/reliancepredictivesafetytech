@@ -863,6 +863,10 @@ textarea {
   background: #b42318;
 }
 
+.status-dot-neutral {
+  background: #98a2b3;
+}
+
 .queue-label {
   border-radius: 999px;
   padding: 5px 8px;
@@ -871,6 +875,28 @@ textarea {
   font-size: 0.74rem;
   font-weight: 850;
   white-space: nowrap;
+}
+
+.work-queue-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.work-queue-column {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.work-queue-column h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.work-queue-row small {
+  line-height: 1.4;
 }
 
 .pipeline-summary-row,
@@ -1414,6 +1440,64 @@ textarea {
   grid-template-columns: minmax(280px, 380px) 1fr;
   gap: 18px;
   align-items: start;
+}
+
+.operations-filters {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.operations-record-card {
+  display: grid;
+  gap: 14px;
+}
+
+.record-badge-row,
+.operations-record-actions,
+.operation-save-warning {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.record-badge {
+  border: 1px solid #d9e0ea;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #f3f6f9;
+  color: #334155;
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: capitalize;
+}
+
+.record-badge-danger {
+  border-color: #e09a9a;
+  background: #fff0f0;
+  color: #9b1c1c;
+}
+
+.record-badge-gold {
+  border-color: #e2b84c;
+  background: #fff7da;
+  color: #6b4c00;
+}
+
+.record-badge-neutral {
+  background: #eef2f6;
+  color: #475467;
+}
+
+.button-neutral {
+  border-color: #d9e0ea;
+  background: #fff;
+  color: #334155;
+}
+
+.operation-save-warning {
+  color: #8a1f1f;
+  font-size: 0.82rem;
+  font-weight: 850;
 }
 
 .lifecycle-layout,
@@ -3037,7 +3121,8 @@ textarea {
 
   .command-layout,
   .command-layout-secondary,
-  .demo-showcase-layout {
+  .demo-showcase-layout,
+  .work-queue-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -3079,6 +3164,7 @@ textarea {
   .company-tree-metrics,
   .pipeline-grid,
   .filters,
+  .operations-filters,
   .kpi-strip,
   .module-group-grid,
   .readiness-grid {
@@ -3440,6 +3526,32 @@ textarea {
   display: flex;
   align-items: flex-start;
   gap: 8px;
+}
+
+.ai-filter-control,
+.ai-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-filter-control select {
+  min-height: 36px;
+  padding: 7px 10px;
+}
+
+.ai-meta-row {
+  margin-top: 8px;
+}
+
+.ai-meta-row span {
+  border-radius: 999px;
+  background: #eef3f8;
+  color: #344054;
+  font-size: 0.72rem;
+  font-weight: 850;
+  padding: 4px 8px;
 }
 
 .ai-proposal-actions {

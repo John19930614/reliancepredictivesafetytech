@@ -20,9 +20,9 @@ export function notificationFromPriorityItem(item: CommandPriorityItem): Generat
     priority: item.priority,
     source_type: item.sourceType,
     source_id: item.sourceId,
-    action_href: item.href,
+    action_href: item.actionHref ?? item.href,
     ai_summary: item.detail,
     dedupe_key: `${item.sourceType}:${item.sourceId}:${item.label.toLowerCase().replace(/\s+/g, "-")}`,
-    metadata: { generated_from: "command_snapshot" },
+    metadata: { generated_from: "command_snapshot", source_label: item.sourceLabel, status: item.status },
   };
 }

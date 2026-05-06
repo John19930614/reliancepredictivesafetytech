@@ -30,6 +30,7 @@ import {
   type CompanyOperationsRecord,
   type DemoRequest,
 } from "@/lib/company-data";
+import { getCommandSnapshot, type CommandPriorityItem } from "@/lib/ai/command-context";
 import { createClient } from "@/lib/supabase/server";
 import { canAccessEmployeePath } from "@/lib/user-management";
 
@@ -107,6 +108,35 @@ function buildPipelineCounts(clients: Pick<CompanyClient, "lifecycle_stage">[]) 
   });
 
   return lifecycleStages.map((stage) => ({ stage, count: counts.get(stage) ?? 0 }));
+}
+
+function workItemTone(item: CommandPriorityItem) {
+  if (item.priority === "critical" || item.priority === "high") return "danger";
+  if (item.reviewRequired) return "gold";
+  return "neutral";
+}
+
+function WorkQueueList({ empty, items }: { empty: string; items: CommandPriorityItem[] }) {
+  if (items.length === 0) {
+    return <div className="empty-state">{empty}</div>;
+  }
+
+  return (
+    <div className="attention-list">
+      {items.map((item) => (
+        <Link className="attention-row work-queue-row" href={item.actionHref} key={`${item.sourceType}-${item.sourceId}-${item.label}`}>
+          <span className={`status-dot status-dot-${workItemTone(item)}`} />
+          <span>
+            <strong>{item.title}</strong>
+            <small>
+              {item.sourceLabel} - {item.status} - {item.detail}
+            </small>
+          </span>
+          <span className="queue-label">{item.label}</span>
+        </Link>
+      ))}
+    </div>
+  );
 }
 
 export default async function EmployeeDashboardPage() {
@@ -207,29 +237,13 @@ export default async function EmployeeDashboardPage() {
   const requiredDocumentTotal = requiredDocuments.reduce((total, group) => total + group.items.length, 0);
   const approvedReadiness = percent(approvedDocumentCount ?? 0, documentCount ?? 0);
   const activeRiskCount = (openLegalIssueCount ?? 0) + (operationRows.length ?? 0) + (blockedChecklistCount ?? 0);
-  const attentionItems = [
-    ...requestRows.map((request) => ({
-      href: "/employee/inbox",
-      title: request.company || request.name,
-      label: "New request",
-      meta: `${request.name} - ${formatDate(request.created_at)}`,
-      tone: "gold",
-    })),
-    ...legalRows.map((issue) => ({
-      href: "/employee/legal-issues",
-      title: issue.title,
-      label: `${issue.severity} legal`,
-      meta: `${issue.status} - due ${formatDate(issue.due_date)}`,
-      tone: issue.severity === "Critical" || issue.severity === "High" ? "danger" : "gold",
-    })),
-    ...operationRows.map((record) => ({
-      href: "/employee/operations",
-      title: record.title,
-      label: `${record.priority} ops`,
-      meta: `${record.status} - ${record.owner || "Unassigned"}`,
-      tone: record.priority === "Critical" ? "danger" : "gold",
-    })),
-  ].filter((item) => canOpenPath(item.href)).slice(0, 8);
+  const commandSnapshot = supabase && user ? await getCommandSnapshot(supabase, user.id) : null;
+  const workItems = (commandSnapshot?.priorityItems ?? []).filter((item) => canOpenPath(item.actionHref));
+  const myWorkItems = workItems.filter((item) => !item.reviewRequired).slice(0, 6);
+  const reviewItems = workItems.filter((item) => item.reviewRequired).slice(0, 6);
+  const riskItems = workItems
+    .filter((item) => item.priority === "critical" || item.priority === "high" || item.dueDate)
+    .slice(0, 6);
 
   const kpis = [
     {
@@ -312,25 +326,13 @@ export default async function EmployeeDashboardPage() {
               <span className="eyebrow">Needs Attention</span>
               <h2>Priority work queue</h2>
             </div>
-            <span className="badge">{attentionItems.length} visible</span>
+            <span className="badge">{workItems.length} visible</span>
           </div>
 
-          <div className="attention-list">
-            {attentionItems.length === 0 ? (
-              <div className="empty-state">No urgent requests, legal issues, or high-priority operations records are waiting.</div>
-            ) : (
-              attentionItems.map((item) => (
-                <Link className="attention-row" href={item.href} key={`${item.label}-${item.title}`}>
-                  <span className={`status-dot status-dot-${item.tone}`} />
-                  <span>
-                    <strong>{item.title}</strong>
-                    <small>{item.meta}</small>
-                  </span>
-                  <span className="queue-label">{item.label}</span>
-                </Link>
-              ))
-            )}
-          </div>
+          <WorkQueueList
+            empty="No urgent requests, legal issues, HR reviews, time cards, or high-priority operations records are waiting."
+            items={workItems.slice(0, 8)}
+          />
         </section>
 
         <section className="command-panel">
@@ -355,6 +357,32 @@ export default async function EmployeeDashboardPage() {
           </div>
         </section>
       </div>
+
+      <section className="command-panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">Internal Work</span>
+            <h2>My work, review queue, and risk due soon</h2>
+          </div>
+          <Link className="panel-link" href="/employee/ai">
+            Open AI command <ArrowRight size={16} />
+          </Link>
+        </div>
+        <div className="work-queue-grid">
+          <section className="work-queue-column">
+            <h3>My Work</h3>
+            <WorkQueueList empty="No assigned operating work is waiting." items={myWorkItems} />
+          </section>
+          <section className="work-queue-column">
+            <h3>Review Queue</h3>
+            <WorkQueueList empty="No HR, time-card, legal, proposal, or commercial reviews are waiting." items={reviewItems} />
+          </section>
+          <section className="work-queue-column">
+            <h3>Risk / Due Soon</h3>
+            <WorkQueueList empty="No high-risk or due-soon work is visible." items={riskItems} />
+          </section>
+        </div>
+      </section>
 
       <div className="command-layout command-layout-secondary">
         <section className="command-panel">

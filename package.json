@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:clean": "powershell -NoProfile -Command \"if (Test-Path '.next/dev') { Remove-Item -LiteralPath '.next/dev' -Recurse -Force }\"",
     "build": "next build",
     "lint": "npm run typecheck",
     "start": "next start",

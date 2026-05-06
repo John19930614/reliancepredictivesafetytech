@@ -89,6 +89,7 @@ export function TimeCardManager({
   const [employeeFilter, setEmployeeFilter] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   const roleById = useMemo(() => new Map(roles.map((role) => [role.id, role])), [roles]);
   const categoryById = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories]);
@@ -156,6 +157,7 @@ export function TimeCardManager({
   const currentCard = ownCards.find((card) => card.week_start === weekStart) ?? null;
   const weeklyEntries = currentCard ? entriesByCardId[currentCard.id] ?? [] : [];
   const canEditCurrentCard = currentCard ? ["draft", "rejected"].includes(currentCard.status) : false;
+  const timeEntrySetupReady = allowedCategories.length > 0 && allowedTasks.length > 0;
 
   const filteredCards = useMemo(() => {
     return cards.filter((card) => {
@@ -177,10 +179,17 @@ export function TimeCardManager({
       return;
     }
 
+    if (!timeEntrySetupReady) {
+      setMessage("Your assigned time-card role needs at least one category and task before hours can be entered.");
+      return;
+    }
+
+    setPendingAction("create-week");
     const { data, error } = await createWeeklyTimeCard({
       weekStart,
       weekEnd,
     });
+    setPendingAction(null);
 
     if (error) {
       setMessage(error);
@@ -199,12 +208,17 @@ export function TimeCardManager({
     if (!currentCard || !canEditCurrentCard) {
       return;
     }
+    if (!timeEntrySetupReady || !selectedCategoryId || !selectedTaskId) {
+      setMessage("Choose an available time-card category and task before adding an entry.");
+      return;
+    }
 
     const formData = new FormData(event.currentTarget);
     const workDate = String(formData.get("work_date") ?? "");
     const hours = Number(formData.get("hours") ?? 0);
     const notes = String(formData.get("notes") ?? "").trim();
 
+    setPendingAction("add-entry");
     const { data, error } = await addEmployeeTimeEntry({
       timeCardId: currentCard.id,
       workDate,
@@ -213,6 +227,7 @@ export function TimeCardManager({
       hours,
       notes,
     });
+    setPendingAction(null);
 
     if (error) {
       setMessage(error);
@@ -228,7 +243,9 @@ export function TimeCardManager({
 
   async function deleteEntry(entry: EmployeeTimeEntry) {
     setMessage("");
+    setPendingAction(`delete-${entry.id}`);
     const { error } = await deleteEmployeeTimeEntry({ entryId: entry.id });
+    setPendingAction(null);
     if (error) {
       setMessage(error);
       return;
@@ -244,7 +261,9 @@ export function TimeCardManager({
       return;
     }
 
+    setPendingAction(`submit-${card.id}`);
     const { data, error } = await submitEmployeeTimeCard({ timeCardId: card.id });
+    setPendingAction(null);
 
     if (error) {
       setMessage(error);
@@ -261,11 +280,13 @@ export function TimeCardManager({
     setMessage("");
     const formData = new FormData(form);
     const reviewNotes = String(formData.get("review_notes") ?? "").trim();
+    setPendingAction(`${status}-${card.id}`);
     const { data, error } = await reviewEmployeeTimeCard({
       timeCardId: card.id,
       status,
       reviewNotes,
     });
+    setPendingAction(null);
 
     if (error) {
       setMessage(error);
@@ -280,10 +301,12 @@ export function TimeCardManager({
 
   async function assignCard(card: EmployeeTimeCard, employeeUserId: string) {
     setMessage("");
+    setPendingAction(`assign-${card.id}`);
     const { data, error } = await assignEmployeeTimeCard({
       timeCardId: card.id,
       employeeUserId,
     });
+    setPendingAction(null);
 
     if (error) {
       setMessage(error);
@@ -303,11 +326,13 @@ export function TimeCardManager({
       return;
     }
 
+    setPendingAction(`payroll-${row.time_card_id}`);
     const { data, error } = await updateTimeCardPayrollRate({
       timeCardId: row.time_card_id,
       hourlyRate: rate,
       totalHours: Number(row.total_hours),
     });
+    setPendingAction(null);
 
     if (error) {
       setMessage(error);
@@ -327,6 +352,10 @@ export function TimeCardManager({
 
     const item = profileByUserId.get(userId);
     return item?.display_name || item?.email || userId.slice(0, 8);
+  }
+
+  function shiftWeek(days: number) {
+    setWeekStart((current) => addDays(current, days));
   }
 
   function renderOwnTimeCardPanel() {
@@ -355,11 +384,19 @@ export function TimeCardManager({
           </section>
           <section className="portal-card">
             <h3>Current week status</h3>
-            <div className="metric" style={{ fontSize: "1.4rem" }}>
+            <div className={`metric time-card-status time-card-status-${currentWeekCard?.status ?? "missing"}`} style={{ fontSize: "1.4rem" }}>
               {currentWeekCard?.status ?? "Not created"}
             </div>
           </section>
         </div>
+
+        {!timeEntrySetupReady ? (
+          <section className="portal-card position-warning">
+            <UserCheck color="#c9932b" size={28} />
+            <h3>Time-card setup incomplete</h3>
+            <p>Your assigned role does not have both categories and tasks available yet. Ask an admin to finish the role setup.</p>
+          </section>
+        ) : null}
 
         <section className="table-card time-card-panel">
           <div className="time-card-toolbar">
@@ -370,10 +407,19 @@ export function TimeCardManager({
               </p>
             </div>
             <div className="time-card-create">
+              <button className="button button-secondary button-neutral" onClick={() => shiftWeek(-7)} type="button">
+                Previous
+              </button>
               <input value={weekStart} onChange={(event) => setWeekStart(event.target.value)} type="date" />
-              <button className="button button-primary" onClick={createWeeklyCard} type="button">
+              <button className="button button-secondary button-neutral" onClick={() => setWeekStart(currentWeekStart)} type="button">
+                Current
+              </button>
+              <button className="button button-secondary button-neutral" onClick={() => shiftWeek(7)} type="button">
+                Next
+              </button>
+              <button className="button button-primary" disabled={pendingAction === "create-week" || !timeEntrySetupReady} onClick={createWeeklyCard} type="button">
                 <Plus size={17} />
-                Create Week
+                {pendingAction === "create-week" ? "Creating..." : "Create Week"}
               </button>
             </div>
           </div>
@@ -381,9 +427,9 @@ export function TimeCardManager({
           {!currentCard ? (
             <div className="empty-state time-card-create-empty">
               <span>Create this week&apos;s time card to start logging hours.</span>
-              <button className="button button-primary" onClick={createWeeklyCard} type="button">
+              <button className="button button-primary" disabled={pendingAction === "create-week" || !timeEntrySetupReady} onClick={createWeeklyCard} type="button">
                 <Plus size={17} />
-                Create Week
+                {pendingAction === "create-week" ? "Creating..." : "Create Week"}
               </button>
             </div>
           ) : (
@@ -399,7 +445,13 @@ export function TimeCardManager({
                       <span>{taskById.get(entry.task_id)?.title ?? "Task"}</span>
                       <strong>{Number(entry.hours).toFixed(2)}</strong>
                       {canEditCurrentCard ? (
-                        <button className="icon-button" onClick={() => deleteEntry(entry)} type="button" aria-label="Delete time entry">
+                        <button
+                          className="icon-button"
+                          disabled={pendingAction === `delete-${entry.id}`}
+                          onClick={() => deleteEntry(entry)}
+                          type="button"
+                          aria-label="Delete time entry"
+                        >
                           <Trash2 size={16} />
                         </button>
                       ) : null}
@@ -448,9 +500,9 @@ export function TimeCardManager({
                       <label htmlFor="notes">Notes</label>
                       <input id="notes" name="notes" />
                     </div>
-                    <button className="button button-primary" disabled={!selectedTaskId} type="submit">
+                    <button className="button button-primary" disabled={pendingAction === "add-entry" || !selectedTaskId || !timeEntrySetupReady} type="submit">
                       <Plus size={17} />
-                      Add Entry
+                      {pendingAction === "add-entry" ? "Adding..." : "Add Entry"}
                     </button>
                   </div>
                 </form>
@@ -460,9 +512,14 @@ export function TimeCardManager({
 
               <div className="time-card-submit">
                 <strong>Total: {sumHours(weeklyEntries).toFixed(2)} hours</strong>
-                <button className="button button-primary" disabled={!canEditCurrentCard || weeklyEntries.length === 0} onClick={() => submitCard(currentCard)} type="button">
+                <button
+                  className="button button-primary"
+                  disabled={!canEditCurrentCard || weeklyEntries.length === 0 || pendingAction === `submit-${currentCard.id}`}
+                  onClick={() => submitCard(currentCard)}
+                  type="button"
+                >
                   <Send size={17} />
-                  Submit Time Card
+                  {pendingAction === `submit-${currentCard.id}` ? "Submitting..." : "Submit Time Card"}
                 </button>
               </div>
             </>
@@ -568,7 +625,11 @@ export function TimeCardManager({
                       <div className="form-grid">
                         <div className="field">
                           <label>Assign employee</label>
-                          <select value={card.employee_user_id ?? ""} onChange={(event) => assignCard(card, event.target.value)}>
+                          <select
+                            value={card.employee_user_id ?? ""}
+                            disabled={pendingAction === `assign-${card.id}`}
+                            onChange={(event) => assignCard(card, event.target.value)}
+                          >
                             <option value="">Unassigned import</option>
                             {profiles.map((item) => (
                               <option key={item.user_id} value={item.user_id}>
@@ -584,6 +645,7 @@ export function TimeCardManager({
                               min="0"
                               step="0.01"
                               type="number"
+                              disabled={pendingAction === `payroll-${card.id}`}
                               defaultValue={cardPayroll.hourly_rate}
                               onBlur={(event) => updatePayrollRate(cardPayroll, Number(event.target.value || 0))}
                             />
@@ -618,13 +680,23 @@ export function TimeCardManager({
                           <label htmlFor={`review-${card.id}`}>Review notes</label>
                           <textarea id={`review-${card.id}`} name="review_notes" defaultValue={card.review_notes ?? ""} />
                         </div>
-                        <button className="button button-primary" type="button" onClick={(event) => reviewCard(card, "approved", event.currentTarget.form!)}>
-                          <CheckCircle2 size={17} />
-                          Approve
+                          <button
+                            className="button button-primary"
+                            disabled={pendingAction === `approved-${card.id}`}
+                            type="button"
+                            onClick={(event) => reviewCard(card, "approved", event.currentTarget.form!)}
+                          >
+                            <CheckCircle2 size={17} />
+                            {pendingAction === `approved-${card.id}` ? "Approving..." : "Approve"}
                         </button>
-                        <button className="button button-danger" type="button" onClick={(event) => reviewCard(card, "rejected", event.currentTarget.form!)}>
-                          <XCircle size={17} />
-                          Reject
+                          <button
+                            className="button button-danger"
+                            disabled={pendingAction === `rejected-${card.id}`}
+                            type="button"
+                            onClick={(event) => reviewCard(card, "rejected", event.currentTarget.form!)}
+                          >
+                            <XCircle size={17} />
+                            {pendingAction === `rejected-${card.id}` ? "Rejecting..." : "Reject"}
                         </button>
                       </form>
                     ) : (
