@@ -3769,6 +3769,16 @@ textarea {
   text-align: left;
 }
 
+.ai-suggestion:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.ai-status-box {
+  padding: 12px 14px;
+  font-size: 0.92rem;
+}
+
 .ai-chat-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

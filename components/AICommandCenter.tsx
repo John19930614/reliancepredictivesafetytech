@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import {
@@ -46,11 +46,39 @@ function priorityClass(priority: string) {
   return `ai-priority ai-priority-${priority}`;
 }
 
+async function aiCommandFetch(input: RequestInfo | URL, init?: RequestInit) {
+  const response = await fetch(input, init);
+
+  if (!response.ok) {
+    let message = `AI command request failed with status ${response.status}.`;
+
+    try {
+      const payload = (await response.clone().json()) as { error?: string };
+      message = payload.error || message;
+    } catch {
+      const text = await response.text();
+      message = text || message;
+    }
+
+    throw new Error(message);
+  }
+
+  return response;
+}
+
 export function AICommandCenter({ snapshot, notifications, proposals, canManageProposals }: AICommandCenterProps) {
   const [input, setInput] = useState("");
   const [sourceFilter, setSourceFilter] = useState("all");
-  const { messages, sendMessage, status, error } = useChat({
-    transport: new DefaultChatTransport({ api: "/api/ai-command" }),
+  const [scanNotice, setScanNotice] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [isScanning, startScanTransition] = useTransition();
+  const transport = useMemo(
+    () => new DefaultChatTransport({ api: "/api/ai-command", fetch: aiCommandFetch }),
+    [],
+  );
+  const { messages, sendMessage, status, error, clearError } = useChat({
+    transport,
+    onError: (nextError) => setLocalError(nextError.message),
   });
 
   const working = status === "submitted" || status === "streaming";
@@ -72,16 +100,43 @@ export function AICommandCenter({ snapshot, notifications, proposals, canManageP
       : "Summarize today's workflow status and recommend the next three actions.";
   }, [snapshot.priorityItems]);
 
-  function submitMessage(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const text = input.trim();
-
+  async function sendAssistantMessage(text: string) {
     if (!text || working) {
       return;
     }
 
-    void sendMessage({ text });
+    setLocalError(null);
+    clearError();
     setInput("");
+
+    try {
+      await sendMessage({ text });
+    } catch (nextError) {
+      setLocalError(nextError instanceof Error ? nextError.message : "The AI assistant request failed.");
+    }
+  }
+
+  function submitMessage(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void sendAssistantMessage(input.trim());
+  }
+
+  function scanWorkflows(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setScanNotice(null);
+
+    startScanTransition(async () => {
+      try {
+        const result = await generateMyWorkflowNotifications();
+        setScanNotice(
+          result.createdCount > 0
+            ? `Created ${result.createdCount} workflow notification${result.createdCount === 1 ? "" : "s"}.`
+            : "Scan complete. No new workflow notifications were found.",
+        );
+      } catch (nextError) {
+        setScanNotice(nextError instanceof Error ? nextError.message : "Workflow scan failed.");
+      }
+    });
   }
 
   return (
@@ -92,13 +147,14 @@ export function AICommandCenter({ snapshot, notifications, proposals, canManageP
           <h1>Workflow assistant and notifications</h1>
           <MessageResponse>{snapshot.summary}</MessageResponse>
         </div>
-        <form action={generateMyWorkflowNotifications}>
-          <button className="button button-primary" type="submit">
+        <form onSubmit={scanWorkflows}>
+          <button className="button button-primary" disabled={isScanning} type="submit">
             <RefreshCw size={18} />
-            Scan Workflows
+            {isScanning ? "Scanning" : "Scan Workflows"}
           </button>
         </form>
       </section>
+      {scanNotice ? <div className="success-box ai-status-box">{scanNotice}</div> : null}
 
       <section className="ai-metric-grid" aria-label="AI workflow metrics">
         {[
@@ -173,13 +229,21 @@ export function AICommandCenter({ snapshot, notifications, proposals, canManageP
           </div>
           <div className="ai-chat-window">
             {messages.length === 0 ? (
-              <button className="ai-suggestion" onClick={() => setInput(suggestedPrompt)} type="button">
+              <button
+                className="ai-suggestion"
+                disabled={working}
+                onClick={() => void sendAssistantMessage(suggestedPrompt)}
+                type="button"
+              >
                 {suggestedPrompt}
               </button>
             ) : (
               messages.map((message) => <Message key={message.id} message={message} />)
             )}
-            {error ? <div className="portal-alert-error success-box">{error.message}</div> : null}
+            {working ? <div className="success-box ai-status-box">Thinking...</div> : null}
+            {localError || error ? (
+              <div className="portal-alert-error success-box ai-status-box">{localError ?? error?.message}</div>
+            ) : null}
           </div>
           <form className="ai-chat-form" onSubmit={submitMessage}>
             <input

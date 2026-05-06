@@ -65,9 +65,11 @@ function cleanPatch(targetTable: string, proposedPatch: unknown) {
 
 export async function generateMyWorkflowNotifications() {
   const { supabase, user } = await getCurrentUser();
-  await generateWorkflowNotificationsForUser(supabase, user.id);
+  const notifications = await generateWorkflowNotificationsForUser(supabase, user.id);
   revalidatePath("/employee/ai");
   revalidatePath("/employee");
+
+  return { createdCount: notifications.length };
 }
 
 export async function markNotificationRead(notificationId: string) {
