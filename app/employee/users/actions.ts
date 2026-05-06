@@ -21,6 +21,16 @@ function cleanText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
 }
 
+function forceProductionRedirect(actionLink: string) {
+  try {
+    const url = new URL(actionLink);
+    url.searchParams.set("redirect_to", employeePortalUrl);
+    return url.toString();
+  } catch {
+    return actionLink;
+  }
+}
+
 function isPortalUserRole(value: string): value is PortalUserRole {
   return portalUserRoles.includes(value as PortalUserRole);
 }
@@ -220,7 +230,7 @@ export async function inviteEmployee(formData: FormData) {
 
   revalidatePath("/employee/users");
   revalidatePath("/employee/time-cards");
-  redirect(usersPath({ message: "Employee invite link generated with HR onboarding assigned.", invite_link: data.properties.action_link }));
+  redirect(usersPath({ message: "Employee invite link generated with HR onboarding assigned.", invite_link: forceProductionRedirect(data.properties.action_link) }));
 }
 
 export async function createPortalUser(formData: FormData) {
@@ -282,7 +292,7 @@ export async function generateEmployeeAccessLink(formData: FormData) {
   }
 
   revalidatePath("/employee/users");
-  redirect(usersPath({ message: `Access link generated for ${email}.`, invite_link: data.properties.action_link }));
+  redirect(usersPath({ message: `Access link generated for ${email}.`, invite_link: forceProductionRedirect(data.properties.action_link) }));
 }
 
 export async function updatePortalUserRole(formData: FormData) {
