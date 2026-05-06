@@ -10,8 +10,8 @@ import { isPortalAdminRole, portalUserRoles, type PortalUserRole } from "@/lib/u
 
 type SupabaseAdminClient = NonNullable<ReturnType<typeof createAdminClient>>;
 
-const employeePortalUrl = "https://reliancepredictivesafetytechnologies.com/employee";
-const siteUrl = "https://reliancepredictivesafetytechnologies.com";
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://safety360docs.com";
+const employeePortalUrl = `${siteUrl}/employee`;
 
 function usersPath(params: Record<string, string>) {
   const searchParams = new URLSearchParams(params);
