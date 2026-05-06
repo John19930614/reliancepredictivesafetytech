@@ -11,6 +11,7 @@ import { isPortalAdminRole, portalUserRoles, type PortalUserRole } from "@/lib/u
 type SupabaseAdminClient = NonNullable<ReturnType<typeof createAdminClient>>;
 
 const employeePortalUrl = "https://reliancepredictivesafetytechnologies.com/employee";
+const siteUrl = "https://reliancepredictivesafetytechnologies.com";
 
 function usersPath(params: Record<string, string>) {
   const searchParams = new URLSearchParams(params);
@@ -21,14 +22,12 @@ function cleanText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
 }
 
-function forceProductionRedirect(actionLink: string) {
-  try {
-    const url = new URL(actionLink);
-    url.searchParams.set("redirect_to", employeePortalUrl);
-    return url.toString();
-  } catch {
-    return actionLink;
-  }
+function buildCompanyAuthLink(tokenHash: string, type: "invite" | "recovery") {
+  const url = new URL("/auth/confirm", siteUrl);
+  url.searchParams.set("token_hash", tokenHash);
+  url.searchParams.set("type", type);
+  url.searchParams.set("next", "/employee");
+  return url.toString();
 }
 
 function isPortalUserRole(value: string): value is PortalUserRole {
@@ -213,7 +212,7 @@ export async function inviteEmployee(formData: FormData) {
     },
   });
 
-  if (error || !data.user || !data.properties?.action_link) {
+  if (error || !data.user || !data.properties?.hashed_token) {
     redirect(usersPath({ error: error?.message ?? "Could not generate employee invite link." }));
   }
 
@@ -230,7 +229,7 @@ export async function inviteEmployee(formData: FormData) {
 
   revalidatePath("/employee/users");
   revalidatePath("/employee/time-cards");
-  redirect(usersPath({ message: "Employee invite link generated with HR onboarding assigned.", invite_link: forceProductionRedirect(data.properties.action_link) }));
+  redirect(usersPath({ message: "Employee invite link generated with HR onboarding assigned.", invite_link: buildCompanyAuthLink(data.properties.hashed_token, "invite") }));
 }
 
 export async function createPortalUser(formData: FormData) {
@@ -287,12 +286,12 @@ export async function generateEmployeeAccessLink(formData: FormData) {
     },
   });
 
-  if (error || !data.properties?.action_link) {
+  if (error || !data.properties?.hashed_token) {
     redirect(usersPath({ error: error?.message ?? "Could not generate employee access link." }));
   }
 
   revalidatePath("/employee/users");
-  redirect(usersPath({ message: `Access link generated for ${email}.`, invite_link: forceProductionRedirect(data.properties.action_link) }));
+  redirect(usersPath({ message: `Access link generated for ${email}.`, invite_link: buildCompanyAuthLink(data.properties.hashed_token, "recovery") }));
 }
 
 export async function updatePortalUserRole(formData: FormData) {
