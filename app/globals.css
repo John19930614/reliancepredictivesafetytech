@@ -2645,6 +2645,7 @@ textarea {
 
 .time-card-create {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -2664,6 +2665,22 @@ textarea {
   border-radius: 8px;
   padding: 16px;
   background: #fafafa;
+}
+
+.time-card-status {
+  text-transform: capitalize;
+}
+
+.time-card-status-submitted {
+  color: #9b6a0a;
+}
+
+.time-card-status-approved {
+  color: #16833b;
+}
+
+.time-card-status-rejected {
+  color: #9b1c1c;
 }
 
 .payroll-kpis {

@@ -24,8 +24,12 @@ export default async function EmployeeLoginPage({ searchParams }: LoginPageProps
       <section className="auth-card">
         <Image className="auth-logo" alt={`${COMPANY_NAME} logo`} height={120} src="/reliance-logo-transparent.png" width={406} />
         <div className="eyebrow">Employee Portal</div>
-        <h1>{COMPANY_NAME}</h1>
-        <p>{TAGLINE}</p>
+        <h1>Employee sign in</h1>
+        <p>
+          {COMPANY_NAME}
+          <br />
+          {TAGLINE}
+        </p>
         {message ? <div className="success-box">{message}</div> : null}
         <form action={login} className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 18 }}>
           <input name="next" type="hidden" value={params.next ?? "/employee"} />

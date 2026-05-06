@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:clean": "powershell -NoProfile -Command \"if (Test-Path '.next/dev') { Remove-Item -LiteralPath '.next/dev' -Recurse -Force }\"",
+    "dev:clean": "powershell -NoProfile -Command \"$root = (Resolve-Path -LiteralPath '.').Path; $target = Resolve-Path -LiteralPath '.next/dev' -ErrorAction SilentlyContinue; if ($target -and $target.Path.StartsWith($root)) { Remove-Item -LiteralPath $target.Path -Recurse -Force }\"",
     "build": "next build",
     "lint": "npm run typecheck",
     "start": "next start",
