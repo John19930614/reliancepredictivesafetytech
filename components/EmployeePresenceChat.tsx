@@ -117,6 +117,36 @@ export function EmployeePresenceChat({
       });
   }, [latestNotificationTitle, router, unreadChatCount]);
 
+  const markLastSeen = useCallback(() => {
+    if (!supabase) {
+      return;
+    }
+
+    void supabase.rpc("mark_employee_last_seen").then(({ error }) => {
+      if (error) {
+        console.error("Could not update employee last seen timestamp.", error);
+      }
+    });
+  }, [supabase]);
+
+  useEffect(() => {
+    markLastSeen();
+
+    const intervalId = window.setInterval(markLastSeen, 5 * 60 * 1000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        markLastSeen();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [markLastSeen]);
+
   useEffect(() => {
     if (!supabase) {
       return;

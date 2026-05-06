@@ -702,6 +702,7 @@ export type Database = {
           role: string;
           team: string | null;
           account_status: string;
+          last_seen_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -712,6 +713,7 @@ export type Database = {
           role?: string;
           team?: string | null;
           account_status?: string;
+          last_seen_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1360,6 +1362,10 @@ export type Database = {
       is_company_portal_owner: {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
+      };
+      mark_employee_last_seen: {
+        Args: Record<PropertyKey, never>;
+        Returns: undefined;
       };
     };
     Enums: Record<string, never>;

@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { updateEmployeeOnboardingCompletion } from "@/lib/hr-onboarding";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { isPortalAdminRole } from "@/lib/user-management";
+import { isPortalAdminRole, isPortalSuperAdminRole } from "@/lib/user-management";
 
 function cleanText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
@@ -34,6 +34,34 @@ async function getAuthorizedAdmin(profileUserId: string) {
 
   if (!role || role.account_status !== "active" || !isPortalAdminRole(role.role)) {
     redirect(`/employee/users/${profileUserId}?error=Only portal admins can update employee onboarding.`);
+  }
+
+  return user;
+}
+
+async function getAuthorizedSuperAdmin(profileUserId: string) {
+  const supabase = await createClient();
+
+  if (!supabase) {
+    redirect(`/employee/users/${profileUserId}?error=Supabase is not configured yet.`);
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(`/employee-login?next=/employee/users/${profileUserId}`);
+  }
+
+  const { data: role } = await supabase
+    .from("user_roles")
+    .select("role, account_status")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!role || role.account_status !== "active" || !isPortalSuperAdminRole(role.role)) {
+    redirect(`/employee/users/${profileUserId}?error=Only super admins can edit employee profiles.`);
   }
 
   return user;
@@ -235,4 +263,89 @@ export async function reviewEmployeeOnboardingUpload(formData: FormData) {
   revalidatePath(`/employee/users/${profileUserId}`);
   revalidatePath("/employee/hr-onboarding");
   redirect(`/employee/users/${profileUserId}?message=${approved ? "Upload approved and requirement completed." : "Upload rejected. Employee can replace it."}`);
+}
+
+export async function updateEmployeeProfileDetails(formData: FormData) {
+  const profileUserId = cleanText(formData.get("profile_user_id"));
+  const legalName = cleanText(formData.get("legal_name"));
+  const displayName = cleanText(formData.get("display_name"));
+  const email = cleanText(formData.get("email")).toLowerCase();
+  const phone = cleanText(formData.get("phone")) || null;
+  const emergencyContactName = cleanText(formData.get("emergency_contact_name")) || null;
+  const emergencyContactPhone = cleanText(formData.get("emergency_contact_phone")) || null;
+  const emergencyContactRelationship = cleanText(formData.get("emergency_contact_relationship")) || null;
+  const profileStatus = cleanText(formData.get("profile_status")) === "archived" ? "archived" : "active";
+  const timeCardRoleId = cleanText(formData.get("time_card_role_id")) || null;
+
+  if (!profileUserId) {
+    redirect("/employee/users?error=Choose an employee profile to update.");
+  }
+
+  await getAuthorizedSuperAdmin(profileUserId);
+  const admin = getAdminClientOrRedirect(profileUserId);
+  const normalizedDisplayName = displayName || legalName || null;
+
+  if (!email) {
+    redirect(`/employee/users/${profileUserId}?error=Employee email is required.`);
+  }
+
+  const { data: targetUser, error: targetUserError } = await admin.auth.admin.getUserById(profileUserId);
+
+  if (targetUserError) {
+    redirect(`/employee/users/${profileUserId}?error=${encodeURIComponent(targetUserError.message)}`);
+  }
+
+  const { error: authError } = await admin.auth.admin.updateUserById(profileUserId, {
+    email,
+    user_metadata: {
+      ...(targetUser.user?.user_metadata ?? {}),
+      display_name: normalizedDisplayName,
+    },
+  });
+
+  if (authError) {
+    redirect(`/employee/users/${profileUserId}?error=${encodeURIComponent(authError.message)}`);
+  }
+
+  const { error: profileError } = await admin.from("employee_profiles").upsert({
+    user_id: profileUserId,
+    legal_name: legalName || null,
+    display_name: normalizedDisplayName,
+    email,
+    phone,
+    emergency_contact_name: emergencyContactName,
+    emergency_contact_phone: emergencyContactPhone,
+    emergency_contact_relationship: emergencyContactRelationship,
+    profile_status: profileStatus,
+    time_card_role_id: timeCardRoleId,
+  });
+
+  if (profileError) {
+    redirect(`/employee/users/${profileUserId}?error=${encodeURIComponent(profileError.message)}`);
+  }
+
+  const { data: role } = await admin
+    .from("user_roles")
+    .select("role, team, account_status")
+    .eq("user_id", profileUserId)
+    .maybeSingle();
+
+  const { error: chatProfileError } = await admin.from("employee_chat_profiles").upsert({
+    user_id: profileUserId,
+    display_name: normalizedDisplayName,
+    email,
+    role: role?.role ?? "employee",
+    team: role?.team ?? null,
+    account_status: profileStatus === "archived" ? "archived" : (role?.account_status ?? "active"),
+  });
+
+  if (chatProfileError) {
+    redirect(`/employee/users/${profileUserId}?error=${encodeURIComponent(chatProfileError.message)}`);
+  }
+
+  revalidatePath("/employee/users");
+  revalidatePath(`/employee/users/${profileUserId}`);
+  revalidatePath("/employee/company-tree");
+  revalidatePath("/employee/time-cards");
+  redirect(`/employee/users/${profileUserId}?message=Employee profile updated.`);
 }

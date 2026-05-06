@@ -1,6 +1,6 @@
-import { ArrowLeft, CheckCircle2, ExternalLink, FileSignature, UserRound } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ExternalLink, FileSignature, Save, UserRound } from "lucide-react";
 import Link from "next/link";
-import { attachExistingEmployeeDocument, reviewEmployeeOnboardingUpload } from "@/app/employee/users/[id]/actions";
+import { attachExistingEmployeeDocument, reviewEmployeeOnboardingUpload, updateEmployeeProfileDetails } from "@/app/employee/users/[id]/actions";
 import type {
   CompanyDocument,
   EmployeeDocumentAssignment,
@@ -13,18 +13,37 @@ import type {
   HrFormDefinition,
   HrDocumentTemplate,
   HrEmployeeProfile,
+  TimeCardRole,
 } from "@/lib/company-data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { isPortalAdminRole } from "@/lib/user-management";
+import { isPortalAdminRole, isPortalSuperAdminRole } from "@/lib/user-management";
 
 type EmployeeProfilePageProps = {
   params: Promise<{ id: string }>;
   searchParams: Promise<{ message?: string; error?: string }>;
 };
 
+type EditableEmployeeProfile = HrEmployeeProfile & {
+  display_name?: string | null;
+  email?: string | null;
+  profile_status?: string;
+  time_card_role_id?: string | null;
+};
+
 function formatDate(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : "Not signed";
+}
+
+function formatLastSeen(value: string | null | undefined) {
+  if (!value) {
+    return "Not recorded yet";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 export default async function EmployeeProfilePage({ params, searchParams }: EmployeeProfilePageProps) {
@@ -45,6 +64,7 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
       : { data: null };
 
   const canViewProfile = currentRole?.account_status === "active" && isPortalAdminRole(currentRole.role);
+  const canEditProfile = currentRole?.account_status === "active" && isPortalSuperAdminRole(currentRole.role);
   const admin = canViewProfile ? createAdminClient() : null;
 
   if (!canViewProfile || !admin) {
@@ -67,6 +87,8 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
     { data: onboardingUploads },
     { data: auditEvents },
     { data: allDocuments },
+    { data: timeCardRoles },
+    { data: chatProfile },
   ] = await Promise.all([
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
     admin.from("employee_profiles").select("*").eq("user_id", id).maybeSingle(),
@@ -77,10 +99,12 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
     admin.from("employee_onboarding_uploads").select("*").eq("user_id", id).order("created_at", { ascending: false }),
     admin.from("employee_onboarding_audit_events").select("*").eq("user_id", id).order("created_at", { ascending: false }).limit(100),
     admin.from("company_documents").select("*").order("updated_at", { ascending: false }),
+    admin.from("time_card_roles").select("*").order("sort_order"),
+    admin.from("employee_chat_profiles").select("last_seen_at").eq("user_id", id).maybeSingle(),
   ]);
 
   const employee = authData.users.find((authUser) => authUser.id === id);
-  const typedProfile = profile as HrEmployeeProfile | null;
+  const typedProfile = profile as EditableEmployeeProfile | null;
   const typedAssignments = (assignments ?? []) as EmployeeDocumentAssignment[];
   const typedSignatures = (signatures ?? []) as EmployeeDocumentSignature[];
   const typedFormResponses = (formResponses ?? []) as EmployeeFormResponse[];
@@ -88,6 +112,8 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
   const typedOnboardingUploads = (onboardingUploads ?? []) as EmployeeOnboardingUpload[];
   const typedAuditEvents = (auditEvents ?? []) as EmployeeOnboardingAuditEvent[];
   const typedAllDocuments = (allDocuments ?? []) as CompanyDocument[];
+  const typedTimeCardRoles = (timeCardRoles ?? []) as TimeCardRole[];
+  const lastSeenAt = (chatProfile as { last_seen_at?: string | null } | null)?.last_seen_at ?? employee?.last_sign_in_at ?? null;
   const templateIds = [...new Set(typedAssignments.map((assignment) => assignment.template_id))];
   const { data: templates } =
     templateIds.length > 0
@@ -212,17 +238,88 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
           <UserRound color="#c9932b" size={28} />
           <h2>Profile details</h2>
           <div className="profile-facts">
+            <p><strong>Display name:</strong> {typedProfile?.display_name ?? "Not provided"}</p>
+            <p><strong>Email:</strong> {typedProfile?.email ?? employee?.email ?? "Not provided"}</p>
             <p><strong>Legal name:</strong> {typedProfile?.legal_name ?? "Not provided"}</p>
             <p><strong>Phone:</strong> {typedProfile?.phone ?? "Not provided"}</p>
             <p><strong>Emergency contact:</strong> {typedProfile?.emergency_contact_name ?? "Not provided"}</p>
             <p><strong>Emergency phone:</strong> {typedProfile?.emergency_contact_phone ?? "Not provided"}</p>
             <p><strong>Relationship:</strong> {typedProfile?.emergency_contact_relationship ?? "Not provided"}</p>
+            <p><strong>Profile status:</strong> {typedProfile?.profile_status ?? "active"}</p>
+            {canEditProfile ? <p><strong>Last on site:</strong> {formatLastSeen(lastSeenAt)}</p> : null}
+            <p>
+              <strong>Time-card role:</strong>{" "}
+              {typedTimeCardRoles.find((role) => role.id === typedProfile?.time_card_role_id)?.name ?? "Unassigned"}
+            </p>
             <p><strong>Completed:</strong> {formatDate(typedProfile?.onboarding_completed_at)}</p>
             <p>
               <strong>Readiness:</strong> {readinessCounts.complete} complete, {readinessCounts.pending} missing,{" "}
               {readinessCounts.review} pending review, {readinessCounts.rejected} rejected, {readinessCounts.waived} waived
             </p>
           </div>
+          {canEditProfile ? (
+            <form action={updateEmployeeProfileDetails} className="signature-panel profile-edit-form">
+              <input name="profile_user_id" type="hidden" value={id} />
+              <div className="form-grid">
+                <div className="field">
+                  <label htmlFor="display_name">Display name</label>
+                  <input id="display_name" name="display_name" defaultValue={typedProfile?.display_name ?? ""} />
+                </div>
+                <div className="field">
+                  <label htmlFor="email">Email</label>
+                  <input id="email" name="email" required type="email" defaultValue={typedProfile?.email ?? employee?.email ?? ""} />
+                </div>
+                <div className="field">
+                  <label htmlFor="legal_name">Legal name</label>
+                  <input id="legal_name" name="legal_name" defaultValue={typedProfile?.legal_name ?? ""} />
+                </div>
+                <div className="field">
+                  <label htmlFor="phone">Phone</label>
+                  <input id="phone" name="phone" defaultValue={typedProfile?.phone ?? ""} />
+                </div>
+                <div className="field">
+                  <label htmlFor="emergency_contact_name">Emergency contact</label>
+                  <input id="emergency_contact_name" name="emergency_contact_name" defaultValue={typedProfile?.emergency_contact_name ?? ""} />
+                </div>
+                <div className="field">
+                  <label htmlFor="emergency_contact_phone">Emergency phone</label>
+                  <input id="emergency_contact_phone" name="emergency_contact_phone" defaultValue={typedProfile?.emergency_contact_phone ?? ""} />
+                </div>
+                <div className="field">
+                  <label htmlFor="emergency_contact_relationship">Relationship</label>
+                  <input
+                    id="emergency_contact_relationship"
+                    name="emergency_contact_relationship"
+                    defaultValue={typedProfile?.emergency_contact_relationship ?? ""}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="profile_status">Profile status</label>
+                  <select id="profile_status" name="profile_status" defaultValue={typedProfile?.profile_status ?? "active"}>
+                    <option value="active">Active</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="time_card_role_id">Time-card role</label>
+                  <select id="time_card_role_id" name="time_card_role_id" defaultValue={typedProfile?.time_card_role_id ?? ""}>
+                    <option value="">Unassigned</option>
+                    {typedTimeCardRoles.map((timeCardRole) => (
+                      <option key={timeCardRole.id} value={timeCardRole.id}>
+                        {timeCardRole.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <button className="button button-primary" type="submit">
+                <Save size={16} />
+                Save Profile
+              </button>
+            </form>
+          ) : (
+            <div className="success-box">Only super admins can edit profile details.</div>
+          )}
         </section>
 
         <section className="hr-document-stack">
