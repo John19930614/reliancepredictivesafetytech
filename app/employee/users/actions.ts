@@ -194,13 +194,17 @@ export async function inviteEmployee(formData: FormData) {
     redirect(usersPath({ error: "Employee email is required." }));
   }
 
-  const { data, error } = await admin.auth.admin.inviteUserByEmail(values.email, {
-    data: values.displayName ? { display_name: values.displayName } : undefined,
-    redirectTo: employeePortalUrl,
+  const { data, error } = await admin.auth.admin.generateLink({
+    type: "invite",
+    email: values.email,
+    options: {
+      data: values.displayName ? { display_name: values.displayName } : undefined,
+      redirectTo: employeePortalUrl,
+    },
   });
 
-  if (error || !data.user) {
-    redirect(usersPath({ error: error?.message ?? "Could not invite employee." }));
+  if (error || !data.user || !data.properties?.action_link) {
+    redirect(usersPath({ error: error?.message ?? "Could not generate employee invite link." }));
   }
 
   const setupError = await assignPortalUserAccess(admin, {
@@ -216,7 +220,7 @@ export async function inviteEmployee(formData: FormData) {
 
   revalidatePath("/employee/users");
   revalidatePath("/employee/time-cards");
-  redirect(usersPath({ message: "Employee invite sent with HR onboarding assigned." }));
+  redirect(usersPath({ message: "Employee invite link generated with HR onboarding assigned.", invite_link: data.properties.action_link }));
 }
 
 export async function createPortalUser(formData: FormData) {

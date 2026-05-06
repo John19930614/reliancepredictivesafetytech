@@ -136,6 +136,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
         <div className="user-admin-layout">
           <form action={inviteEmployee} className="form-panel">
             <h2>Invite employee</h2>
+            <p className="muted-copy">Generates a secure invite link you can send directly, without Supabase email limits.</p>
             <div className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 16 }}>
               <div className="field">
                 <label htmlFor="display_name">Display name</label>
@@ -172,7 +173,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
               </div>
               <button className="button button-primary" type="submit">
                 <Send size={18} />
-                Send Invite
+                Generate Invite Link
               </button>
             </div>
           </form>
