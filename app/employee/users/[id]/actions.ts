@@ -100,6 +100,10 @@ export async function attachExistingEmployeeDocument(formData: FormData) {
       status: "waived",
       existing_document_id: document.id,
       waived_at: waivedAt,
+      verification_status: "waived",
+      verified_by: currentUser.id,
+      verified_at: waivedAt,
+      rejection_reason: null,
       assigned_by: currentUser.id,
       notes: notes || `Satisfied by existing document: ${document.title}`,
     })
@@ -127,4 +131,108 @@ export async function attachExistingEmployeeDocument(formData: FormData) {
   revalidatePath("/employee/users");
   revalidatePath(`/employee/users/${profileUserId}`);
   redirect(`/employee/users/${profileUserId}?message=Requirement satisfied by uploaded record.`);
+}
+
+export async function reviewEmployeeOnboardingUpload(formData: FormData) {
+  const profileUserId = cleanText(formData.get("profile_user_id"));
+  const assignmentId = cleanText(formData.get("assignment_id"));
+  const uploadId = cleanText(formData.get("upload_id"));
+  const decision = cleanText(formData.get("decision"));
+  const reviewNotes = cleanText(formData.get("review_notes"));
+  const retentionUntil = cleanText(formData.get("retention_until")) || null;
+  const legalHold = formData.get("legal_hold") === "on";
+
+  if (!profileUserId || !assignmentId || !uploadId || !["approve", "reject"].includes(decision)) {
+    redirect(`/employee/users/${profileUserId || ""}?error=Choose an upload and review decision.`);
+  }
+
+  const currentUser = await getAuthorizedAdmin(profileUserId);
+  const admin = getAdminClientOrRedirect(profileUserId);
+
+  const { data: upload } = await admin
+    .from("employee_onboarding_uploads")
+    .select("*")
+    .eq("id", uploadId)
+    .eq("assignment_id", assignmentId)
+    .eq("user_id", profileUserId)
+    .maybeSingle();
+
+  if (!upload) {
+    redirect(`/employee/users/${profileUserId}?error=Onboarding upload was not found.`);
+  }
+
+  const reviewedAt = new Date().toISOString();
+  const approved = decision === "approve";
+  const { error: uploadError } = await admin
+    .from("employee_onboarding_uploads")
+    .update({
+      upload_status: approved ? "approved" : "rejected",
+      review_notes: reviewNotes || (approved ? "Approved by admin review." : "Rejected by admin review."),
+      reviewed_by: currentUser.id,
+      reviewed_at: reviewedAt,
+    })
+    .eq("id", upload.id);
+
+  if (uploadError) {
+    redirect(`/employee/users/${profileUserId}?error=${encodeURIComponent(uploadError.message)}`);
+  }
+
+  const { error: assignmentError } = await admin
+    .from("employee_document_assignments")
+    .update(
+      approved
+        ? {
+            status: "signed",
+            signed_at: reviewedAt,
+            verification_status: "approved",
+            verified_by: currentUser.id,
+            verified_at: reviewedAt,
+            rejection_reason: null,
+            retention_until: retentionUntil,
+            legal_hold: legalHold,
+            notes: reviewNotes || `Approved upload: ${upload.file_name}`,
+          }
+        : {
+            status: "pending",
+            verification_status: "rejected",
+            verified_by: currentUser.id,
+            verified_at: reviewedAt,
+            rejection_reason: reviewNotes || "Upload rejected. Please replace the file.",
+            retention_until: retentionUntil,
+            legal_hold: legalHold,
+            notes: reviewNotes || `Rejected upload: ${upload.file_name}`,
+          },
+    )
+    .eq("id", assignmentId)
+    .eq("user_id", profileUserId);
+
+  if (assignmentError) {
+    redirect(`/employee/users/${profileUserId}?error=${encodeURIComponent(assignmentError.message)}`);
+  }
+
+  const completionError = await updateProfileCompletion(profileUserId);
+
+  if (completionError) {
+    redirect(`/employee/users/${profileUserId}?error=${encodeURIComponent(completionError.message)}`);
+  }
+
+  await admin.from("employee_onboarding_audit_events").insert({
+    assignment_id: assignmentId,
+    user_id: profileUserId,
+    actor_user_id: currentUser.id,
+    event_type: approved ? "upload_approved" : "upload_rejected",
+    event_details: {
+      upload_id: upload.id,
+      file_name: upload.file_name,
+      file_sha256: upload.file_sha256,
+      review_notes: reviewNotes,
+      retention_until: retentionUntil,
+      legal_hold: legalHold,
+    },
+  });
+
+  revalidatePath("/employee/users");
+  revalidatePath(`/employee/users/${profileUserId}`);
+  revalidatePath("/employee/hr-onboarding");
+  redirect(`/employee/users/${profileUserId}?message=${approved ? "Upload approved and requirement completed." : "Upload rejected. Employee can replace it."}`);
 }

@@ -1,9 +1,9 @@
-import { Archive, Save, Trash2, UserPlus, Users } from "lucide-react";
+import { Archive, Save, Send, Trash2, Users } from "lucide-react";
 import Link from "next/link";
 import {
   archivePortalUser,
-  createPortalUser,
   deletePortalUser,
+  inviteEmployee,
   updatePortalUserRole,
 } from "@/app/employee/users/actions";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -126,8 +126,8 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
         </section>
       ) : (
         <div className="user-admin-layout">
-          <form action={createPortalUser} className="form-panel">
-            <h2>Add user</h2>
+          <form action={inviteEmployee} className="form-panel">
+            <h2>Invite employee</h2>
             <div className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 16 }}>
               <div className="field">
                 <label htmlFor="display_name">Display name</label>
@@ -136,10 +136,6 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
               <div className="field">
                 <label htmlFor="email">Email</label>
                 <input id="email" name="email" required type="email" />
-              </div>
-              <div className="field">
-                <label htmlFor="password">Temporary password</label>
-                <input id="password" minLength={8} name="password" required type="password" />
               </div>
               <div className="field">
                 <label htmlFor="role">Role</label>
@@ -167,8 +163,8 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                 </select>
               </div>
               <button className="button button-primary" type="submit">
-                <UserPlus size={18} />
-                Add User
+                <Send size={18} />
+                Send Invite
               </button>
             </div>
           </form>

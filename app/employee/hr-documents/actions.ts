@@ -31,6 +31,23 @@ const requiredTemplateFormSlugs: Record<string, string> = {
   "Electronic Records and E-Sign Consent": "electronic-records-esign-consent",
 };
 
+const requiredTemplateRequirementSlugs: Record<string, string> = {
+  "Federal Form I-9 Employment Eligibility Checklist": "federal-i9-section-1",
+  "I-9 Identity and Work Authorization Document Review Upload": "federal-i9-identity-document-upload",
+  "Federal Form W-4 Employee Withholding Checklist": "federal-w4-employee-withholding",
+  "Texas New Hire Reporting Worksheet": "texas-new-hire-reporting",
+  "Employee Personal Information and Emergency Contact Form": "employee-profile-emergency-contact",
+  "Offer and Role Acknowledgment": "offer-role-acknowledgment",
+  "Direct Deposit Authorization": "direct-deposit-authorization",
+  "Employee Handbook Acknowledgment": "employee-handbook-acknowledgment",
+  "Confidentiality and IP Assignment Agreement": "confidentiality-ip-assignment",
+  "Acceptable Use and Information Security Policy": "acceptable-use-information-security",
+  "Safety-Critical Data and AI Output Acknowledgment": "safety-ai-output-acknowledgment",
+  "Employee Privacy and Data Handling Acknowledgment": "employee-privacy-data-handling",
+  "Electronic Records and E-Sign Consent": "electronic-records-esign-consent",
+  "Payroll, Benefits, and Required Document Upload Checklist": "payroll-benefits-required-upload-checklist",
+};
+
 async function getAuthorizedAdmin() {
   const supabase = await createClient();
 
@@ -88,6 +105,35 @@ async function relinkRequiredTemplatesToFillableForms(admin: NonNullable<ReturnT
     const { error: updateError } = await admin
       .from("hr_document_templates")
       .update({ form_definition_id: formDefinitionId })
+      .eq("title", title);
+
+    if (updateError) {
+      return updateError;
+    }
+  }
+
+  return null;
+}
+
+async function relinkRequiredTemplatesToComplianceRequirements(admin: NonNullable<ReturnType<typeof createAdminClient>>) {
+  const slugs = Object.values(requiredTemplateRequirementSlugs);
+  const { data: requirements, error } = await admin.from("hr_compliance_requirements").select("id, slug").in("slug", slugs);
+
+  if (error) {
+    return error;
+  }
+
+  const requirementsBySlug = new Map((requirements ?? []).map((requirement) => [requirement.slug, requirement.id]));
+
+  for (const [title, slug] of Object.entries(requiredTemplateRequirementSlugs)) {
+    const complianceRequirementId = requirementsBySlug.get(slug);
+    if (!complianceRequirementId) {
+      continue;
+    }
+
+    const { error: updateError } = await admin
+      .from("hr_document_templates")
+      .update({ compliance_requirement_id: complianceRequirementId })
       .eq("title", title);
 
     if (updateError) {

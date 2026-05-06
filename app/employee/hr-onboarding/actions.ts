@@ -1,5 +1,6 @@
 "use server";
 
+import { createHash } from "crypto";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -13,6 +14,14 @@ import type { Json } from "@/lib/supabase/types";
 function cleanText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
 }
+
+const maxUploadBytes = 10 * 1024 * 1024;
+const allowedUploadTypes = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "image/jpeg",
+  "image/png",
+]);
 
 function getSafeNextPath(value: string) {
   if (!value || !value.startsWith("/employee") || value.startsWith("/employee-login")) {
@@ -363,7 +372,7 @@ export async function signEmployeeDocument(formData: FormData) {
   const signedAt = new Date().toISOString();
   const { error: updateError } = await admin
     .from("employee_document_assignments")
-    .update({ status: "signed", signed_at: signedAt })
+    .update({ status: "signed", signed_at: signedAt, verification_status: "approved", verified_at: signedAt, rejection_reason: null })
     .eq("id", assignment.id)
     .eq("user_id", user.id);
 
@@ -423,6 +432,136 @@ export async function saveEmployeeFormDraft(formData: FormData) {
 
   revalidatePath("/employee/hr-onboarding");
   redirect(onboardingPath({ message: "Form draft saved.", next }));
+}
+
+export async function uploadEmployeeOnboardingDocument(formData: FormData) {
+  const { user } = await getSignedInUser();
+  const admin = getAdminClientOrRedirect();
+  const assignmentId = cleanText(formData.get("assignment_id"));
+  const next = cleanText(formData.get("next"));
+  const file = formData.get("file");
+
+  if (!assignmentId) {
+    redirect(onboardingPath({ error: "Choose an upload requirement before uploading.", next }));
+  }
+
+  if (!(file instanceof File) || !file.name) {
+    redirect(onboardingPath({ error: "Choose a PDF, DOCX, JPG, or PNG file to upload.", next }));
+  }
+
+  if (file.size > maxUploadBytes) {
+    redirect(onboardingPath({ error: "Upload is too large. Use a file under 10 MB.", next }));
+  }
+
+  if (!allowedUploadTypes.has(file.type)) {
+    redirect(onboardingPath({ error: "Only PDF, DOCX, JPG, and PNG onboarding uploads are allowed.", next }));
+  }
+
+  const { data: assignment, error: assignmentError } = await admin
+    .from("employee_document_assignments")
+    .select("*")
+    .eq("id", assignmentId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (assignmentError || !assignment) {
+    redirect(onboardingPath({ error: assignmentError?.message ?? "Document assignment was not found.", next }));
+  }
+
+  if (assignment.status !== "pending") {
+    redirect(onboardingPath({ error: "This document requirement has already been completed.", next }));
+  }
+
+  const { data: template, error: templateError } = await admin
+    .from("hr_document_templates")
+    .select("*")
+    .eq("id", assignment.template_id)
+    .maybeSingle();
+
+  if (templateError || !template) {
+    redirect(onboardingPath({ error: templateError?.message ?? "Document template was not found.", next }));
+  }
+
+  const requirementId = assignment.compliance_requirement_id ?? template.compliance_requirement_id;
+  const { data: requirement } = requirementId
+    ? await admin.from("hr_compliance_requirements").select("id, document_mode").eq("id", requirementId).maybeSingle()
+    : { data: null };
+
+  if (requirement?.document_mode !== "upload") {
+    redirect(onboardingPath({ error: "This requirement is not configured for secure employee uploads.", next }));
+  }
+
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+  const filePath = `employee-onboarding/${user.id}/${assignment.id}/uploads/${Date.now()}-${safeName}`;
+  const { error: uploadError } = await admin.storage.from("employee-onboarding-documents").upload(filePath, bytes, {
+    contentType: file.type,
+    upsert: false,
+  });
+
+  if (uploadError) {
+    redirect(onboardingPath({ error: uploadError.message, next }));
+  }
+
+  const { data: upload, error: uploadRecordError } = await admin
+    .from("employee_onboarding_uploads")
+    .insert({
+      assignment_id: assignment.id,
+      user_id: user.id,
+      template_id: template.id,
+      compliance_requirement_id: requirement.id,
+      file_bucket: "employee-onboarding-documents",
+      file_path: filePath,
+      file_name: file.name,
+      file_type: file.type,
+      file_size: file.size,
+      file_sha256: sha256,
+      upload_status: "pending_review",
+    })
+    .select("*")
+    .single();
+
+  if (uploadRecordError || !upload) {
+    redirect(onboardingPath({ error: uploadRecordError?.message ?? "Could not save upload record.", next }));
+  }
+
+  await admin
+    .from("employee_onboarding_uploads")
+    .update({ upload_status: "superseded", superseded_by: upload.id })
+    .eq("assignment_id", assignment.id)
+    .neq("id", upload.id)
+    .in("upload_status", ["pending_review", "rejected"]);
+
+  const { error: assignmentUpdateError } = await admin
+    .from("employee_document_assignments")
+    .update({
+      compliance_requirement_id: requirement.id,
+      verification_status: "pending_review",
+      rejection_reason: null,
+      notes: `Employee uploaded ${file.name} for admin review.`,
+    })
+    .eq("id", assignment.id)
+    .eq("user_id", user.id);
+
+  if (assignmentUpdateError) {
+    redirect(onboardingPath({ error: assignmentUpdateError.message, next }));
+  }
+
+  const headerStore = await headers();
+  await addAuditEvent({
+    assignmentId: assignment.id,
+    userId: user.id,
+    actorUserId: user.id,
+    eventType: "upload_submitted",
+    eventDetails: { file_name: file.name, file_type: file.type, file_size: file.size, file_sha256: sha256 },
+    signerIp: headerStore.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+    signerUserAgent: headerStore.get("user-agent"),
+  });
+
+  revalidatePath("/employee/hr-onboarding");
+  revalidatePath("/employee/users");
+  redirect(onboardingPath({ message: "Upload received. HR/admin review is required before this item is complete.", next }));
 }
 
 export async function signEmployeeStructuredForm(formData: FormData) {
@@ -556,7 +695,7 @@ export async function signEmployeeStructuredForm(formData: FormData) {
 
   const { error: updateError } = await admin
     .from("employee_document_assignments")
-    .update({ status: "signed", signed_at: signedAt })
+    .update({ status: "signed", signed_at: signedAt, verification_status: "approved", verified_at: signedAt, rejection_reason: null })
     .eq("id", assignment.id)
     .eq("user_id", user.id);
 

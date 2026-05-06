@@ -8,6 +8,8 @@ import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
 import { createClient } from "@/lib/supabase/server";
 import { isPortalAdminRole, portalUserRoles, type PortalUserRole } from "@/lib/user-management";
 
+type SupabaseAdminClient = NonNullable<ReturnType<typeof createAdminClient>>;
+
 function usersPath(params: Record<string, string>) {
   const searchParams = new URLSearchParams(params);
   return `/employee/users?${searchParams.toString()}`;
@@ -60,17 +62,13 @@ function getAdminClientOrRedirect() {
 }
 
 async function createEmployeeProfileAndAssignments(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: SupabaseAdminClient,
   userId: string,
   legalName: string,
   email: string,
   timeCardRoleId: string | null,
   assignedBy: string,
 ) {
-  if (!admin) {
-    return null;
-  }
-
   const { error: profileError } = await admin.from("employee_profiles").upsert({
     user_id: userId,
     legal_name: legalName || null,
@@ -89,7 +87,7 @@ async function createEmployeeProfileAndAssignments(
 }
 
 async function upsertEmployeeChatProfile(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: SupabaseAdminClient,
   values: {
     userId: string;
     displayName?: string | null;
@@ -99,10 +97,6 @@ async function upsertEmployeeChatProfile(
     accountStatus?: string;
   },
 ) {
-  if (!admin) {
-    return null;
-  }
-
   const { error } = await admin.from("employee_chat_profiles").upsert({
     user_id: values.userId,
     display_name: values.displayName || null,
@@ -119,63 +113,139 @@ async function upsertEmployeeChatProfile(
   return error;
 }
 
-export async function createPortalUser(formData: FormData) {
-  const currentUser = await getAuthorizedAdmin();
-  const admin = getAdminClientOrRedirect();
+type PortalUserSetupValues = {
+  displayName: string;
+  email: string;
+  role: PortalUserRole;
+  team: string;
+  timeCardRoleId: string | null;
+};
+
+function getPortalUserSetupValues(formData: FormData): PortalUserSetupValues {
   const email = cleanText(formData.get("email")).toLowerCase();
-  const password = cleanText(formData.get("password"));
   const displayName = cleanText(formData.get("display_name"));
   const team = cleanText(formData.get("team"));
   const timeCardRoleId = cleanText(formData.get("time_card_role_id")) || null;
   const requestedRole = cleanText(formData.get("role"));
   const role = isPortalUserRole(requestedRole) ? requestedRole : "employee";
 
-  if (!email || !password) {
+  return {
+    displayName,
+    email,
+    role,
+    team,
+    timeCardRoleId,
+  };
+}
+
+async function assignPortalUserAccess(
+  admin: SupabaseAdminClient,
+  values: PortalUserSetupValues & {
+    assignedBy: string;
+    userId: string;
+  },
+) {
+  const { error: roleError } = await admin.from("user_roles").upsert({
+    user_id: values.userId,
+    role: values.role,
+    team: values.team || null,
+    account_status: "active",
+  });
+
+  if (roleError) {
+    return roleError;
+  }
+
+  const onboardingError = await createEmployeeProfileAndAssignments(
+    admin,
+    values.userId,
+    values.displayName,
+    values.email,
+    values.timeCardRoleId,
+    values.assignedBy,
+  );
+
+  if (onboardingError) {
+    return onboardingError;
+  }
+
+  return upsertEmployeeChatProfile(admin, {
+    userId: values.userId,
+    displayName: values.displayName,
+    email: values.email,
+    role: values.role,
+    team: values.team,
+    accountStatus: "active",
+  });
+}
+
+async function rollbackCreatedAuthUser(admin: SupabaseAdminClient, userId: string) {
+  await admin.auth.admin.deleteUser(userId, true);
+}
+
+export async function inviteEmployee(formData: FormData) {
+  const currentUser = await getAuthorizedAdmin();
+  const admin = getAdminClientOrRedirect();
+  const values = getPortalUserSetupValues(formData);
+
+  if (!values.email) {
+    redirect(usersPath({ error: "Employee email is required." }));
+  }
+
+  const { data, error } = await admin.auth.admin.inviteUserByEmail(values.email, {
+    data: values.displayName ? { display_name: values.displayName } : undefined,
+  });
+
+  if (error || !data.user) {
+    redirect(usersPath({ error: error?.message ?? "Could not invite employee." }));
+  }
+
+  const setupError = await assignPortalUserAccess(admin, {
+    ...values,
+    assignedBy: currentUser.id,
+    userId: data.user.id,
+  });
+
+  if (setupError) {
+    await rollbackCreatedAuthUser(admin, data.user.id);
+    redirect(usersPath({ error: setupError.message }));
+  }
+
+  revalidatePath("/employee/users");
+  revalidatePath("/employee/time-cards");
+  redirect(usersPath({ message: "Employee invite sent with HR onboarding assigned." }));
+}
+
+export async function createPortalUser(formData: FormData) {
+  const currentUser = await getAuthorizedAdmin();
+  const admin = getAdminClientOrRedirect();
+  const values = getPortalUserSetupValues(formData);
+  const password = cleanText(formData.get("password"));
+
+  if (!values.email || !password) {
     redirect(usersPath({ error: "Email and temporary password are required." }));
   }
 
   const { data, error } = await admin.auth.admin.createUser({
-    email,
+    email: values.email,
     password,
     email_confirm: true,
-    user_metadata: displayName ? { display_name: displayName } : undefined,
+    user_metadata: values.displayName ? { display_name: values.displayName } : undefined,
   });
 
   if (error || !data.user) {
     redirect(usersPath({ error: error?.message ?? "Could not create user." }));
   }
 
-  const { error: roleError } = await admin.from("user_roles").upsert({
-    user_id: data.user.id,
-    role,
-    team: team || null,
-    account_status: "active",
-  });
-
-  if (roleError) {
-    await admin.auth.admin.deleteUser(data.user.id, true);
-    redirect(usersPath({ error: roleError.message }));
-  }
-
-  const onboardingError = await createEmployeeProfileAndAssignments(admin, data.user.id, displayName, email, timeCardRoleId, currentUser.id);
-
-  if (onboardingError) {
-    await admin.auth.admin.deleteUser(data.user.id, true);
-    redirect(usersPath({ error: onboardingError.message }));
-  }
-
-  const chatProfileError = await upsertEmployeeChatProfile(admin, {
+  const setupError = await assignPortalUserAccess(admin, {
+    ...values,
+    assignedBy: currentUser.id,
     userId: data.user.id,
-    displayName,
-    email,
-    role,
-    team,
-    accountStatus: "active",
   });
 
-  if (chatProfileError) {
-    await admin.auth.admin.deleteUser(data.user.id, true);
-    redirect(usersPath({ error: chatProfileError.message }));
+  if (setupError) {
+    await rollbackCreatedAuthUser(admin, data.user.id);
+    redirect(usersPath({ error: setupError.message }));
   }
 
   revalidatePath("/employee/users");

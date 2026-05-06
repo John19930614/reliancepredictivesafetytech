@@ -656,6 +656,54 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["employee_profiles"]["Insert"]>;
         Relationships: [];
       };
+      hr_compliance_requirements: {
+        Row: {
+          id: string;
+          slug: string;
+          title: string;
+          jurisdiction_level: string;
+          jurisdiction_state: string | null;
+          employee_type: string;
+          category: string;
+          document_mode: string;
+          official_source_url: string | null;
+          due_rule: string | null;
+          retention_rule: string | null;
+          review_status: string;
+          active: boolean;
+          required: boolean;
+          sort_order: number;
+          last_reviewed_at: string | null;
+          reviewed_by: string | null;
+          review_notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          slug: string;
+          title: string;
+          jurisdiction_level?: string;
+          jurisdiction_state?: string | null;
+          employee_type?: string;
+          category?: string;
+          document_mode?: string;
+          official_source_url?: string | null;
+          due_rule?: string | null;
+          retention_rule?: string | null;
+          review_status?: string;
+          active?: boolean;
+          required?: boolean;
+          sort_order?: number;
+          last_reviewed_at?: string | null;
+          reviewed_by?: string | null;
+          review_notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["hr_compliance_requirements"]["Insert"]>;
+        Relationships: [];
+      };
       hr_document_templates: {
         Row: {
           id: string;
@@ -668,6 +716,7 @@ export type Database = {
           sort_order: number;
           source_document_id: string | null;
           form_definition_id: string | null;
+          compliance_requirement_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -682,6 +731,7 @@ export type Database = {
           sort_order?: number;
           source_document_id?: string | null;
           form_definition_id?: string | null;
+          compliance_requirement_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -701,6 +751,13 @@ export type Database = {
             referencedRelation: "hr_form_definitions";
             referencedColumns: ["id"];
           },
+          {
+            foreignKeyName: "hr_document_templates_compliance_requirement_id_fkey";
+            columns: ["compliance_requirement_id"];
+            isOneToOne: false;
+            referencedRelation: "hr_compliance_requirements";
+            referencedColumns: ["id"];
+          },
         ];
       };
       hr_form_definitions: {
@@ -718,6 +775,7 @@ export type Database = {
           official_form_edition: string | null;
           official_form_expiration_date: string | null;
           field_schema: Json;
+          compliance_requirement_id: string | null;
           active: boolean;
           required: boolean;
           sensitive: boolean;
@@ -739,6 +797,7 @@ export type Database = {
           official_form_edition?: string | null;
           official_form_expiration_date?: string | null;
           field_schema?: Json;
+          compliance_requirement_id?: string | null;
           active?: boolean;
           required?: boolean;
           sensitive?: boolean;
@@ -747,7 +806,15 @@ export type Database = {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["hr_form_definitions"]["Insert"]>;
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "hr_form_definitions_compliance_requirement_id_fkey";
+            columns: ["compliance_requirement_id"];
+            isOneToOne: false;
+            referencedRelation: "hr_compliance_requirements";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       employee_form_responses: {
         Row: {
@@ -864,6 +931,72 @@ export type Database = {
           },
         ];
       };
+      employee_onboarding_uploads: {
+        Row: {
+          id: string;
+          assignment_id: string;
+          user_id: string;
+          template_id: string;
+          compliance_requirement_id: string | null;
+          file_bucket: string;
+          file_path: string;
+          file_name: string;
+          file_type: string;
+          file_size: number;
+          file_sha256: string;
+          upload_status: string;
+          review_notes: string | null;
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+          superseded_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          assignment_id: string;
+          user_id: string;
+          template_id: string;
+          compliance_requirement_id?: string | null;
+          file_bucket?: string;
+          file_path: string;
+          file_name: string;
+          file_type: string;
+          file_size: number;
+          file_sha256: string;
+          upload_status?: string;
+          review_notes?: string | null;
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+          superseded_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_onboarding_uploads"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "employee_onboarding_uploads_assignment_id_fkey";
+            columns: ["assignment_id"];
+            isOneToOne: false;
+            referencedRelation: "employee_document_assignments";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "employee_onboarding_uploads_template_id_fkey";
+            columns: ["template_id"];
+            isOneToOne: false;
+            referencedRelation: "hr_document_templates";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "employee_onboarding_uploads_compliance_requirement_id_fkey";
+            columns: ["compliance_requirement_id"];
+            isOneToOne: false;
+            referencedRelation: "hr_compliance_requirements";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       employee_onboarding_audit_events: {
         Row: {
           id: string;
@@ -907,6 +1040,13 @@ export type Database = {
           due_date: string | null;
           assigned_by: string | null;
           existing_document_id: string | null;
+          compliance_requirement_id: string | null;
+          verification_status: string;
+          verified_by: string | null;
+          verified_at: string | null;
+          rejection_reason: string | null;
+          retention_until: string | null;
+          legal_hold: boolean;
           signed_at: string | null;
           waived_at: string | null;
           notes: string | null;
@@ -921,6 +1061,13 @@ export type Database = {
           due_date?: string | null;
           assigned_by?: string | null;
           existing_document_id?: string | null;
+          compliance_requirement_id?: string | null;
+          verification_status?: string;
+          verified_by?: string | null;
+          verified_at?: string | null;
+          rejection_reason?: string | null;
+          retention_until?: string | null;
+          legal_hold?: boolean;
           signed_at?: string | null;
           waived_at?: string | null;
           notes?: string | null;
@@ -941,6 +1088,13 @@ export type Database = {
             columns: ["existing_document_id"];
             isOneToOne: false;
             referencedRelation: "company_documents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "employee_document_assignments_compliance_requirement_id_fkey";
+            columns: ["compliance_requirement_id"];
+            isOneToOne: false;
+            referencedRelation: "hr_compliance_requirements";
             referencedColumns: ["id"];
           },
         ];

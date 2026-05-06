@@ -61,7 +61,7 @@ export async function assignActiveRequiredHrDocuments(
 
   const { data: templates, error: templateError } = await admin
     .from("hr_document_templates")
-    .select("id")
+    .select("id, compliance_requirement_id")
     .eq("active", true)
     .eq("required", true);
 
@@ -80,12 +80,26 @@ export async function assignActiveRequiredHrDocuments(
     return null;
   }
 
+  const requirementIds = [...new Set(templates.map((template) => template.compliance_requirement_id).filter(Boolean) as string[])];
+  const { data: requirements, error: requirementError } =
+    requirementIds.length > 0
+      ? await admin.from("hr_compliance_requirements").select("id, document_mode").in("id", requirementIds)
+      : { data: [], error: null };
+
+  if (requirementError) {
+    return requirementError;
+  }
+
+  const requirementModesById = new Map((requirements ?? []).map((requirement) => [requirement.id, requirement.document_mode]));
+
   const { error: assignmentError } = await admin.from("employee_document_assignments").upsert(
     uniqueUserIds.flatMap((userId) =>
       templates.map((template) => ({
         user_id: userId,
         template_id: template.id,
+        compliance_requirement_id: template.compliance_requirement_id,
         status: "pending",
+        verification_status: requirementModesById.get(template.compliance_requirement_id ?? "") === "upload" ? "not_submitted" : "not_required",
         assigned_by: assignedBy,
       })),
     ),

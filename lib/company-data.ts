@@ -161,6 +161,31 @@ export const recordTypes = [
 
 export const hrOnboardingStatuses = ["not_started", "in_progress", "complete"] as const;
 export const employeeDocumentStatuses = ["pending", "signed", "waived"] as const;
+export const hrComplianceDocumentModes = ["fillable_form", "upload", "acknowledgment", "review_catalog"] as const;
+export const hrComplianceReviewStatuses = ["needs_review", "reviewed", "approved", "rejected", "inactive"] as const;
+
+export type HrComplianceRequirement = {
+  id: string;
+  slug: string;
+  title: string;
+  jurisdiction_level: string;
+  jurisdiction_state: string | null;
+  employee_type: string;
+  category: string;
+  document_mode: string;
+  official_source_url: string | null;
+  due_rule: string | null;
+  retention_rule: string | null;
+  review_status: string;
+  active: boolean;
+  required: boolean;
+  sort_order: number;
+  last_reviewed_at: string | null;
+  reviewed_by: string | null;
+  review_notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 export type HrEmployeeProfile = {
   user_id: string;
@@ -186,6 +211,7 @@ export type HrDocumentTemplate = {
   sort_order: number;
   source_document_id: string | null;
   form_definition_id: string | null;
+  compliance_requirement_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -233,6 +259,7 @@ export type HrFormDefinition = {
   official_form_edition: string | null;
   official_form_expiration_date: string | null;
   field_schema: HrFormField[];
+  compliance_requirement_id: string | null;
   active: boolean;
   required: boolean;
   sensitive: boolean;
@@ -278,6 +305,27 @@ export type EmployeeSignedDocument = {
   created_at: string;
 };
 
+export type EmployeeOnboardingUpload = {
+  id: string;
+  assignment_id: string;
+  user_id: string;
+  template_id: string;
+  compliance_requirement_id: string | null;
+  file_bucket: string;
+  file_path: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  file_sha256: string;
+  upload_status: string;
+  review_notes: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  superseded_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type EmployeeOnboardingAuditEvent = {
   id: string;
   assignment_id: string | null;
@@ -298,6 +346,13 @@ export type EmployeeDocumentAssignment = {
   due_date: string | null;
   assigned_by: string | null;
   existing_document_id: string | null;
+  compliance_requirement_id: string | null;
+  verification_status: string;
+  verified_by: string | null;
+  verified_at: string | null;
+  rejection_reason: string | null;
+  retention_until: string | null;
+  legal_hold: boolean;
   signed_at: string | null;
   waived_at: string | null;
   notes: string | null;
