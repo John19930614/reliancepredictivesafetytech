@@ -2,11 +2,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, LockKeyhole, ShieldCheck } from "lucide-react";
 import { DemoRequestForm } from "@/components/DemoRequestForm";
+import { RecoveryHashRedirect } from "@/components/auth/RecoveryHashRedirect";
 import { COMPANY_NAME, CONTACT_EMAIL, TAGLINE, products, whyReliance } from "@/lib/company-data";
 
 export default function HomePage() {
   return (
     <div className="site-shell">
+      <RecoveryHashRedirect />
       <header className="public-header">
         <nav className="container public-nav" aria-label="Public navigation">
           <Link className="brand-mark" href="/">
