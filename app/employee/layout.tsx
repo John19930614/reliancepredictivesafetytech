@@ -20,6 +20,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
   let chatProps: React.ComponentProps<typeof EmployeePresenceChat> | null = null;
   let currentRole: { role: string; account_status: string } | null = null;
   let unreadNotificationCount = 0;
+  let unreadChatNotificationCount = 0;
 
   if (supabase && user) {
     const { data: role } = await supabase
@@ -34,6 +35,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
       { data: profiles, error: profilesError },
       { data: companyThread, error: companyThreadError },
       { count: notificationCount, error: notificationCountError },
+      { count: chatNotificationCount, error: chatNotificationCountError },
     ] = await Promise.all([
       supabase.from("employee_chat_profiles").select("*").order("display_name"),
       supabase.from("employee_chat_threads").select("*").eq("thread_type", "company").maybeSingle(),
@@ -42,17 +44,28 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
         .select("*", { count: "exact", head: true })
         .eq("recipient_user_id", user.id)
         .eq("status", "unread"),
+      supabase
+        .from("portal_notifications")
+        .select("*", { count: "exact", head: true })
+        .eq("recipient_user_id", user.id)
+        .eq("status", "unread")
+        .eq("source_type", "employee_chat_message"),
     ]);
 
     if (
       (profilesError && !isMissingSchemaRelationError(profilesError)) ||
       (companyThreadError && !isMissingSchemaRelationError(companyThreadError)) ||
-      (notificationCountError && !isMissingSchemaRelationError(notificationCountError))
+      (notificationCountError && !isMissingSchemaRelationError(notificationCountError)) ||
+      (chatNotificationCountError && !isMissingSchemaRelationError(chatNotificationCountError))
     ) {
-      console.error("Could not load employee shell data.", profilesError ?? companyThreadError ?? notificationCountError);
+      console.error(
+        "Could not load employee shell data.",
+        profilesError ?? companyThreadError ?? notificationCountError ?? chatNotificationCountError,
+      );
     }
 
     unreadNotificationCount = notificationCount ?? 0;
+    unreadChatNotificationCount = chatNotificationCount ?? 0;
 
     const typedCompanyThread = (companyThread ?? null) as EmployeeChatThread | null;
     const { data: companyMessages, error: companyMessagesError } = typedCompanyThread
@@ -81,6 +94,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
         companyThread: typedCompanyThread,
         initialProfiles: typedProfiles,
         initialCompanyMessages: ([...(companyMessages ?? [])].reverse()) as EmployeeChatMessage[],
+        initialUnreadChatNotificationCount: unreadChatNotificationCount,
       };
     }
   }

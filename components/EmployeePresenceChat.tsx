@@ -1,14 +1,16 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { MessageCircle, Radio, Send, Users, X } from "lucide-react";
-import { ensureDirectThread, sendChatMessage } from "@/app/employee/chat/actions";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Bell, MessageCircle, Radio, Send, Users, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ensureDirectThread, markChatNotificationsRead, sendChatMessage } from "@/app/employee/chat/actions";
 import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/supabase/types";
 
 type EmployeeChatProfile = Database["public"]["Tables"]["employee_chat_profiles"]["Row"];
 type EmployeeChatThread = Database["public"]["Tables"]["employee_chat_threads"]["Row"];
 type EmployeeChatMessage = Database["public"]["Tables"]["employee_chat_messages"]["Row"];
+type PortalNotification = Database["public"]["Tables"]["portal_notifications"]["Row"];
 
 type EmployeePresenceChatProps = {
   currentUser: {
@@ -19,6 +21,7 @@ type EmployeePresenceChatProps = {
   companyThread: EmployeeChatThread | null;
   initialProfiles: EmployeeChatProfile[];
   initialCompanyMessages: EmployeeChatMessage[];
+  initialUnreadChatNotificationCount: number;
 };
 
 type PresencePayload = {
@@ -52,8 +55,10 @@ export function EmployeePresenceChat({
   companyThread,
   initialProfiles,
   initialCompanyMessages,
+  initialUnreadChatNotificationCount,
 }: EmployeePresenceChatProps) {
   const supabase = useMemo(() => createClient(), []);
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"company" | "direct">("company");
   const [selectedRecipientId, setSelectedRecipientId] = useState("");
@@ -66,6 +71,8 @@ export function EmployeePresenceChat({
   const [statusMessage, setStatusMessage] = useState("");
   const [loadingThreadId, setLoadingThreadId] = useState("");
   const [sending, setSending] = useState(false);
+  const [unreadChatCount, setUnreadChatCount] = useState(initialUnreadChatNotificationCount);
+  const [latestNotificationTitle, setLatestNotificationTitle] = useState("");
   const messageEndRef = useRef<HTMLDivElement | null>(null);
 
   const profileByUserId = useMemo(
@@ -94,6 +101,21 @@ export function EmployeePresenceChat({
   const activeThread = activeTab === "company" ? companyThread : selectedRecipientId ? directThreads[selectedRecipientId] : null;
   const activeMessages = activeThread ? messagesByThread[activeThread.id] ?? [] : [];
   const onlineCount = [...onlineUserIds].filter((userId) => userId !== currentUser.id).length;
+  const toggleBadgeCount = unreadChatCount > 0 ? unreadChatCount : onlineCount;
+
+  const clearChatNotifications = useCallback((force = false) => {
+    if (!force && unreadChatCount === 0 && !latestNotificationTitle) {
+      return;
+    }
+
+    setUnreadChatCount(0);
+    setLatestNotificationTitle("");
+    void markChatNotificationsRead()
+      .then(() => router.refresh())
+      .catch((error) => {
+        setStatusMessage(error instanceof Error ? error.message : "Could not update chat notifications.");
+      });
+  }, [latestNotificationTitle, router, unreadChatCount]);
 
   useEffect(() => {
     if (!supabase) {
@@ -148,6 +170,14 @@ export function EmployeePresenceChat({
   }, [currentUser.displayName, currentUser.email, currentUser.id, currentUserProfile, supabase]);
 
   useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    clearChatNotifications();
+  }, [clearChatNotifications, open]);
+
+  useEffect(() => {
     if (!supabase) {
       return;
     }
@@ -176,6 +206,65 @@ export function EmployeePresenceChat({
       void supabase.removeChannel(channel);
     };
   }, [supabase]);
+
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+
+    const channel = supabase
+      .channel(`employee-chat-notifications-${currentUser.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "portal_notifications",
+          filter: `recipient_user_id=eq.${currentUser.id}`,
+        },
+        (payload) => {
+          const notification = payload.new as PortalNotification;
+
+          if (notification.source_type !== "employee_chat_message" || notification.status !== "unread") {
+            return;
+          }
+
+          if (open) {
+            clearChatNotifications(true);
+            return;
+          }
+
+          setUnreadChatCount((count) => count + 1);
+          setLatestNotificationTitle(notification.title);
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "portal_notifications",
+          filter: `recipient_user_id=eq.${currentUser.id}`,
+        },
+        (payload) => {
+          const oldNotification = payload.old as Partial<PortalNotification>;
+          const notification = payload.new as PortalNotification;
+
+          if (notification.source_type !== "employee_chat_message") {
+            return;
+          }
+
+          if (oldNotification.status === "unread" && notification.status !== "unread") {
+            setUnreadChatCount((count) => Math.max(0, count - 1));
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [clearChatNotifications, currentUser.id, open, supabase]);
 
   useEffect(() => {
     if (open) {
@@ -264,8 +353,25 @@ export function EmployeePresenceChat({
     <div className={`employee-chat-shell${open ? " employee-chat-shell-open" : ""}`}>
       <button className="employee-chat-toggle" type="button" onClick={() => setOpen((value) => !value)} aria-label="Open employee chat">
         <MessageCircle size={21} />
-        {onlineCount > 0 ? <span>{onlineCount}</span> : null}
+        {toggleBadgeCount > 0 ? (
+          <span className={unreadChatCount > 0 ? "employee-chat-unread-count" : "employee-chat-online-count"}>
+            {toggleBadgeCount > 99 ? "99+" : toggleBadgeCount}
+          </span>
+        ) : null}
       </button>
+      {latestNotificationTitle && !open ? (
+        <button
+          className="employee-chat-toast"
+          type="button"
+          onClick={() => {
+            setOpen(true);
+            clearChatNotifications(true);
+          }}
+        >
+          <Bell size={16} />
+          <span>{latestNotificationTitle}</span>
+        </button>
+      ) : null}
 
       {open ? (
         <aside className="employee-chat-drawer" aria-label="Employee chat">
@@ -372,6 +478,16 @@ export function EmployeePresenceChat({
                   disabled={!activeThread || sending}
                   maxLength={2000}
                   onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      if (!activeThread || sending || draft.trim().length === 0) {
+                        return;
+                      }
+
+                      event.currentTarget.form?.requestSubmit();
+                    }
+                  }}
                   placeholder="Message..."
                   value={draft}
                 />

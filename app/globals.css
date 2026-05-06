@@ -2995,6 +2995,45 @@ textarea {
   line-height: 18px;
 }
 
+.employee-chat-toggle .employee-chat-unread-count {
+  background: #c12f2f;
+}
+
+.employee-chat-toast {
+  position: fixed;
+  right: 88px;
+  bottom: 29px;
+  z-index: 90;
+  display: inline-flex;
+  max-width: min(340px, calc(100vw - 128px));
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(201, 147, 43, 0.45);
+  border-radius: 8px;
+  padding: 0 14px;
+  background: #111;
+  color: #fff;
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.24);
+  cursor: pointer;
+  font-size: 0.86rem;
+  font-weight: 800;
+  text-align: left;
+}
+
+.employee-chat-toast svg {
+  flex: 0 0 auto;
+  color: var(--gold-bright);
+}
+
+.employee-chat-toast span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .employee-chat-drawer {
   position: fixed;
   right: 24px;
@@ -3524,6 +3563,12 @@ textarea {
   .employee-chat-toggle {
     right: 16px;
     bottom: 16px;
+  }
+
+  .employee-chat-toast {
+    right: 16px;
+    bottom: 82px;
+    max-width: calc(100vw - 32px);
   }
 
   .employee-chat-drawer {

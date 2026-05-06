@@ -271,7 +271,7 @@ export function AICommandCenter({ snapshot, notifications, proposals, canManageP
           </div>
           <div className="ai-list">
             {notifications.length === 0 ? (
-              <div className="empty-state">No unread AI workflow notifications.</div>
+              <div className="empty-state">No unread notifications.</div>
             ) : (
               notifications.map((notification) => (
                 <article className="ai-notification-row" key={notification.id}>

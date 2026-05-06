@@ -293,7 +293,7 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
       owner: userId,
       dueDate: notification.created_at,
       status: notification.status ?? "unread",
-      sourceLabel: "AI Notification",
+      sourceLabel: notification.source_type === "employee_chat_message" ? "Chat Notification" : "AI Notification",
       sourceType: notification.source_type ?? "portal_notification",
       sourceId: notification.source_id ?? notification.id,
       reviewRequired: false,

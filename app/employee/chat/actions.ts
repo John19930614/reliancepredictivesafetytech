@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOptionalFeatureSetupMessage, isMissingSchemaRelationError } from "@/lib/supabase/errors";
 import type { Database } from "@/lib/supabase/types";
@@ -157,4 +158,27 @@ export async function sendChatMessage(threadId: string, body: string): Promise<E
   }
 
   return data as EmployeeChatMessage;
+}
+
+export async function markChatNotificationsRead() {
+  const { supabase, user } = await getAuthenticatedChatClient();
+  const readAt = new Date().toISOString();
+
+  const { error } = await supabase
+    .from("portal_notifications")
+    .update({ status: "read", read_at: readAt })
+    .eq("recipient_user_id", user.id)
+    .eq("status", "unread")
+    .eq("source_type", "employee_chat_message");
+
+  if (error) {
+    if (isMissingSchemaRelationError(error)) {
+      throw new Error(getOptionalFeatureSetupMessage("Employee chat notifications"));
+    }
+
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/employee");
+  revalidatePath("/employee/ai");
 }
