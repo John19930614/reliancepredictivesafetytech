@@ -10,6 +10,8 @@ import { isPortalAdminRole, portalUserRoles, type PortalUserRole } from "@/lib/u
 
 type SupabaseAdminClient = NonNullable<ReturnType<typeof createAdminClient>>;
 
+const employeePortalUrl = "https://reliancepredictivesafetytechnologies.com/employee";
+
 function usersPath(params: Record<string, string>) {
   const searchParams = new URLSearchParams(params);
   return `/employee/users?${searchParams.toString()}`;
@@ -194,6 +196,7 @@ export async function inviteEmployee(formData: FormData) {
 
   const { data, error } = await admin.auth.admin.inviteUserByEmail(values.email, {
     data: values.displayName ? { display_name: values.displayName } : undefined,
+    redirectTo: employeePortalUrl,
   });
 
   if (error || !data.user) {
@@ -266,7 +269,7 @@ export async function generateEmployeeAccessLink(formData: FormData) {
     type: "recovery",
     email,
     options: {
-      redirectTo: "https://reliancepredictivesafetytechnologies.com/employee",
+      redirectTo: employeePortalUrl,
     },
   });
 
