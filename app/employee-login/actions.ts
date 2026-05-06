@@ -3,6 +3,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://reliancepredictivesafetytechnologies.com";
+
 export async function login(formData: FormData) {
   const supabase = await createClient();
 
@@ -21,6 +23,30 @@ export async function login(formData: FormData) {
   }
 
   redirect(next.startsWith("/employee") ? next : "/employee");
+}
+
+export async function requestPasswordReset(formData: FormData) {
+  const supabase = await createClient();
+
+  if (!supabase) {
+    redirect("/employee-login?message=supabase-required");
+  }
+
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+
+  if (!email) {
+    redirect("/employee-login?message=reset-email-required");
+  }
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${siteUrl}/auth/update-password`,
+  });
+
+  if (error) {
+    redirect(`/employee-login?message=${encodeURIComponent(error.message)}`);
+  }
+
+  redirect("/employee-login?message=reset-sent");
 }
 
 export async function logout() {

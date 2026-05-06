@@ -62,22 +62,21 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data } = await supabase.auth.getClaims();
+  const userId = data?.claims?.sub;
 
-  if (isEmployeeRoute && !user) {
+  if (isEmployeeRoute && !userId) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/employee-login";
     loginUrl.searchParams.set("next", request.nextUrl.pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  if (isEmployeeRoute && user) {
+  if (isEmployeeRoute && userId) {
     const { data: role } = await supabase
       .from("user_roles")
       .select("role, account_status")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .eq("account_status", "active")
       .in("role", [
         "platform_admin",
@@ -101,7 +100,7 @@ export async function updateSession(request: NextRequest) {
     const isHrOnboardingRoute = request.nextUrl.pathname === "/employee/hr-onboarding";
 
     if (!isAdminRole) {
-      const onboardingLocked = await hasPendingRequiredOnboarding(supabase, user.id);
+      const onboardingLocked = await hasPendingRequiredOnboarding(supabase, userId);
 
       if (onboardingLocked && !isHrOnboardingRoute) {
         const onboardingUrl = request.nextUrl.clone();

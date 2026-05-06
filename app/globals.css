@@ -2259,6 +2259,230 @@ textarea {
   content: "";
 }
 
+.org-map-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.org-map-view-toggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.org-chart-zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #e2e6ea;
+  border-radius: 6px;
+  padding: 4px;
+  background: #f8fafc;
+}
+
+.org-chart-zoom-controls .icon-button {
+  width: 32px;
+  height: 32px;
+  border-color: transparent;
+  border-radius: 5px;
+  color: #334155;
+}
+
+.org-chart-zoom-controls .icon-button:hover:not(:disabled) {
+  background: #fff;
+  color: #8a5d05;
+}
+
+.org-chart-zoom-controls .icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.org-chart-zoom-controls span {
+  min-width: 42px;
+  color: #475467;
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-align: center;
+}
+
+.org-chart-viewport {
+  overflow: auto;
+  border: 1px solid #e0e4e8;
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(148, 163, 184, 0.11) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(148, 163, 184, 0.11) 1px, transparent 1px),
+    #f8fafc;
+  background-size: 30px 30px;
+  padding: 22px;
+}
+
+.org-chart-canvas {
+  min-width: max-content;
+  transform-origin: top center;
+  transition: transform 160ms ease;
+}
+
+.org-chart-roots,
+.org-chart-children {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.org-chart-roots {
+  align-items: flex-start;
+}
+
+.org-chart-item {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  min-width: 238px;
+}
+
+.org-chart-node-shell {
+  position: relative;
+  z-index: 1;
+}
+
+.org-chart-children {
+  position: relative;
+  margin-top: 34px;
+  padding-top: 28px;
+}
+
+.org-chart-children::before {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: calc(100% - 238px);
+  min-width: 0;
+  height: 2px;
+  transform: translateX(-50%);
+  background: rgba(201, 147, 43, 0.45);
+  content: "";
+}
+
+.org-chart-children > .org-chart-item::before {
+  position: absolute;
+  top: -28px;
+  left: 50%;
+  width: 2px;
+  height: 28px;
+  transform: translateX(-50%);
+  background: rgba(201, 147, 43, 0.45);
+  content: "";
+}
+
+.org-chart-card {
+  display: grid;
+  width: 238px;
+  min-height: 188px;
+  gap: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-top: 4px solid var(--gold);
+  border-radius: 8px;
+  padding: 13px;
+  background: #fff;
+  color: #111;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.11);
+}
+
+.org-chart-context {
+  border-top-color: #cbd5e1;
+  background: #fbfbfa;
+  opacity: 0.8;
+}
+
+.org-chart-card-top,
+.org-chart-status-row,
+.org-chart-assignee {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.org-chart-card-top {
+  justify-content: space-between;
+}
+
+.org-chart-department {
+  display: block;
+  margin-bottom: 4px;
+  color: #8a5d05;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.org-chart-card h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.org-chart-toggle {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  color: #334155;
+}
+
+.org-chart-toggle svg {
+  transition: transform 160ms ease;
+}
+
+.org-chart-toggle svg.collapsed {
+  transform: rotate(-90deg);
+}
+
+.org-chart-status-row {
+  flex-wrap: wrap;
+}
+
+.org-chart-assignee {
+  min-width: 0;
+  align-items: center;
+  border-radius: 6px;
+  padding: 8px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.org-chart-assignee span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.org-chart-assignee svg {
+  flex: 0 0 auto;
+  color: #9b6a0a;
+}
+
+.org-chart-meta {
+  display: grid;
+  gap: 5px;
+  color: #667085;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.org-chart-meta span {
+  overflow-wrap: anywhere;
+}
+
 .position-card {
   display: grid;
   gap: 12px;
@@ -3097,6 +3321,20 @@ textarea {
   .org-tree-children > .org-tree-item::before {
     left: -22px;
     width: 22px;
+  }
+
+  .org-map-controls,
+  .position-tree-toolbar .segmented-control {
+    justify-content: flex-start;
+  }
+
+  .org-chart-viewport {
+    padding: 14px;
+  }
+
+  .org-chart-roots,
+  .org-chart-children {
+    justify-content: flex-start;
   }
 
   .time-card-toolbar,

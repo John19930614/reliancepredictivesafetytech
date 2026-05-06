@@ -26,7 +26,7 @@ function buildCompanyAuthLink(tokenHash: string, type: "invite" | "recovery") {
   const url = new URL("/auth/confirm", siteUrl);
   url.searchParams.set("token_hash", tokenHash);
   url.searchParams.set("type", type);
-  url.searchParams.set("next", "/employee");
+  url.searchParams.set("next", type === "recovery" ? "/auth/update-password" : "/employee");
   return url.toString();
 }
 

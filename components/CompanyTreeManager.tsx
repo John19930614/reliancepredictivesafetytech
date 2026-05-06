@@ -1,7 +1,23 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BriefcaseBusiness, ChevronDown, CircleDollarSign, Mail, MapPin, Phone, Save, Search, UserPlus, Users } from "lucide-react";
+import {
+  BriefcaseBusiness,
+  ChartNetwork,
+  ChevronDown,
+  CircleDollarSign,
+  ListTree,
+  Mail,
+  MapPin,
+  Phone,
+  RotateCcw,
+  Save,
+  Search,
+  UserPlus,
+  Users,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import {
   companyPositionDepartments,
   companyPositionEmploymentTypes,
@@ -29,6 +45,7 @@ export type CurrentEmployeeOption = {
 };
 
 type PositionStatusFilter = "All" | (typeof companyPositionStatuses)[number];
+type OrgMapMode = "chart" | "list";
 
 type PositionNode = CompanyPosition & {
   children: PositionNode[];
@@ -76,6 +93,9 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
   const [message, setMessage] = useState("");
   const [statusFilter, setStatusFilter] = useState<PositionStatusFilter>("All");
   const [query, setQuery] = useState("");
+  const [orgMapMode, setOrgMapMode] = useState<OrgMapMode>("chart");
+  const [chartScale, setChartScale] = useState(1);
+  const [collapsedPositionIds, setCollapsedPositionIds] = useState<Set<string>>(() => new Set());
   const employeesByUserId = useMemo(
     () => new Map(employeeOptions.map((employee) => [employee.user_id, employee])),
     [employeeOptions],
@@ -166,6 +186,34 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
     return roots;
   }, [filteredPositions, positionsById, sortedPositions]);
   const filterTabs: PositionStatusFilter[] = ["All", ...companyPositionStatuses];
+  const chartScaleLabel = `${Math.round(chartScale * 100)}%`;
+
+  function adjustChartScale(direction: "in" | "out") {
+    setChartScale((current) => {
+      const next = direction === "in" ? current + 0.1 : current - 0.1;
+
+      return Math.min(1.3, Math.max(0.7, Number(next.toFixed(1))));
+    });
+  }
+
+  function resetChartView() {
+    setChartScale(1);
+    setCollapsedPositionIds(new Set());
+  }
+
+  function toggleChartNode(positionId: string) {
+    setCollapsedPositionIds((current) => {
+      const next = new Set(current);
+
+      if (next.has(positionId)) {
+        next.delete(positionId);
+      } else {
+        next.add(positionId);
+      }
+
+      return next;
+    });
+  }
 
   function getEmployeeAssignmentPatch(selectedUserId: string, existingPosition?: CompanyPosition) {
     if (
@@ -446,6 +494,58 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
     );
   }
 
+  function renderChartNode(position: PositionNode) {
+    const reportsTo = position.parent_position_id ? positionsById.get(position.parent_position_id)?.title : null;
+    const isHiringRole = position.status === "Open" || position.status === "Needed";
+    const directReportCount = childCountByPositionId.get(position.id) ?? 0;
+    const hasChildren = position.children.length > 0;
+    const isCollapsed = collapsedPositionIds.has(position.id);
+
+    return (
+      <li className="org-chart-item" key={position.id}>
+        <div className="org-chart-node-shell">
+          <article className={`org-chart-card ${position.matchesFilter ? "" : "org-chart-context"}`}>
+            <div className="org-chart-card-top">
+              <div>
+                <span className="org-chart-department">{position.department}</span>
+                <h3>{position.title}</h3>
+              </div>
+              {hasChildren ? (
+                <button
+                  aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${position.title}`}
+                  className="icon-button org-chart-toggle"
+                  onClick={() => toggleChartNode(position.id)}
+                  title={`${isCollapsed ? "Expand" : "Collapse"} ${position.title}`}
+                  type="button"
+                >
+                  <ChevronDown className={isCollapsed ? "collapsed" : ""} size={16} />
+                </button>
+              ) : null}
+            </div>
+            <div className="org-chart-status-row">
+              <span className={`status-pill status-${getStatusClass(position.status)}`}>{position.status}</span>
+              <span className={`priority-pill priority-${(position.hiring_priority ?? "Medium").toLowerCase()}`}>
+                {position.hiring_priority ?? "Medium"}
+              </span>
+            </div>
+            <div className="org-chart-assignee">
+              <Users size={15} />
+              <span>{position.employee_name || (isHiringRole ? "Hiring needed" : "Unassigned")}</span>
+            </div>
+            <div className="org-chart-meta">
+              <span>{reportsTo ? `Reports to ${reportsTo}` : "Top level"}</span>
+              <span>
+                {directReportCount} report{directReportCount === 1 ? "" : "s"}
+              </span>
+              <span>{position.location || "Location not set"}</span>
+            </div>
+          </article>
+        </div>
+        {hasChildren && !isCollapsed ? <ul className="org-chart-children">{position.children.map((child) => renderChartNode(child))}</ul> : null}
+      </li>
+    );
+  }
+
   return (
     <div className="company-tree-layout">
       <form action={createPosition} className="form-panel company-tree-add">
@@ -568,6 +668,54 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
                 value={query}
               />
             </div>
+            <div className="org-map-controls">
+              <div className="segmented-control org-map-view-toggle" aria-label="Choose org map view">
+                <button
+                  className={orgMapMode === "chart" ? "active" : ""}
+                  onClick={() => setOrgMapMode("chart")}
+                  title="Chart view"
+                  type="button"
+                >
+                  <ChartNetwork size={15} />
+                  Chart
+                </button>
+                <button
+                  className={orgMapMode === "list" ? "active" : ""}
+                  onClick={() => setOrgMapMode("list")}
+                  title="List view"
+                  type="button"
+                >
+                  <ListTree size={15} />
+                  List
+                </button>
+              </div>
+              <div className="org-chart-zoom-controls" aria-label="Org chart zoom controls">
+                <button
+                  aria-label="Zoom out"
+                  className="icon-button"
+                  disabled={chartScale <= 0.7}
+                  onClick={() => adjustChartScale("out")}
+                  title="Zoom out"
+                  type="button"
+                >
+                  <ZoomOut size={16} />
+                </button>
+                <span>{chartScaleLabel}</span>
+                <button
+                  aria-label="Zoom in"
+                  className="icon-button"
+                  disabled={chartScale >= 1.3}
+                  onClick={() => adjustChartScale("in")}
+                  title="Zoom in"
+                  type="button"
+                >
+                  <ZoomIn size={16} />
+                </button>
+                <button aria-label="Reset chart" className="icon-button" onClick={resetChartView} title="Reset chart" type="button">
+                  <RotateCcw size={16} />
+                </button>
+              </div>
+            </div>
             <div className="segmented-control" aria-label="Filter positions by status">
               {filterTabs.map((status) => (
                 <button
@@ -583,7 +731,16 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
           </div>
         </div>
 
-        {visibleTree.length > 0 ? <ul className="org-tree-root">{visibleTree.map((position) => renderPositionNode(position))}</ul> : null}
+        {visibleTree.length > 0 && orgMapMode === "chart" ? (
+          <div className="org-chart-viewport">
+            <div className="org-chart-canvas" style={{ transform: `scale(${chartScale})` }}>
+              <ul className="org-chart-roots">{visibleTree.map((position) => renderChartNode(position))}</ul>
+            </div>
+          </div>
+        ) : null}
+        {visibleTree.length > 0 && orgMapMode === "list" ? (
+          <ul className="org-tree-root">{visibleTree.map((position) => renderPositionNode(position))}</ul>
+        ) : null}
         {filteredPositions.length === 0 ? (
           <div className="empty-state">No positions match the current search and status filter.</div>
         ) : null}
