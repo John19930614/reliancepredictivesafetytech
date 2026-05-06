@@ -93,11 +93,11 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
 
   const [
     { data: newDemoRequests },
-    { data: staleLeads },
+    { data: activeLeads },
     { data: blockedChecklistItems },
     { data: highPriorityOperations },
     { data: openLegalIssues },
-    { data: submittedTimeCards },
+    { data: actionableTimeCards },
     { data: hrReviewAssignments },
     { data: pendingWorkflowProposals },
     { data: unreadNotificationRows, count: unreadNotifications },
@@ -107,7 +107,6 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
       .from("company_clients")
       .select("id, name, owner, lifecycle_stage, updated_at")
       .eq("lifecycle_stage", "Lead")
-      .lt("updated_at", staleLeadCutoff)
       .order("updated_at", { ascending: true })
       .limit(8),
     supabase
@@ -132,14 +131,14 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
       .limit(8),
     supabase
       .from("employee_time_cards")
-      .select("id, employee_user_id, week_start, week_end, submitted_at")
-      .eq("status", "submitted")
+      .select("id, employee_user_id, week_start, week_end, submitted_at, status")
+      .in("status", ["submitted", "rejected"])
       .order("submitted_at", { ascending: true })
       .limit(8),
     supabase
       .from("employee_document_assignments")
-      .select("id, user_id, verification_status, due_date, rejection_reason")
-      .in("verification_status", ["pending_review", "rejected"])
+      .select("id, user_id, status, verification_status, due_date, rejection_reason")
+      .or("status.eq.pending,verification_status.in.(pending_review,rejected,not_submitted)")
       .order("updated_at", { ascending: false })
       .limit(8),
     supabase
@@ -173,12 +172,15 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
       sourceId: request.id,
       reviewRequired: true,
     }))),
-    ...((staleLeads ?? []).map((lead) => ({
+    ...((activeLeads ?? []).map((lead) => {
+      const isStale = lead.updated_at ? lead.updated_at < staleLeadCutoff : true;
+
+      return {
       title: lead.name,
-      label: "Stale lead",
+      label: isStale ? "Stale lead" : "Lead follow-up",
       href: `/employee/clients/${lead.id}`,
-      priority: "medium" as const,
-      detail: `Lead untouched since ${formatDate(lead.updated_at)} - ${lead.owner || "unassigned"}`,
+      priority: isStale ? ("medium" as const) : ("low" as const),
+      detail: `${isStale ? "Untouched" : "Updated"} ${formatDate(lead.updated_at)} - ${lead.owner || "unassigned"}`,
       owner: lead.owner,
       dueDate: lead.updated_at,
       status: lead.lifecycle_stage ?? "Lead",
@@ -186,7 +188,8 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
       sourceType: "company_client",
       sourceId: lead.id,
       reviewRequired: false,
-    }))),
+      };
+    })),
     ...((blockedChecklistItems ?? []).map((item) => ({
       title: item.title,
       label: "Blocked checklist",
@@ -229,33 +232,43 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
       sourceId: issue.id,
       reviewRequired: true,
     }))),
-    ...((submittedTimeCards ?? []).map((card) => ({
+    ...((actionableTimeCards ?? []).map((card) => ({
       title: `Time card ${formatDate(card.week_start)}-${formatDate(card.week_end)}`,
-      label: "Time card review",
+      label: card.status === "rejected" ? "Time card correction" : "Time card review",
       href: "/employee/time-cards",
-      priority: "medium" as const,
-      detail: `Submitted ${formatDate(card.submitted_at)} by ${card.employee_user_id?.slice(0, 8) ?? "unknown"}`,
+      priority: card.status === "rejected" ? ("high" as const) : ("medium" as const),
+      detail: `${card.status === "rejected" ? "Rejected" : "Submitted"} ${formatDate(card.submitted_at)} by ${card.employee_user_id?.slice(0, 8) ?? "unknown"}`,
       owner: card.employee_user_id,
       dueDate: card.submitted_at ?? card.week_end,
-      status: "submitted",
+      status: card.status ?? "submitted",
       sourceLabel: "People",
       sourceType: "employee_time_card",
       sourceId: card.id,
-      reviewRequired: true,
+      reviewRequired: card.status === "submitted",
     }))),
     ...((hrReviewAssignments ?? []).map((assignment) => ({
       title: `HR document ${assignment.verification_status.replace("_", " ")}`,
-      label: "HR review",
+      label:
+        assignment.verification_status === "pending_review"
+          ? "HR review"
+          : assignment.verification_status === "rejected"
+            ? "HR correction"
+            : "HR document required",
       href: isAdmin ? `/employee/users/${assignment.user_id}` : "/employee/hr-onboarding",
-      priority: assignment.verification_status === "rejected" ? ("high" as const) : ("medium" as const),
+      priority:
+        assignment.verification_status === "rejected"
+          ? ("high" as const)
+          : assignment.verification_status === "pending_review"
+            ? ("medium" as const)
+            : ("low" as const),
       detail: assignment.rejection_reason || `Due ${formatDate(assignment.due_date)}`,
       owner: assignment.user_id,
       dueDate: assignment.due_date,
-      status: assignment.verification_status,
+      status: assignment.status ?? assignment.verification_status,
       sourceLabel: "People",
       sourceType: "employee_document_assignment",
       sourceId: assignment.id,
-      reviewRequired: true,
+      reviewRequired: assignment.verification_status === "pending_review",
     }))),
     ...((pendingWorkflowProposals ?? []).map((proposal) => ({
       title: proposal.title,
@@ -289,11 +302,11 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
 
   const counts = {
     newDemoRequests: newDemoRequests?.length ?? 0,
-    staleLeads: staleLeads?.length ?? 0,
+    staleLeads: activeLeads?.filter((lead) => !lead.updated_at || lead.updated_at < staleLeadCutoff).length ?? 0,
     blockedChecklistItems: blockedChecklistItems?.length ?? 0,
     highPriorityOperations: highPriorityOperations?.length ?? 0,
     openLegalIssues: openLegalIssues?.length ?? 0,
-    submittedTimeCards: submittedTimeCards?.length ?? 0,
+    submittedTimeCards: actionableTimeCards?.filter((card) => card.status === "submitted").length ?? 0,
     hrReviewItems: hrReviewAssignments?.length ?? 0,
     pendingWorkflowProposals: pendingWorkflowProposals?.length ?? 0,
     unreadNotifications: unreadNotifications ?? 0,
@@ -306,6 +319,6 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
     summary:
       `As of ${todayIsoDate()}, the portal has ${counts.newDemoRequests} new demo requests, ` +
       `${counts.highPriorityOperations} high-priority operations records, ${counts.openLegalIssues} legal items due soon, ` +
-      `${counts.submittedTimeCards} submitted time cards, and ${counts.hrReviewItems} HR review items.`,
+      `${counts.submittedTimeCards} submitted time cards, and ${counts.hrReviewItems} HR tasks.`,
   };
 }

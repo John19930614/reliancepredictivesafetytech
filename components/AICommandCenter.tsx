@@ -162,7 +162,7 @@ export function AICommandCenter({ snapshot, notifications, proposals, canManageP
           ["New requests", snapshot.counts.newDemoRequests],
           ["High ops", snapshot.counts.highPriorityOperations],
           ["Legal due", snapshot.counts.openLegalIssues],
-          ["HR review", snapshot.counts.hrReviewItems],
+          ["HR tasks", snapshot.counts.hrReviewItems],
           ["Proposals", snapshot.counts.pendingWorkflowProposals],
         ].map(([label, value]) => (
           <article className="ai-metric" key={label}>
