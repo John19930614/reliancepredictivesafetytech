@@ -159,6 +159,20 @@ export const recordTypes = [
   "Employee Record",
 ] as const;
 
+export const trainingModuleCategories = [
+  "General Safety",
+  "Onboarding",
+  "Toolbox Talk",
+  "Permit / JSA",
+  "Equipment",
+  "Emergency Response",
+  "Compliance",
+] as const;
+
+export const trainingModuleStatuses = ["Draft", "Ready", "Archived"] as const;
+export const clientTrainingDeliveryModes = ["In Person", "Virtual", "Hybrid"] as const;
+export const clientTrainingEventStatuses = ["Planned", "Ready", "Presented", "Canceled"] as const;
+
 export const hrOnboardingStatuses = ["not_started", "in_progress", "complete"] as const;
 export const employeeDocumentStatuses = ["pending", "signed", "waived"] as const;
 export const hrComplianceDocumentModes = ["fillable_form", "upload", "acknowledgment", "review_catalog"] as const;
@@ -540,6 +554,61 @@ export type CompanyLegalIssue = {
   linked_document_id: string | null;
   description: string | null;
   resolution_notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TrainingModule = {
+  id: string;
+  title: string;
+  description: string | null;
+  category: string;
+  audience: string;
+  status: string;
+  owner: string | null;
+  estimated_duration_minutes: number | null;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TrainingModuleFile = {
+  id: string;
+  module_id: string;
+  file_bucket: string;
+  file_path: string;
+  file_name: string;
+  file_type: string | null;
+  file_size: number | null;
+  uploaded_by: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ClientTrainingEvent = {
+  id: string;
+  client_id: string;
+  title: string;
+  scheduled_start_at: string | null;
+  delivery_mode: string;
+  location: string | null;
+  instructor: string | null;
+  status: string;
+  notes: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ClientTrainingEventModule = {
+  id: string;
+  event_id: string;
+  module_id: string;
+  sort_order: number;
+  presenter_notes: string | null;
   created_at: string;
   updated_at: string;
 };

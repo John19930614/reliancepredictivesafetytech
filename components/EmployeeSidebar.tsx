@@ -12,6 +12,7 @@ import {
   FileSignature,
   FileText,
   Gauge,
+  GraduationCap,
   Inbox,
   LayoutDashboard,
   ListChecks,
@@ -51,6 +52,7 @@ const navGroups = [
     items: [
       { href: "/employee/company-tree", label: "Company Tree", icon: Network },
       { href: "/employee/hr-onboarding", label: "HR Onboarding", icon: FileSignature },
+      { href: "/employee/training", label: "Training", icon: GraduationCap },
       { href: "/employee/hr-documents", label: "HR Documents", icon: FileText },
       { href: "/employee/time-cards", label: "Time Cards", icon: Clock3 },
     ],

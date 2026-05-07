@@ -41,6 +41,7 @@ const employeeSelfServicePaths = [
   "/employee/ai",
   "/employee/company-tree",
   "/employee/hr-onboarding",
+  "/employee/training",
   "/employee/time-cards",
 ] as const;
 

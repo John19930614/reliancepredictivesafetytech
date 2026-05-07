@@ -527,6 +527,155 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["company_document_requirements"]["Insert"]>;
         Relationships: [];
       };
+      training_modules: {
+        Row: {
+          id: string;
+          title: string;
+          description: string | null;
+          category: string;
+          audience: string;
+          status: string;
+          owner: string | null;
+          estimated_duration_minutes: number | null;
+          created_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          title: string;
+          description?: string | null;
+          category?: string;
+          audience?: string;
+          status?: string;
+          owner?: string | null;
+          estimated_duration_minutes?: number | null;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["training_modules"]["Insert"]>;
+        Relationships: [];
+      };
+      training_module_files: {
+        Row: {
+          id: string;
+          module_id: string;
+          file_bucket: string;
+          file_path: string;
+          file_name: string;
+          file_type: string | null;
+          file_size: number | null;
+          uploaded_by: string | null;
+          sort_order: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          module_id: string;
+          file_bucket?: string;
+          file_path: string;
+          file_name: string;
+          file_type?: string | null;
+          file_size?: number | null;
+          uploaded_by?: string | null;
+          sort_order?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["training_module_files"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "training_module_files_module_id_fkey";
+            columns: ["module_id"];
+            isOneToOne: false;
+            referencedRelation: "training_modules";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      client_training_events: {
+        Row: {
+          id: string;
+          client_id: string;
+          title: string;
+          scheduled_start_at: string | null;
+          delivery_mode: string;
+          location: string | null;
+          instructor: string | null;
+          status: string;
+          notes: string | null;
+          created_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          client_id: string;
+          title: string;
+          scheduled_start_at?: string | null;
+          delivery_mode?: string;
+          location?: string | null;
+          instructor?: string | null;
+          status?: string;
+          notes?: string | null;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["client_training_events"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "client_training_events_client_id_fkey";
+            columns: ["client_id"];
+            isOneToOne: false;
+            referencedRelation: "company_clients";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      client_training_event_modules: {
+        Row: {
+          id: string;
+          event_id: string;
+          module_id: string;
+          sort_order: number;
+          presenter_notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          event_id: string;
+          module_id: string;
+          sort_order?: number;
+          presenter_notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["client_training_event_modules"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "client_training_event_modules_event_id_fkey";
+            columns: ["event_id"];
+            isOneToOne: false;
+            referencedRelation: "client_training_events";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "client_training_event_modules_module_id_fkey";
+            columns: ["module_id"];
+            isOneToOne: false;
+            referencedRelation: "training_modules";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       client_onboarding_items: {
         Row: {
           id: string;
