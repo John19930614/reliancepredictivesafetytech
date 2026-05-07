@@ -137,6 +137,18 @@ export const demoRequestStatuses = [
   "closed",
 ] as const;
 
+export const supportTicketStatuses = ["new", "reviewing", "waiting on customer", "resolved", "closed"] as const;
+export const supportTicketPriorities = ["low", "normal", "high", "urgent"] as const;
+export const supportTicketCategories = [
+  "Login / account access",
+  "Document builder",
+  "Dashboard / reports",
+  "Billing / subscription",
+  "Bug report",
+  "Feature request",
+  "Other",
+] as const;
+
 export const lifecycleStages = [
   "Lead",
   "First Pitch",
@@ -462,6 +474,28 @@ export const legalIssueStatuses = ["Open", "In Review", "Waiting", "Resolved", "
 export const clientStatuses = ["Active", "Paused", "Lost", "Archived"] as const;
 export const timeCardStatuses = ["draft", "submitted", "approved", "rejected"] as const;
 
+export const financeTransactionTypes = ["income", "expense"] as const;
+export const financeIncomeStatuses = ["expected", "invoiced", "received", "cancelled"] as const;
+export const financeExpenseStatuses = ["planned", "due", "paid", "cancelled"] as const;
+export const financeReviewStatuses = ["unreviewed", "reviewed", "needs_follow_up"] as const;
+export const financeBudgetTypes = ["income", "expense"] as const;
+export const financeBudgetPeriods = ["monthly", "yearly"] as const;
+export const financeRecurringCadences = ["weekly", "monthly", "quarterly", "yearly"] as const;
+export const financeRecurringStatuses = ["active", "paused", "ended"] as const;
+export const financeCategories = [
+  "Sales / Revenue",
+  "Software / Hosting",
+  "Legal / Compliance",
+  "Payroll / Labor",
+  "Marketing / Sales",
+  "Insurance",
+  "Training / Certifications",
+  "Office / Admin",
+  "Travel",
+  "Taxes / Fees",
+  "Other",
+] as const;
+
 export const operationsRecordCategories = [
   "Operations",
   "People / HR",
@@ -473,6 +507,21 @@ export const operationsRecordCategories = [
   "Sales / Customer Success",
   "Vendor / Asset",
   "Leadership",
+] as const;
+
+export const operationsRecordTypes = [
+  "General",
+  "Task",
+  "SOP",
+  "Vendor",
+  "Asset",
+  "Risk",
+  "Internal Decision",
+  "Client Follow-up",
+  "Document Control",
+  "Compliance Item",
+  "Workflow",
+  "Other",
 ] as const;
 
 export const operationsRecordStatuses = ["Open", "In Progress", "Waiting", "Complete", "Archived"] as const;
@@ -547,6 +596,25 @@ export type DemoRequest = {
   message: string | null;
   status: string;
   created_at: string;
+};
+
+export type SupportTicket = {
+  id: string;
+  submitter_name: string;
+  submitter_email: string;
+  submitter_phone: string | null;
+  company: string | null;
+  subject: string;
+  category: string;
+  priority: string;
+  issue_url: string | null;
+  message: string;
+  status: string;
+  submitted_by_user_id: string | null;
+  assigned_to_user_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 };
 
 export type CompanyClient = {
@@ -765,6 +833,80 @@ export type EmployeeTimeCardPayroll = {
   updated_at: string;
 };
 
+export type CompanyFinanceAuthorizedUser = {
+  user_id: string;
+  access_label: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CompanyFinanceTransaction = {
+  id: string;
+  transaction_type: (typeof financeTransactionTypes)[number];
+  title: string;
+  amount: number;
+  transaction_date: string;
+  category: string;
+  status: string;
+  vendor_customer: string | null;
+  payment_method: string | null;
+  owner: string | null;
+  notes: string | null;
+  related_client_id: string | null;
+  related_document_id: string | null;
+  created_by: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CompanyFinanceBudget = {
+  id: string;
+  name: string;
+  budget_type: (typeof financeBudgetTypes)[number];
+  category: string;
+  period: (typeof financeBudgetPeriods)[number];
+  period_start: string;
+  amount: number;
+  owner: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CompanyFinanceRecurringItem = {
+  id: string;
+  item_type: (typeof financeTransactionTypes)[number];
+  title: string;
+  amount: number;
+  category: string;
+  cadence: (typeof financeRecurringCadences)[number];
+  next_due_date: string | null;
+  status: string;
+  vendor_customer: string | null;
+  payment_method: string | null;
+  owner: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CompanyFinanceReceipt = {
+  id: string;
+  transaction_id: string;
+  file_path: string;
+  file_name: string;
+  file_type: string | null;
+  file_size: number | null;
+  uploaded_by: string | null;
+  created_at: string;
+};
+
 export type CompanyOperationsRecord = {
   id: string;
   title: string;
@@ -855,6 +997,63 @@ export type WorkflowActionProposal = {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+};
+
+export type WebsiteContentItem = {
+  id: string;
+  content_key: string;
+  route_path: string;
+  content_type: string;
+  title: string;
+  fallback_value: string;
+  draft_value: string | null;
+  approved_value: string | null;
+  status: string;
+  risk_level: string;
+  ai_notes: string | null;
+  created_by: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  created_by_ai: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WebsiteHealthCheck = {
+  id: string;
+  scan_id: string;
+  route_path: string;
+  target_url: string;
+  status: string;
+  status_code: number | null;
+  response_ms: number | null;
+  checked_at: string;
+  error_message: string | null;
+  seo_title: string | null;
+  seo_description: string | null;
+  h1: string | null;
+  broken_links: unknown;
+  content_gaps: string[];
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type WebsiteOperationsEvent = {
+  id: string;
+  actor_user_id: string | null;
+  notification_id: string | null;
+  health_check_id: string | null;
+  proposal_id: string | null;
+  source_type: string;
+  source_id: string | null;
+  event_type: string;
+  title: string;
+  body: string | null;
+  risk_level: string;
+  created_by_ai: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
 };
 
 export const companyPositionSeed: CompanyPosition[] = [

@@ -5,6 +5,7 @@ import { getCommandSnapshot } from "@/lib/ai/command-context";
 import { getResendClient, NOTIFICATION_FROM } from "@/lib/email/resend";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateWorkflowNotificationsForUser } from "@/lib/notifications/rules";
+import { runWebsiteOperationsScan } from "@/lib/website-operations";
 
 type DigestResult = {
   userId: string;
@@ -42,6 +43,11 @@ export async function runDailyAiDigest() {
   const digestDate = centralDate();
   const resend = getResendClient();
   const appUrl = getAppUrl();
+
+  await runWebsiteOperationsScan(admin, {
+    baseUrl: appUrl,
+    notifyAdmins: true,
+  });
 
   const { data: roles, error: roleError } = await admin
     .from("user_roles")

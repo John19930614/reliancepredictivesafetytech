@@ -18,6 +18,8 @@ const proposalPatchAllowList: Record<string, readonly string[]> = {
   employee_document_assignments: ["verification_status", "rejection_reason", "notes"],
   hr_candidate_intakes: ["status", "notes", "human_decision", "human_decision_notes"],
   employee_payroll_setup_tasks: ["status", "due_date", "notes"],
+  website_content_items: ["draft_value", "approved_value", "status", "ai_notes", "metadata"],
+  website_operations_events: ["body", "risk_level", "metadata"],
 };
 
 async function getCurrentUser() {
@@ -141,6 +143,13 @@ export async function approveWorkflowProposal(formData: FormData) {
   let nextStatus = "approved";
 
   if (proposal.target_record_id && Object.keys(patch).length > 0) {
+    if (proposal.target_table === "website_content_items" && patch.status === "approved") {
+      Object.assign(patch, {
+        approved_by: user.id,
+        approved_at: appliedAt,
+      });
+    }
+
     const { error: updateError } = await (admin.from(proposal.target_table as never) as any)
       .update(patch)
       .eq("id", proposal.target_record_id);

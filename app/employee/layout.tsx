@@ -3,6 +3,7 @@ import { EmployeeSidebar } from "@/components/EmployeeSidebar";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/types";
+import { isPortalOwnerRole } from "@/lib/user-management";
 
 type EmployeeChatProfile = Database["public"]["Tables"]["employee_chat_profiles"]["Row"];
 type EmployeeChatThread = Database["public"]["Tables"]["employee_chat_threads"]["Row"];
@@ -19,6 +20,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
   } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
   let chatProps: React.ComponentProps<typeof EmployeePresenceChat> | null = null;
   let currentRole: { role: string; account_status: string } | null = null;
+  let canAccessFinance = false;
   let unreadNotificationCount = 0;
   let unreadChatNotificationCount = 0;
 
@@ -30,12 +32,14 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
       .eq("account_status", "active")
       .maybeSingle();
     currentRole = role;
+    const isOwner = role?.account_status === "active" && isPortalOwnerRole(role.role);
 
     const [
       { data: profiles, error: profilesError },
       { data: companyThread, error: companyThreadError },
       { count: notificationCount, error: notificationCountError },
       { count: chatNotificationCount, error: chatNotificationCountError },
+      { data: financeAuthorization, error: financeAuthorizationError },
     ] = await Promise.all([
       supabase.from("employee_chat_profiles").select("*").order("display_name"),
       supabase.from("employee_chat_threads").select("*").eq("thread_type", "company").maybeSingle(),
@@ -50,20 +54,23 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
         .eq("recipient_user_id", user.id)
         .eq("status", "unread")
         .eq("source_type", "employee_chat_message"),
+      supabase.from("company_finance_authorized_users").select("user_id").eq("user_id", user.id).maybeSingle(),
     ]);
 
     if (
       (profilesError && !isMissingSchemaRelationError(profilesError)) ||
       (companyThreadError && !isMissingSchemaRelationError(companyThreadError)) ||
       (notificationCountError && !isMissingSchemaRelationError(notificationCountError)) ||
-      (chatNotificationCountError && !isMissingSchemaRelationError(chatNotificationCountError))
+      (chatNotificationCountError && !isMissingSchemaRelationError(chatNotificationCountError)) ||
+      (financeAuthorizationError && !isMissingSchemaRelationError(financeAuthorizationError))
     ) {
       console.error(
         "Could not load employee shell data.",
-        profilesError ?? companyThreadError ?? notificationCountError ?? chatNotificationCountError,
+        profilesError ?? companyThreadError ?? notificationCountError ?? chatNotificationCountError ?? financeAuthorizationError,
       );
     }
 
+    canAccessFinance = Boolean(isOwner || financeAuthorization);
     unreadNotificationCount = notificationCount ?? 0;
     unreadChatNotificationCount = chatNotificationCount ?? 0;
 
@@ -103,6 +110,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
     <div className="portal-shell">
       <EmployeeSidebar
         accountStatus={currentRole?.account_status}
+        canAccessFinance={canAccessFinance}
         currentRole={currentRole?.role}
         unreadNotificationCount={unreadNotificationCount}
       />

@@ -39,6 +39,7 @@ export function isPortalSuperAdminRole(role: string | null | undefined) {
 const employeeSelfServicePaths = [
   "/employee",
   "/employee/ai",
+  "/employee/work",
   "/employee/company-tree",
   "/employee/hr-onboarding",
   "/employee/training",
@@ -66,10 +67,13 @@ const governancePaths = [
 ] as const;
 
 const adminPaths = [
+  "/employee/website-operations",
   "/employee/hr-documents",
   "/employee/users",
   "/employee/settings",
 ] as const;
+
+const ownerOnlyPaths = ["/employee/finance"] as const;
 
 const allPortalPaths = [
   ...employeeSelfServicePaths,
@@ -80,8 +84,8 @@ const allPortalPaths = [
 ] as const;
 
 export const portalRolePathAccess: Record<PortalUserRole, readonly string[]> = {
-  platform_admin: allPortalPaths,
-  super_admin: allPortalPaths,
+  platform_admin: [...allPortalPaths, ...ownerOnlyPaths],
+  super_admin: [...allPortalPaths, ...ownerOnlyPaths],
   company_admin: allPortalPaths,
   admin: allPortalPaths,
   internal_reviewer: [
@@ -108,6 +112,11 @@ function normalizePortalPath(pathname: string) {
   }
 
   return pathWithoutQuery;
+}
+
+export function isFinancePortalPath(pathname: string) {
+  const normalizedPath = normalizePortalPath(pathname);
+  return ownerOnlyPaths.some((allowedPath) => normalizedPath === allowedPath || normalizedPath.startsWith(`${allowedPath}/`));
 }
 
 export function canAccessEmployeePath(

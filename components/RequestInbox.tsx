@@ -1,13 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Mail, Phone, Search } from "lucide-react";
-import { demoRequestStatuses, type DemoRequest } from "@/lib/company-data";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, ExternalLink, Mail, Phone, Search } from "lucide-react";
+import { demoRequestStatuses, supportTicketStatuses, type DemoRequest, type SupportTicket } from "@/lib/company-data";
 import { createClient } from "@/lib/supabase/client";
 
 type RequestInboxProps = {
   initialRequests: DemoRequest[];
+  initialSupportTickets: SupportTicket[];
 };
+
+type InboxTab = "requests" | "support";
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-US", {
@@ -26,10 +29,23 @@ function normalizeStatusLabel(status: string) {
     .join(" ");
 }
 
-export function RequestInbox({ initialRequests }: RequestInboxProps) {
+function isLinkTarget(value: string) {
+  return value.startsWith("http://") || value.startsWith("https://") || value.startsWith("/");
+}
+
+export function RequestInbox({ initialRequests, initialSupportTickets }: RequestInboxProps) {
   const [requests, setRequests] = useState(initialRequests);
+  const [supportTickets, setSupportTickets] = useState(initialSupportTickets);
   const [filters, setFilters] = useState({ status: "", query: "" });
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<InboxTab>("requests");
+
+  useEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (tab === "support") {
+      setActiveTab("support");
+    }
+  }, []);
 
   const filteredRequests = useMemo(() => {
     const query = filters.query.trim().toLowerCase();
@@ -55,6 +71,33 @@ export function RequestInbox({ initialRequests }: RequestInboxProps) {
     });
   }, [filters, requests]);
 
+  const filteredSupportTickets = useMemo(() => {
+    const query = filters.query.trim().toLowerCase();
+
+    return supportTickets.filter((ticket) => {
+      const matchesStatus = !filters.status || ticket.status === filters.status;
+      const matchesQuery =
+        !query ||
+        [
+          ticket.submitter_name,
+          ticket.company,
+          ticket.submitter_email,
+          ticket.submitter_phone,
+          ticket.subject,
+          ticket.category,
+          ticket.priority,
+          ticket.issue_url,
+          ticket.message,
+        ]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(query));
+
+      return matchesStatus && matchesQuery;
+    });
+  }, [filters, supportTickets]);
+
+  const currentStatuses = activeTab === "support" ? supportTicketStatuses : demoRequestStatuses;
+
   async function updateStatus(request: DemoRequest, status: string) {
     setRequests((current) => current.map((item) => (item.id === request.id ? { ...item, status } : item)));
 
@@ -68,14 +111,43 @@ export function RequestInbox({ initialRequests }: RequestInboxProps) {
     setSavingId(null);
   }
 
+  async function updateSupportTicketStatus(ticket: SupportTicket, status: string) {
+    setSupportTickets((current) => current.map((item) => (item.id === ticket.id ? { ...item, status } : item)));
+
+    const supabase = createClient();
+    if (!supabase) {
+      return;
+    }
+
+    setSavingId(ticket.id);
+    await supabase.from("support_tickets").update({ status }).eq("id", ticket.id);
+    setSavingId(null);
+  }
+
+  function switchTab(tab: InboxTab) {
+    setActiveTab(tab);
+    setFilters({ status: "", query: "" });
+  }
+
   return (
     <section className="inbox-panel">
+      <div className="inbox-tabs" aria-label="Inbox type">
+        <button className={activeTab === "requests" ? "active" : undefined} onClick={() => switchTab("requests")} type="button">
+          Demo requests
+          <span>{requests.length}</span>
+        </button>
+        <button className={activeTab === "support" ? "active" : undefined} onClick={() => switchTab("support")} type="button">
+          Tech support
+          <span>{supportTickets.length}</span>
+        </button>
+      </div>
+
       <div className="filters">
         <div className="search-field">
           <Search aria-hidden="true" size={18} />
           <input
-            aria-label="Search requests"
-            placeholder="Search names, companies, messages"
+            aria-label={activeTab === "support" ? "Search support tickets" : "Search requests"}
+            placeholder={activeTab === "support" ? "Search tickets, subjects, messages" : "Search names, companies, messages"}
             value={filters.query}
             onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
           />
@@ -86,7 +158,7 @@ export function RequestInbox({ initialRequests }: RequestInboxProps) {
           onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}
         >
           <option value="">All statuses</option>
-          {demoRequestStatuses.map((status) => (
+          {currentStatuses.map((status) => (
             <option key={status} value={status}>
               {normalizeStatusLabel(status)}
             </option>
@@ -95,9 +167,11 @@ export function RequestInbox({ initialRequests }: RequestInboxProps) {
       </div>
 
       <div className="inbox-list">
-        {filteredRequests.length === 0 ? (
+        {activeTab === "requests" && filteredRequests.length === 0 ? (
           <div className="empty-state">No information or demo requests match the current filters.</div>
-        ) : (
+        ) : null}
+
+        {activeTab === "requests" ? (
           filteredRequests.map((request) => (
             <article className="request-card" key={request.id}>
               <div className="request-card-head">
@@ -150,7 +224,73 @@ export function RequestInbox({ initialRequests }: RequestInboxProps) {
               </div>
             </article>
           ))
-        )}
+        ) : null}
+
+        {activeTab === "support" && filteredSupportTickets.length === 0 ? (
+          <div className="empty-state">No tech support tickets match the current filters.</div>
+        ) : null}
+
+        {activeTab === "support"
+          ? filteredSupportTickets.map((ticket) => (
+              <article className="request-card support-ticket-card" id={`support-ticket-${ticket.id}`} key={ticket.id}>
+                <div className="request-card-head">
+                  <div>
+                    <div className="eyebrow">{formatDate(ticket.created_at)}</div>
+                    <h2>{ticket.subject}</h2>
+                    <p>
+                      {[ticket.submitter_name, ticket.company].filter(Boolean).join(" / ") || "Tech support ticket"}
+                    </p>
+                  </div>
+                  <span className="badge">{savingId === ticket.id ? "Saving" : normalizeStatusLabel(ticket.status)}</span>
+                </div>
+
+                <div className="request-meta">
+                  <a href={`mailto:${ticket.submitter_email}`}>
+                    <Mail size={16} />
+                    {ticket.submitter_email}
+                  </a>
+                  {ticket.submitter_phone ? (
+                    <a href={`tel:${ticket.submitter_phone}`}>
+                      <Phone size={16} />
+                      {ticket.submitter_phone}
+                    </a>
+                  ) : null}
+                  {ticket.issue_url && isLinkTarget(ticket.issue_url) ? (
+                    <a href={ticket.issue_url} rel="noreferrer" target="_blank">
+                      <ExternalLink size={16} />
+                      Page / area
+                    </a>
+                  ) : null}
+                </div>
+
+                <div className="request-products">
+                  <span>{ticket.category}</span>
+                  {ticket.issue_url && !isLinkTarget(ticket.issue_url) ? <span>{ticket.issue_url}</span> : null}
+                  <span className={ticket.priority === "urgent" || ticket.priority === "high" ? "ticket-priority-hot" : undefined}>
+                    {ticket.priority === "urgent" || ticket.priority === "high" ? <AlertTriangle size={14} /> : null}
+                    {normalizeStatusLabel(ticket.priority)} priority
+                  </span>
+                </div>
+
+                <p className="request-message">{ticket.message}</p>
+
+                <div className="field request-status">
+                  <label htmlFor={`support-status-${ticket.id}`}>Status</label>
+                  <select
+                    id={`support-status-${ticket.id}`}
+                    value={ticket.status}
+                    onChange={(event) => updateSupportTicketStatus(ticket, event.target.value)}
+                  >
+                    {supportTicketStatuses.map((status) => (
+                      <option key={status} value={status}>
+                        {normalizeStatusLabel(status)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </article>
+            ))
+          : null}
       </div>
     </section>
   );

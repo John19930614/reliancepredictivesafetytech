@@ -45,6 +45,64 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["portal_notifications"]["Insert"]>;
         Relationships: [];
       };
+      support_tickets: {
+        Row: {
+          id: string;
+          submitter_name: string;
+          submitter_email: string;
+          submitter_phone: string | null;
+          company: string | null;
+          subject: string;
+          category: string;
+          priority: string;
+          issue_url: string | null;
+          message: string;
+          status: string;
+          submitted_by_user_id: string | null;
+          assigned_to_user_id: string | null;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          submitter_name: string;
+          submitter_email: string;
+          submitter_phone?: string | null;
+          company?: string | null;
+          subject: string;
+          category?: string;
+          priority?: string;
+          issue_url?: string | null;
+          message: string;
+          status?: string;
+          submitted_by_user_id?: string | null;
+          assigned_to_user_id?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["support_tickets"]["Insert"]>;
+        Relationships: [];
+      };
+      support_ticket_recipients: {
+        Row: {
+          recipient_user_id: string;
+          label: string;
+          active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          recipient_user_id: string;
+          label?: string;
+          active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["support_ticket_recipients"]["Insert"]>;
+        Relationships: [];
+      };
       notification_preferences: {
         Row: {
           user_id: string;
@@ -139,6 +197,126 @@ export type Database = {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["ai_digest_runs"]["Insert"]>;
+        Relationships: [];
+      };
+      website_content_items: {
+        Row: {
+          id: string;
+          content_key: string;
+          route_path: string;
+          content_type: string;
+          title: string;
+          fallback_value: string;
+          draft_value: string | null;
+          approved_value: string | null;
+          status: string;
+          risk_level: string;
+          ai_notes: string | null;
+          created_by: string | null;
+          approved_by: string | null;
+          approved_at: string | null;
+          created_by_ai: boolean;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          content_key: string;
+          route_path?: string;
+          content_type?: string;
+          title: string;
+          fallback_value?: string;
+          draft_value?: string | null;
+          approved_value?: string | null;
+          status?: string;
+          risk_level?: string;
+          ai_notes?: string | null;
+          created_by?: string | null;
+          approved_by?: string | null;
+          approved_at?: string | null;
+          created_by_ai?: boolean;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["website_content_items"]["Insert"]>;
+        Relationships: [];
+      };
+      website_health_checks: {
+        Row: {
+          id: string;
+          scan_id: string;
+          route_path: string;
+          target_url: string;
+          status: string;
+          status_code: number | null;
+          response_ms: number | null;
+          checked_at: string;
+          error_message: string | null;
+          seo_title: string | null;
+          seo_description: string | null;
+          h1: string | null;
+          broken_links: Json;
+          content_gaps: string[];
+          metadata: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          scan_id?: string;
+          route_path: string;
+          target_url: string;
+          status?: string;
+          status_code?: number | null;
+          response_ms?: number | null;
+          checked_at?: string;
+          error_message?: string | null;
+          seo_title?: string | null;
+          seo_description?: string | null;
+          h1?: string | null;
+          broken_links?: Json;
+          content_gaps?: string[];
+          metadata?: Json;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["website_health_checks"]["Insert"]>;
+        Relationships: [];
+      };
+      website_operations_events: {
+        Row: {
+          id: string;
+          actor_user_id: string | null;
+          notification_id: string | null;
+          health_check_id: string | null;
+          proposal_id: string | null;
+          source_type: string;
+          source_id: string | null;
+          event_type: string;
+          title: string;
+          body: string | null;
+          risk_level: string;
+          created_by_ai: boolean;
+          metadata: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          actor_user_id?: string | null;
+          notification_id?: string | null;
+          health_check_id?: string | null;
+          proposal_id?: string | null;
+          source_type: string;
+          source_id?: string | null;
+          event_type: string;
+          title: string;
+          body?: string | null;
+          risk_level?: string;
+          created_by_ai?: boolean;
+          metadata?: Json;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["website_operations_events"]["Insert"]>;
         Relationships: [];
       };
       hr_candidate_intakes: {
@@ -454,6 +632,172 @@ export type Database = {
         };
         Update: Partial<Database["public"]["Tables"]["employee_time_card_payroll"]["Insert"]>;
         Relationships: [];
+      };
+      company_finance_authorized_users: {
+        Row: {
+          user_id: string;
+          access_label: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          access_label?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["company_finance_authorized_users"]["Insert"]>;
+        Relationships: [];
+      };
+      company_finance_transactions: {
+        Row: {
+          id: string;
+          transaction_type: string;
+          title: string;
+          amount: number;
+          transaction_date: string;
+          category: string;
+          status: string;
+          vendor_customer: string | null;
+          payment_method: string | null;
+          owner: string | null;
+          notes: string | null;
+          related_client_id: string | null;
+          related_document_id: string | null;
+          created_by: string | null;
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+          review_status: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          transaction_type: string;
+          title: string;
+          amount: number;
+          transaction_date?: string;
+          category: string;
+          status: string;
+          vendor_customer?: string | null;
+          payment_method?: string | null;
+          owner?: string | null;
+          notes?: string | null;
+          related_client_id?: string | null;
+          related_document_id?: string | null;
+          created_by?: string | null;
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+          review_status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["company_finance_transactions"]["Insert"]>;
+        Relationships: [];
+      };
+      company_finance_budgets: {
+        Row: {
+          id: string;
+          name: string;
+          budget_type: string;
+          category: string;
+          period: string;
+          period_start: string;
+          amount: number;
+          owner: string | null;
+          notes: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          budget_type: string;
+          category: string;
+          period?: string;
+          period_start: string;
+          amount: number;
+          owner?: string | null;
+          notes?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["company_finance_budgets"]["Insert"]>;
+        Relationships: [];
+      };
+      company_finance_recurring_items: {
+        Row: {
+          id: string;
+          item_type: string;
+          title: string;
+          amount: number;
+          category: string;
+          cadence: string;
+          next_due_date: string | null;
+          status: string;
+          vendor_customer: string | null;
+          payment_method: string | null;
+          owner: string | null;
+          notes: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          item_type: string;
+          title: string;
+          amount: number;
+          category: string;
+          cadence?: string;
+          next_due_date?: string | null;
+          status?: string;
+          vendor_customer?: string | null;
+          payment_method?: string | null;
+          owner?: string | null;
+          notes?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["company_finance_recurring_items"]["Insert"]>;
+        Relationships: [];
+      };
+      company_finance_receipts: {
+        Row: {
+          id: string;
+          transaction_id: string;
+          file_path: string;
+          file_name: string;
+          file_type: string | null;
+          file_size: number | null;
+          uploaded_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          transaction_id: string;
+          file_path: string;
+          file_name: string;
+          file_type?: string | null;
+          file_size?: number | null;
+          uploaded_by?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["company_finance_receipts"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "company_finance_receipts_transaction_id_fkey";
+            columns: ["transaction_id"];
+            isOneToOne: false;
+            referencedRelation: "company_finance_transactions";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       company_checklist_items: {
         Row: {
@@ -1629,6 +1973,10 @@ export type Database = {
         Returns: boolean;
       };
       is_company_portal_employee: {
+        Args: Record<PropertyKey, never>;
+        Returns: boolean;
+      };
+      is_company_finance_user: {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
       };

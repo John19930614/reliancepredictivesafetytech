@@ -9,11 +9,14 @@ import {
   BriefcaseBusiness,
   Clock3,
   Database,
+  DollarSign,
   FileSignature,
   FileText,
   Gauge,
+  Globe2,
   GraduationCap,
   Inbox,
+  KanbanSquare,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -34,6 +37,9 @@ const navGroups = [
     items: [
       { href: "/employee", label: "Dashboard", icon: LayoutDashboard },
       { href: "/employee/ai", label: "AI Command", icon: Bot },
+      { href: "/employee/website-operations", label: "Website Ops", icon: Globe2 },
+      { href: "/employee/work", label: "Work Management", icon: KanbanSquare },
+      { href: "/employee/finance", label: "Finance Center", icon: DollarSign, financeOnly: true },
       { href: "/employee/operations", label: "Operations Database", icon: Database },
       { href: "/employee/checklist", label: "Startup Checklist", icon: ListChecks },
     ],
@@ -85,16 +91,26 @@ function isActivePath(pathname: string, href: string) {
 
 type EmployeeSidebarProps = {
   accountStatus?: string | null;
+  canAccessFinance?: boolean;
   currentRole?: string | null;
   unreadNotificationCount?: number;
 };
 
-export function EmployeeSidebar({ accountStatus = "active", currentRole = "employee", unreadNotificationCount = 0 }: EmployeeSidebarProps) {
+export function EmployeeSidebar({
+  accountStatus = "active",
+  canAccessFinance = false,
+  currentRole = "employee",
+  unreadNotificationCount = 0,
+}: EmployeeSidebarProps) {
   const pathname = usePathname();
   const visibleGroups = navGroups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => canAccessEmployeePath(currentRole, accountStatus, item.href)),
+      items: group.items.filter((item) =>
+        "financeOnly" in item && item.financeOnly
+          ? accountStatus === "active" && canAccessFinance
+          : canAccessEmployeePath(currentRole, accountStatus, item.href),
+      ),
     }))
     .filter((group) => group.items.length > 0);
 

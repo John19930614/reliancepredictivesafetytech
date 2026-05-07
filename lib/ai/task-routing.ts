@@ -64,6 +64,11 @@ export function getWorkflowActionHref({
       return `/employee/users#candidate-${sourceId}`;
     case "hr_compliance_requirement":
       return `/employee/hr-documents#compliance-requirement-${sourceId}`;
+    case "website_health_check":
+    case "website_content_item":
+    case "website_operations_event":
+    case "website_scan":
+      return "/employee/website-operations";
     case "workflow_action_proposal":
       return `/employee/ai#workflow-proposal-${sourceId}`;
     default:
@@ -93,6 +98,11 @@ export function getWorkflowSourceLabel(sourceType: string | null | undefined) {
       return "Chat";
     case "workflow_action_proposal":
       return "AI Proposal";
+    case "website_health_check":
+    case "website_content_item":
+    case "website_operations_event":
+    case "website_scan":
+      return "Website";
     default:
       return "AI Notification";
   }

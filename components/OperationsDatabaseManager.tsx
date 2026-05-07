@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertTriangle, Database, Save, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Database, Save, Trash2, XCircle } from "lucide-react";
 import {
   operationsRecordCategories,
   operationsRecordPriorities,
   operationsRecordStatuses,
+  operationsRecordTypes,
   type CompanyClient,
   type CompanyDocument,
   type CompanyOperationsRecord,
@@ -16,6 +17,7 @@ type OperationsDatabaseManagerProps = {
   initialRecords: CompanyOperationsRecord[];
   clients: CompanyClient[];
   documents: CompanyDocument[];
+  ownerOptions?: string[];
 };
 
 type OperationsRecordPatch = Partial<
@@ -44,6 +46,9 @@ type OperationsFilters = {
   search: string;
 };
 
+const activeStatusFilter = "__active";
+const closedStatuses = ["Archived", "Complete"];
+
 function cleanOptional(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
   return text || null;
@@ -54,7 +59,7 @@ function todayIsoDate() {
 }
 
 function dueStatus(record: Pick<CompanyOperationsRecord, "due_date" | "status">) {
-  if (["Archived", "Complete"].includes(record.status)) return "closed";
+  if (isClosedRecord(record)) return "closed";
   if (!record.due_date) return "no_due";
   const today = todayIsoDate();
   if (record.due_date < today) return "overdue";
@@ -67,13 +72,25 @@ function dueStatusLabel(status: string) {
   return status.replace("_", " ");
 }
 
-export function OperationsDatabaseManager({ initialRecords, clients, documents }: OperationsDatabaseManagerProps) {
+function isClosedRecord(record: Pick<CompanyOperationsRecord, "status">) {
+  return closedStatuses.includes(record.status);
+}
+
+export function OperationsDatabaseManager({ initialRecords, clients, documents, ownerOptions = [] }: OperationsDatabaseManagerProps) {
   const [records, setRecords] = useState(initialRecords);
   const [drafts, setDrafts] = useState<Record<string, OperationsRecordPatch>>({});
-  const [filters, setFilters] = useState<OperationsFilters>({ category: "", status: "", priority: "", owner: "", dueStatus: "", search: "" });
+  const [filters, setFilters] = useState<OperationsFilters>({
+    category: "",
+    status: activeStatusFilter,
+    priority: "",
+    owner: "",
+    dueStatus: "",
+    search: "",
+  });
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
   const filteredRecords = useMemo(() => {
@@ -85,7 +102,7 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
 
       return (
         (!filters.category || view.category === filters.category) &&
-        (!filters.status || view.status === filters.status) &&
+        (filters.status === activeStatusFilter ? !isClosedRecord(view) : !filters.status || view.status === filters.status) &&
         (!filters.priority || view.priority === filters.priority) &&
         (!filters.owner || (filters.owner === "unassigned" ? !view.owner : view.owner === filters.owner)) &&
         (!filters.dueStatus || dueStatus(view) === filters.dueStatus) &&
@@ -96,14 +113,37 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
 
   const clientsById = useMemo(() => new Map(clients.map((client) => [client.id, client.name])), [clients]);
   const documentsById = useMemo(() => new Map(documents.map((document) => [document.id, document.title])), [documents]);
-  const ownerOptions = useMemo(() => {
+  const recordTypeOptions = useMemo(() => {
+    const knownTypes = new Set<string>(operationsRecordTypes);
+    const extraTypes = new Set<string>();
+
+    records.forEach((record) => {
+      const recordType = (drafts[record.id]?.record_type ?? record.record_type)?.trim();
+      if (recordType && !knownTypes.has(recordType)) extraTypes.add(recordType);
+    });
+
+    return [...operationsRecordTypes, ...[...extraTypes].sort((first, second) => first.localeCompare(second))];
+  }, [drafts, records]);
+  const ownerSelectOptions = useMemo(() => {
     const owners = new Set<string>();
+    ownerOptions.forEach((owner) => {
+      const trimmedOwner = owner.trim();
+      if (trimmedOwner) owners.add(trimmedOwner);
+    });
+    clients.forEach((client) => {
+      const owner = client.owner?.trim();
+      if (owner) owners.add(owner);
+    });
+    documents.forEach((document) => {
+      const owner = document.owner?.trim();
+      if (owner) owners.add(owner);
+    });
     records.forEach((record) => {
       const owner = (drafts[record.id]?.owner ?? record.owner)?.trim();
       if (owner) owners.add(owner);
     });
     return [...owners].sort((first, second) => first.localeCompare(second));
-  }, [drafts, records]);
+  }, [clients, documents, drafts, ownerOptions, records]);
 
   function viewRecord(record: CompanyOperationsRecord) {
     return { ...record, ...(drafts[record.id] ?? {}) };
@@ -194,8 +234,8 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
     }
   }
 
-  async function saveRecord(record: CompanyOperationsRecord) {
-    const patch = drafts[record.id];
+  async function saveRecord(record: CompanyOperationsRecord, quickPatch?: OperationsRecordPatch) {
+    const patch = quickPatch ? { ...(drafts[record.id] ?? {}), ...quickPatch } : drafts[record.id];
     if (!patch) {
       setStatusMessage("No changes to save.");
       return;
@@ -232,8 +272,38 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
         delete next[record.id];
         return next;
       });
-      setStatusMessage("Operations record saved.");
+      setStatusMessage(isClosedRecord(data as CompanyOperationsRecord) ? "Operations record closed and removed from active records." : "Operations record saved.");
     }
+  }
+
+  async function deleteRecord(record: CompanyOperationsRecord) {
+    if (!window.confirm(`Remove "${record.title}" from operations records?`)) return;
+
+    setDeletingId(record.id);
+    setMessage("");
+
+    const supabase = createClient();
+    if (!supabase) {
+      setDeletingId(null);
+      setStatusMessage("Supabase is required for the operations database.", "error");
+      return;
+    }
+
+    const { error } = await supabase.from("company_operations_records").delete().eq("id", record.id);
+    setDeletingId(null);
+
+    if (error) {
+      setStatusMessage(error.message, "error");
+      return;
+    }
+
+    setRecords((current) => current.filter((item) => item.id !== record.id));
+    setDrafts((current) => {
+      const next = { ...current };
+      delete next[record.id];
+      return next;
+    });
+    setStatusMessage("Operations record removed.");
   }
 
   return (
@@ -256,7 +326,11 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
           </div>
           <div className="field">
             <label htmlFor="record_type">Record type</label>
-            <input id="record_type" name="record_type" placeholder="Task, SOP, vendor, asset, risk..." />
+            <select id="record_type" name="record_type" defaultValue="General">
+              {recordTypeOptions.map((recordType) => (
+                <option key={recordType}>{recordType}</option>
+              ))}
+            </select>
           </div>
           <div className="form-grid">
             <div className="field">
@@ -278,7 +352,12 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
           </div>
           <div className="field">
             <label htmlFor="owner">Owner</label>
-            <input id="owner" name="owner" />
+            <select id="owner" name="owner" defaultValue="">
+              <option value="">Unassigned</option>
+              {ownerSelectOptions.map((owner) => (
+                <option key={owner}>{owner}</option>
+              ))}
+            </select>
           </div>
           <div className="field">
             <label htmlFor="due_date">Due date</label>
@@ -330,6 +409,7 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
             ))}
           </select>
           <select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}>
+            <option value={activeStatusFilter}>Active records</option>
             <option value="">All statuses</option>
             {operationsRecordStatuses.map((status) => (
               <option key={status}>{status}</option>
@@ -344,7 +424,7 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
           <select value={filters.owner} onChange={(event) => setFilters((current) => ({ ...current, owner: event.target.value }))}>
             <option value="">All owners</option>
             <option value="unassigned">No owner</option>
-            {ownerOptions.map((owner) => (
+            {ownerSelectOptions.map((owner) => (
               <option key={owner}>{owner}</option>
             ))}
           </select>
@@ -393,6 +473,22 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
                   </div>
                 <div className="form-grid">
                   <div className="field">
+                    <label>Category</label>
+                    <select value={draftRecord.category} onChange={(event) => updateDraft(record.id, { category: event.target.value })}>
+                      {operationsRecordCategories.map((category) => (
+                        <option key={category}>{category}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>Record type</label>
+                    <select value={draftRecord.record_type} onChange={(event) => updateDraft(record.id, { record_type: event.target.value })}>
+                      {recordTypeOptions.map((recordType) => (
+                        <option key={recordType}>{recordType}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
                     <label>Status</label>
                     <select value={draftRecord.status} onChange={(event) => updateDraft(record.id, { status: event.target.value })}>
                       {operationsRecordStatuses.map((status) => (
@@ -410,7 +506,12 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
                   </div>
                   <div className="field">
                     <label>Owner</label>
-                    <input value={draftRecord.owner ?? ""} onChange={(event) => updateDraft(record.id, { owner: event.target.value || null })} />
+                    <select value={draftRecord.owner ?? ""} onChange={(event) => updateDraft(record.id, { owner: event.target.value || null })}>
+                      <option value="">Unassigned</option>
+                      {ownerSelectOptions.map((owner) => (
+                        <option key={owner}>{owner}</option>
+                      ))}
+                    </select>
                   </div>
                   <div className="field">
                     <label>Due date</label>
@@ -450,13 +551,31 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents }
                   </div>
                 </div>
                 <div className="operations-record-actions">
-                  <button className="button button-primary" disabled={!dirty || savingId === record.id} onClick={() => saveRecord(record)} type="button">
+                  <button className="button button-primary" disabled={!dirty || savingId === record.id || deletingId === record.id} onClick={() => saveRecord(record)} type="button">
                     <Save size={17} />
                     {savingId === record.id ? "Saving..." : "Save"}
                   </button>
-                  <button className="button button-secondary button-neutral" disabled={!dirty || savingId === record.id} onClick={() => cancelDraft(record.id)} type="button">
+                  <button
+                    className="button button-secondary button-neutral"
+                    disabled={savingId === record.id || deletingId === record.id || draftRecord.status === "Complete"}
+                    onClick={() => saveRecord(record, { status: "Complete" })}
+                    type="button"
+                  >
+                    <CheckCircle2 size={17} />
+                    Mark Complete
+                  </button>
+                  <button className="button button-secondary button-neutral" disabled={!dirty || savingId === record.id || deletingId === record.id} onClick={() => cancelDraft(record.id)} type="button">
                     <XCircle size={17} />
                     Cancel
+                  </button>
+                  <button
+                    className="button button-danger"
+                    disabled={savingId === record.id || deletingId === record.id}
+                    onClick={() => deleteRecord(record)}
+                    type="button"
+                  >
+                    <Trash2 size={17} />
+                    {deletingId === record.id ? "Removing..." : "Remove"}
                   </button>
                   {messageTone === "error" && dirty ? (
                     <span className="operation-save-warning">

@@ -18,6 +18,8 @@ const allowedProposalTables = [
   "employee_document_assignments",
   "hr_candidate_intakes",
   "employee_payroll_setup_tasks",
+  "website_content_items",
+  "website_operations_events",
 ] as const;
 
 const aiCommandModel = process.env.AI_COMMAND_MODEL || "openai/gpt-5";
@@ -211,6 +213,36 @@ async function summarizeRecord(sourceType: string, sourceId: string) {
       : { error: "Compliance requirement not found." };
   }
 
+  if (sourceType === "website_health_check") {
+    const { data } = await supabase.from("website_health_checks").select("*").eq("id", sourceId).maybeSingle();
+    return data
+      ? {
+          type: sourceType,
+          title: `${data.route_path} website check`,
+          status: data.status,
+          summary:
+            `Website route ${data.route_path} returned HTTP ${data.status_code ?? "n/a"} in ${data.response_ms ?? 0} ms. ` +
+            `${data.content_gaps.length} content gaps. Broken links: ${JSON.stringify(data.broken_links)}.`,
+          actionHref: getWorkflowActionHref({ sourceType, sourceId }),
+        }
+      : { error: "Website health check not found." };
+  }
+
+  if (sourceType === "website_content_item") {
+    const { data } = await supabase.from("website_content_items").select("*").eq("id", sourceId).maybeSingle();
+    return data
+      ? {
+          type: sourceType,
+          title: data.title,
+          status: data.status,
+          summary:
+            `${data.content_key} controls ${data.route_path}. Draft: ${data.draft_value || "none"}. ` +
+            `Approved: ${data.approved_value || "none"}. Public changes require human approval.`,
+          actionHref: getWorkflowActionHref({ sourceType, sourceId }),
+        }
+      : { error: "Website content item not found." };
+  }
+
   return { error: "This record type is not supported yet." };
 }
 
@@ -257,6 +289,8 @@ export async function POST(req: Request) {
               "employee_onboarding_profile",
               "employee_payroll_setup_task",
               "hr_compliance_requirement",
+              "website_health_check",
+              "website_content_item",
             ]),
             sourceId: z.string().min(1),
           }),

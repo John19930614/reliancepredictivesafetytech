@@ -167,6 +167,7 @@ export function AICommandCenter({ snapshot, notifications, proposals, canManageP
           ["Onboarding", snapshot.counts.incompleteOnboarding],
           ["Payroll gaps", snapshot.counts.payrollSetupGaps],
           ["State reviews", snapshot.counts.stateComplianceReviews],
+          ["Website", snapshot.counts.websiteRouteReviews],
           ["Proposals", snapshot.counts.pendingWorkflowProposals],
         ].map(([label, value]) => (
           <article className="ai-metric" key={label}>

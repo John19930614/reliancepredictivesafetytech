@@ -475,32 +475,34 @@ export function EmployeePresenceChat({
             </section>
 
             <section className="employee-chat-conversation" aria-label="Messages">
-              {statusMessage ? <div className="employee-chat-status">{statusMessage}</div> : null}
-              {activeTab === "direct" && !selectedRecipient ? (
-                <div className="employee-chat-empty">Choose an employee.</div>
-              ) : loadingThreadId === activeThread?.id || loadingThreadId === selectedRecipientId ? (
-                <div className="employee-chat-empty">Loading chat.</div>
-              ) : activeMessages.length === 0 ? (
-                <div className="employee-chat-empty">No messages yet.</div>
-              ) : (
-                <div className="employee-chat-message-list">
-                  {activeMessages.map((message) => {
-                    const mine = message.sender_user_id === currentUser.id;
-                    const sender = message.sender_user_id ? profileByUserId.get(message.sender_user_id) : undefined;
+              <div className="employee-chat-thread-space">
+                {statusMessage ? <div className="employee-chat-status">{statusMessage}</div> : null}
+                {activeTab === "direct" && !selectedRecipient ? (
+                  <div className="employee-chat-empty">Choose an employee.</div>
+                ) : loadingThreadId === activeThread?.id || loadingThreadId === selectedRecipientId ? (
+                  <div className="employee-chat-empty">Loading chat.</div>
+                ) : activeMessages.length === 0 ? (
+                  <div className="employee-chat-empty">No messages yet.</div>
+                ) : (
+                  <div className="employee-chat-message-list">
+                    {activeMessages.map((message) => {
+                      const mine = message.sender_user_id === currentUser.id;
+                      const sender = message.sender_user_id ? profileByUserId.get(message.sender_user_id) : undefined;
 
-                    return (
-                      <article className={mine ? "employee-chat-message mine" : "employee-chat-message"} key={message.id}>
-                        <div>
-                          <strong>{mine ? "You" : getProfileName(sender)}</strong>
-                          <span>{formatMessageTime(message.created_at)}</span>
-                        </div>
-                        <p>{message.body}</p>
-                      </article>
-                    );
-                  })}
-                  <div ref={messageEndRef} />
-                </div>
-              )}
+                      return (
+                        <article className={mine ? "employee-chat-message mine" : "employee-chat-message"} key={message.id}>
+                          <div>
+                            <strong>{mine ? "You" : getProfileName(sender)}</strong>
+                            <span>{formatMessageTime(message.created_at)}</span>
+                          </div>
+                          <p>{message.body}</p>
+                        </article>
+                      );
+                    })}
+                    <div ref={messageEndRef} />
+                  </div>
+                )}
+              </div>
 
               <form className="employee-chat-composer" onSubmit={handleSend}>
                 <textarea

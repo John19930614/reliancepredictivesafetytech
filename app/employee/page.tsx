@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Clock3,
   Database,
+  DollarSign,
   FileText,
   Gauge,
   Inbox,
@@ -32,7 +33,7 @@ import {
 } from "@/lib/company-data";
 import { getCommandSnapshot, type CommandPriorityItem } from "@/lib/ai/command-context";
 import { createClient } from "@/lib/supabase/server";
-import { canAccessEmployeePath } from "@/lib/user-management";
+import { canAccessEmployeePath, isPortalOwnerRole } from "@/lib/user-management";
 
 const moduleGroups = [
   {
@@ -40,6 +41,8 @@ const moduleGroups = [
     description: "Company records, launch readiness, and decision control.",
     modules: [
       { title: "AI Command Center", href: "/employee/ai", icon: Bot },
+      { title: "Work Management", href: "/employee/work", icon: ListChecks },
+      { title: "Finance Center", href: "/employee/finance", icon: DollarSign },
       { title: "Operations Database", href: "/employee/operations", icon: Database },
       { title: "Startup Checklist", href: "/employee/checklist", icon: ListChecks },
       { title: "Launch Gate", href: "/employee/launch-gate", icon: BookOpenCheck },
@@ -152,8 +155,16 @@ export default async function EmployeeDashboardPage() {
           .eq("user_id", user.id)
           .maybeSingle()
       : { data: null };
+  const { data: financeAuthorization } =
+    supabase && user
+      ? await supabase.from("company_finance_authorized_users").select("user_id").eq("user_id", user.id).maybeSingle()
+      : { data: null };
+  const canAccessFinance = Boolean(
+    currentRole?.account_status === "active" && (isPortalOwnerRole(currentRole.role) || financeAuthorization),
+  );
+  const canManageFinanceRecords = Boolean(financeAuthorization);
   const canOpenPath = (href: string) =>
-    !supabase || canAccessEmployeePath(currentRole?.role, currentRole?.account_status, href);
+    !supabase || (href === "/employee/finance" ? canAccessFinance : canAccessEmployeePath(currentRole?.role, currentRole?.account_status, href));
   const [
     { count: checklistCount },
     { count: blockedChecklistCount },
@@ -238,7 +249,67 @@ export default async function EmployeeDashboardPage() {
   const approvedReadiness = percent(approvedDocumentCount ?? 0, documentCount ?? 0);
   const activeRiskCount = (openLegalIssueCount ?? 0) + (operationRows.length ?? 0) + (blockedChecklistCount ?? 0);
   const commandSnapshot = supabase && user ? await getCommandSnapshot(supabase, user.id) : null;
-  const workItems = (commandSnapshot?.priorityItems ?? []).filter((item) => canOpenPath(item.actionHref));
+  const financePriorityItems: CommandPriorityItem[] = [];
+  let financeOpenAmount = 0;
+  let financeReviewCount = 0;
+
+  if (supabase && canManageFinanceRecords) {
+    const [{ data: financeTransactions }, { data: financeRecurringItems }] = await Promise.all([
+      supabase.from("company_finance_transactions").select("*").neq("status", "cancelled").order("transaction_date", { ascending: true }).limit(80),
+      supabase.from("company_finance_recurring_items").select("*").eq("status", "active").order("next_due_date", { ascending: true }).limit(30),
+    ]);
+    const today = new Date().toISOString().slice(0, 10);
+    const soon = new Date();
+    soon.setDate(soon.getDate() + 14);
+    const soonDate = soon.toISOString().slice(0, 10);
+
+    (financeTransactions ?? []).forEach((transaction) => {
+      const open =
+        (transaction.transaction_type === "expense" && ["planned", "due"].includes(transaction.status)) ||
+        (transaction.transaction_type === "income" && ["expected", "invoiced"].includes(transaction.status));
+      if (open) financeOpenAmount += Number(transaction.amount);
+      if (transaction.review_status !== "reviewed") financeReviewCount += 1;
+      if (open && transaction.transaction_date <= soonDate) {
+        financePriorityItems.push({
+          title: transaction.title,
+          label: transaction.transaction_type === "expense" ? "Finance due" : "Income follow-up",
+          href: "/employee/finance",
+          actionHref: "/employee/finance",
+          priority: transaction.transaction_date < today ? "high" : "medium",
+          detail: `${transaction.category} - $${Number(transaction.amount).toFixed(2)} - due ${formatDate(transaction.transaction_date)}`,
+          owner: transaction.owner,
+          dueDate: transaction.transaction_date,
+          status: transaction.status,
+          sourceLabel: "Finance",
+          sourceType: "company_finance_transaction",
+          sourceId: transaction.id,
+          reviewRequired: transaction.review_status !== "reviewed",
+        });
+      }
+    });
+
+    (financeRecurringItems ?? []).forEach((item) => {
+      if (item.next_due_date && item.next_due_date <= soonDate) {
+        financePriorityItems.push({
+          title: item.title,
+          label: "Recurring finance",
+          href: "/employee/finance",
+          actionHref: "/employee/finance",
+          priority: item.next_due_date < today ? "high" : "medium",
+          detail: `${item.category} - $${Number(item.amount).toFixed(2)} - next ${formatDate(item.next_due_date)}`,
+          owner: item.owner,
+          dueDate: item.next_due_date,
+          status: item.status,
+          sourceLabel: "Finance",
+          sourceType: "company_finance_recurring_item",
+          sourceId: item.id,
+          reviewRequired: false,
+        });
+      }
+    });
+  }
+
+  const workItems = [...financePriorityItems, ...(commandSnapshot?.priorityItems ?? [])].filter((item) => canOpenPath(item.actionHref));
   const myWorkItems = workItems.filter((item) => !item.reviewRequired).slice(0, 6);
   const reviewItems = workItems.filter((item) => item.reviewRequired).slice(0, 6);
   const riskItems = workItems
@@ -273,6 +344,13 @@ export default async function EmployeeDashboardPage() {
       detail: "Submitted for review",
       icon: Clock3,
       href: "/employee/time-cards",
+    },
+    {
+      label: "Finance control",
+      value: financeReviewCount,
+      detail: canManageFinanceRecords ? `$${financeOpenAmount.toFixed(2)} open cash movement` : "Owner finance access",
+      icon: DollarSign,
+      href: "/employee/finance",
     },
     {
       label: "Controlled docs",

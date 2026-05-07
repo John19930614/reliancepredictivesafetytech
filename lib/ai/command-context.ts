@@ -42,6 +42,8 @@ export type CommandSnapshot = {
     pendingOnboardingReviews: number;
     payrollSetupGaps: number;
     stateComplianceReviews: number;
+    websiteRouteReviews: number;
+    websiteContentGaps: number;
     pendingWorkflowProposals: number;
     unreadNotifications: number;
   };
@@ -120,6 +122,7 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
     { data: incompleteProfiles },
     { data: payrollSetupTasks },
     { data: stateComplianceReviews },
+    { data: websiteRouteReviews },
     { data: pendingWorkflowProposals },
     { data: unreadNotificationRows, count: unreadNotifications },
   ] = await Promise.all([
@@ -192,6 +195,14 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
           .eq("jurisdiction_level", "state")
           .or("active.eq.false,review_status.neq.reviewed")
           .order("sort_order")
+          .limit(8)
+      : { data: [] },
+    isAdmin
+      ? supabase
+          .from("website_health_checks")
+          .select("id, route_path, status, status_code, response_ms, checked_at, content_gaps, broken_links")
+          .neq("status", "ok")
+          .order("checked_at", { ascending: false })
           .limit(8)
       : { data: [] },
     supabase
@@ -433,6 +444,25 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
       sourceId: requirement.id,
       reviewRequired: true,
     }))),
+    ...((websiteRouteReviews ?? []).map((check) => {
+      const brokenLinkCount = Array.isArray(check.broken_links) ? check.broken_links.length : 0;
+      const gapCount = check.content_gaps?.length ?? 0;
+
+      return {
+        title: `${check.route_path} website review`,
+        label: check.status === "error" ? "Website route error" : "Website route review",
+        href: getWorkflowActionHref({ sourceType: "website_health_check", sourceId: check.id }),
+        priority: check.status === "error" ? ("high" as const) : ("medium" as const),
+        detail: `HTTP ${check.status_code ?? "n/a"} - ${check.response_ms ?? 0} ms - ${brokenLinkCount} link warning${brokenLinkCount === 1 ? "" : "s"} - ${gapCount} content gap${gapCount === 1 ? "" : "s"}`,
+        owner: null,
+        dueDate: check.checked_at,
+        status: check.status,
+        sourceLabel: getWorkflowSourceLabel("website_health_check"),
+        sourceType: "website_health_check",
+        sourceId: check.id,
+        reviewRequired: true,
+      };
+    })),
     ...((pendingWorkflowProposals ?? []).map((proposal) => ({
       title: proposal.title,
       label: "Workflow proposal",
@@ -485,6 +515,8 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
     pendingOnboardingReviews: hrReviewAssignments?.filter((assignment) => assignment.verification_status === "pending_review").length ?? 0,
     payrollSetupGaps: payrollSetupTasks?.length ?? 0,
     stateComplianceReviews: stateComplianceReviews?.length ?? 0,
+    websiteRouteReviews: websiteRouteReviews?.length ?? 0,
+    websiteContentGaps: websiteRouteReviews?.reduce((count, check) => count + (check.content_gaps?.length ?? 0), 0) ?? 0,
     pendingWorkflowProposals: pendingWorkflowProposals?.length ?? 0,
     unreadNotifications: unreadNotifications ?? 0,
   };
@@ -498,6 +530,7 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
       `${counts.highPriorityOperations} high-priority operations records, ${counts.openLegalIssues} legal items due soon, ` +
       `${counts.submittedTimeCards} submitted time cards, ${counts.hrReviewItems} HR tasks, ` +
       `${counts.onboardingCandidates} candidate intakes, ${counts.incompleteOnboarding} incomplete onboarding profiles, ` +
-      `${counts.payrollSetupGaps} payroll setup gaps, and ${counts.stateComplianceReviews} state compliance reviews.`,
+      `${counts.payrollSetupGaps} payroll setup gaps, ${counts.stateComplianceReviews} state compliance reviews, ` +
+      `and ${counts.websiteRouteReviews} website route reviews.`,
   };
 }
