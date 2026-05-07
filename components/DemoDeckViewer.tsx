@@ -4,16 +4,18 @@ import { ChevronLeft, ChevronRight, Maximize2, Minimize2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const TOTAL_DECK_PAGES = 19;
+const SLIDE_PATH = "/demo-deck-slides";
+
+function getSlideSrc(page: number) {
+  return `${SLIDE_PATH}/slide-${String(page).padStart(2, "0")}.png`;
+}
 
 export function DemoDeckViewer() {
   const [page, setPage] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const viewerRef = useRef<HTMLDivElement>(null);
 
-  const viewerSrc = useMemo(
-    () => `/demo-deck.pdf#page=${page}&toolbar=0&navpanes=0&scrollbar=0&view=FitH`,
-    [page],
-  );
+  const slideSrc = useMemo(() => getSlideSrc(page), [page]);
 
   useEffect(() => {
     const syncFullscreenState = () => {
@@ -23,6 +25,15 @@ export function DemoDeckViewer() {
     document.addEventListener("fullscreenchange", syncFullscreenState);
     return () => document.removeEventListener("fullscreenchange", syncFullscreenState);
   }, []);
+
+  useEffect(() => {
+    [page - 1, page + 1]
+      .filter((slidePage) => slidePage >= 1 && slidePage <= TOTAL_DECK_PAGES)
+      .forEach((slidePage) => {
+        const image = new Image();
+        image.src = getSlideSrc(slidePage);
+      });
+  }, [page]);
 
   const goToPreviousPage = () => {
     setPage((currentPage) => Math.max(1, currentPage - 1));
@@ -62,8 +73,8 @@ export function DemoDeckViewer() {
         </button>
       </div>
 
-      <div className="demo-pdf-viewer">
-        <iframe key={viewerSrc} src={viewerSrc} title={`Reliance demo presentation page ${page}`} />
+      <div className="demo-slide-viewer">
+        <img src={slideSrc} alt={`Reliance demo presentation slide ${page}`} />
       </div>
     </div>
   );
