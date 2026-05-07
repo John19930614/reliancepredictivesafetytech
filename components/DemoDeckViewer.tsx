@@ -3,7 +3,7 @@
 import { ChevronLeft, ChevronRight, Maximize2, Minimize2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const TOTAL_DECK_PAGES = 18;
+const TOTAL_DECK_PAGES = 19;
 
 export function DemoDeckViewer() {
   const [page, setPage] = useState(1);
