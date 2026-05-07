@@ -163,6 +163,10 @@ export function AICommandCenter({ snapshot, notifications, proposals, canManageP
           ["High ops", snapshot.counts.highPriorityOperations],
           ["Legal due", snapshot.counts.openLegalIssues],
           ["HR tasks", snapshot.counts.hrReviewItems],
+          ["Candidates", snapshot.counts.onboardingCandidates],
+          ["Onboarding", snapshot.counts.incompleteOnboarding],
+          ["Payroll gaps", snapshot.counts.payrollSetupGaps],
+          ["State reviews", snapshot.counts.stateComplianceReviews],
           ["Proposals", snapshot.counts.pendingWorkflowProposals],
         ].map(([label, value]) => (
           <article className="ai-metric" key={label}>
@@ -274,7 +278,7 @@ export function AICommandCenter({ snapshot, notifications, proposals, canManageP
               <div className="empty-state">No unread notifications.</div>
             ) : (
               notifications.map((notification) => (
-                <article className="ai-notification-row" key={notification.id}>
+                <article className="ai-notification-row" id={`notification-${notification.id}`} key={notification.id}>
                   <div>
                     <span className={priorityClass(notification.priority)}>{notification.priority}</span>
                     <h3>{notification.title}</h3>
@@ -318,7 +322,7 @@ export function AICommandCenter({ snapshot, notifications, proposals, canManageP
               <div className="empty-state">No pending AI workflow proposals.</div>
             ) : (
               proposals.map((proposal) => (
-                <article className="ai-proposal-row" key={proposal.id}>
+                <article className="ai-proposal-row" id={`workflow-proposal-${proposal.id}`} key={proposal.id}>
                   <div>
                     <span className={priorityClass(proposal.risk_level)}>{proposal.risk_level}</span>
                     <h3>{proposal.title}</h3>

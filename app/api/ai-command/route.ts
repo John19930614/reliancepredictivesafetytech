@@ -1,6 +1,8 @@
 import { convertToModelMessages, stepCountIs, streamText, tool, type UIMessage } from "ai";
 import { z } from "zod";
 import { getCommandSnapshot } from "@/lib/ai/command-context";
+import { cleanEmployeeActionHref, getWorkflowActionHref } from "@/lib/ai/task-routing";
+import { createHrAutomationNotification } from "@/lib/hr-automation";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@/lib/supabase/types";
 
@@ -14,6 +16,8 @@ const allowedProposalTables = [
   "company_documents",
   "employee_time_cards",
   "employee_document_assignments",
+  "hr_candidate_intakes",
+  "employee_payroll_setup_tasks",
 ] as const;
 
 const aiCommandModel = process.env.AI_COMMAND_MODEL || "openai/gpt-5";
@@ -91,6 +95,122 @@ async function summarizeRecord(sourceType: string, sourceId: string) {
       : { error: "Legal issue not found." };
   }
 
+  if (sourceType === "employee_time_card") {
+    const { data } = await supabase.from("employee_time_cards").select("*").eq("id", sourceId).maybeSingle();
+    const { data: profile } = data?.employee_user_id
+      ? await supabase
+          .from("employee_profiles")
+          .select("display_name, legal_name, email")
+          .eq("user_id", data.employee_user_id)
+          .maybeSingle()
+      : { data: null };
+    const employeeName = profile?.display_name || profile?.legal_name || profile?.email || data?.employee_user_id?.slice(0, 8) || "Employee";
+
+    return data
+      ? {
+          type: sourceType,
+          title: `${employeeName} time card`,
+          status: data.status,
+          summary: `${employeeName} has a ${data.status} time card for ${data.week_start} through ${data.week_end}. Submitted: ${data.submitted_at || "not submitted"}.`,
+          actionHref: getWorkflowActionHref({ sourceType, sourceId }),
+        }
+      : { error: "Time card not found." };
+  }
+
+  if (sourceType === "employee_document_assignment") {
+    const { data } = await supabase.from("employee_document_assignments").select("*").eq("id", sourceId).maybeSingle();
+    const [{ data: profile }, { data: template }] = await Promise.all([
+      data?.user_id
+        ? supabase.from("employee_profiles").select("display_name, legal_name, email").eq("user_id", data.user_id).maybeSingle()
+        : { data: null },
+      data?.template_id ? supabase.from("hr_document_templates").select("title, category").eq("id", data.template_id).maybeSingle() : { data: null },
+    ]);
+    const employeeName = profile?.display_name || profile?.legal_name || profile?.email || data?.user_id?.slice(0, 8) || "Employee";
+    const documentTitle = template?.title || "HR document";
+
+    return data
+      ? {
+          type: sourceType,
+          title: `${documentTitle} for ${employeeName}`,
+          status: `${data.status} / ${data.verification_status}`,
+          summary:
+            `${employeeName} has ${documentTitle} marked ${data.status} with verification ${data.verification_status}. ` +
+            `Due: ${data.due_date || "not set"}. ${data.rejection_reason ? `Rejection reason: ${data.rejection_reason}` : ""}`,
+          actionHref: getWorkflowActionHref({
+            sourceType,
+            sourceId,
+            ownerUserId: data.user_id,
+            isAdmin: true,
+          }),
+        }
+      : { error: "HR assignment not found." };
+  }
+
+  if (sourceType === "hr_candidate_intake") {
+    const { data } = await supabase.from("hr_candidate_intakes").select("*").eq("id", sourceId).maybeSingle();
+    return data
+      ? {
+          type: sourceType,
+          title: data.candidate_name,
+          status: `${data.status} / ${data.human_decision}`,
+          summary:
+            `${data.candidate_name} (${data.email}) is a ${data.target_role} candidate in ${data.jurisdiction_state || "an unset state"}. ` +
+            `Notes: ${data.notes || "No notes."} Human decision: ${data.human_decision_notes || data.human_decision}.`,
+          actionHref: getWorkflowActionHref({ sourceType, sourceId }),
+        }
+      : { error: "Candidate intake not found." };
+  }
+
+  if (sourceType === "employee_onboarding_profile") {
+    const { data } = await supabase.from("employee_profiles").select("*").eq("user_id", sourceId).maybeSingle();
+    return data
+      ? {
+          type: sourceType,
+          title: data.display_name || data.legal_name || data.email || "Employee onboarding",
+          status: data.onboarding_status,
+          summary:
+            `${data.display_name || data.legal_name || data.email || "Employee"} onboarding is ${data.onboarding_status}. ` +
+            `Work state: ${data.work_state || "not set"}. Profile status: ${data.profile_status || "active"}.`,
+          actionHref: getWorkflowActionHref({ sourceType, sourceId, ownerUserId: data.user_id, isAdmin: true }),
+        }
+      : { error: "Employee profile not found." };
+  }
+
+  if (sourceType === "employee_payroll_setup_task") {
+    const { data } = await supabase.from("employee_payroll_setup_tasks").select("*").eq("id", sourceId).maybeSingle();
+    const { data: profile } = data?.user_id
+      ? await supabase.from("employee_profiles").select("display_name, legal_name, email").eq("user_id", data.user_id).maybeSingle()
+      : { data: null };
+    const employeeName = profile?.display_name || profile?.legal_name || profile?.email || data?.user_id?.slice(0, 8) || "Employee";
+    return data
+      ? {
+          type: sourceType,
+          title: `${employeeName} payroll setup`,
+          status: data.status,
+          summary:
+            `${employeeName} payroll setup is ${data.status}. State: ${data.jurisdiction_state || "not set"}. ` +
+            `W-4 ${data.w4_received ? "received" : "missing"}, I-9 ${data.i9_reviewed ? "reviewed" : "not reviewed"}, ` +
+            `direct deposit ${data.direct_deposit_ready ? "ready" : "not ready"}, state new-hire ${data.state_new_hire_reported ? "reported" : "not reported"}.`,
+          actionHref: getWorkflowActionHref({ sourceType, sourceId, ownerUserId: data.user_id, isAdmin: true }),
+        }
+      : { error: "Payroll setup task not found." };
+  }
+
+  if (sourceType === "hr_compliance_requirement") {
+    const { data } = await supabase.from("hr_compliance_requirements").select("*").eq("id", sourceId).maybeSingle();
+    return data
+      ? {
+          type: sourceType,
+          title: data.title,
+          status: `${data.review_status} / ${data.active ? "active" : "inactive"}`,
+          summary:
+            `${data.title} applies at ${data.jurisdiction_level}${data.jurisdiction_state ? ` (${data.jurisdiction_state})` : ""}. ` +
+            `Due rule: ${data.due_rule || "not set"}. Retention: ${data.retention_rule || "not set"}.`,
+          actionHref: getWorkflowActionHref({ sourceType, sourceId }),
+        }
+      : { error: "Compliance requirement not found." };
+  }
+
   return { error: "This record type is not supported yet." };
 }
 
@@ -126,7 +246,18 @@ export async function POST(req: Request) {
         summarizeRecord: tool({
           description: "Summarize one supported portal record by source type and id.",
           inputSchema: z.object({
-            sourceType: z.enum(["demo_request", "company_client", "company_operations_record", "company_legal_issue"]),
+            sourceType: z.enum([
+              "demo_request",
+              "company_client",
+              "company_operations_record",
+              "company_legal_issue",
+              "employee_time_card",
+              "employee_document_assignment",
+              "hr_candidate_intake",
+              "employee_onboarding_profile",
+              "employee_payroll_setup_task",
+              "hr_compliance_requirement",
+            ]),
             sourceId: z.string().min(1),
           }),
           execute: async ({ sourceType, sourceId }) => summarizeRecord(sourceType, sourceId),
@@ -171,7 +302,7 @@ export async function POST(req: Request) {
                 title,
                 body,
                 priority,
-                action_href: actionHref ?? "/employee/ai",
+                action_href: cleanEmployeeActionHref(actionHref, "/employee/ai"),
                 source_type: "ai_reminder",
                 created_by_ai: true,
                 ai_summary: "Created by the AI command assistant at the user's request.",
@@ -185,6 +316,45 @@ export async function POST(req: Request) {
             }
 
             return data;
+          },
+        }),
+        createOnboardingNotification: tool({
+          description:
+            "Create a low-risk HR onboarding notification or ticket for an employee or admin. This must not approve hiring, payroll, eligibility, compliance, discipline, compensation, termination, accommodations, or document verification.",
+          inputSchema: z.object({
+            recipientUserId: z.string().min(1),
+            title: z.string().min(1).max(120),
+            body: z.string().min(1).max(500),
+            priority: z.enum(["low", "medium", "high", "critical"]).default("medium"),
+            actionHref: z.string().startsWith("/employee").optional(),
+            sourceType: z.enum([
+              "hr_candidate_intake",
+              "employee_onboarding_profile",
+              "employee_document_assignment",
+              "employee_payroll_setup_task",
+              "hr_compliance_requirement",
+              "ai_onboarding_ticket",
+            ]),
+            sourceId: z.string().optional(),
+          }),
+          execute: async ({ recipientUserId, title, body, priority, actionHref, sourceType, sourceId }) => {
+            const dedupeSourceId = sourceId ?? recipientUserId;
+            const notification = await createHrAutomationNotification(supabase, {
+              recipientUserId,
+              title,
+              body,
+              priority,
+              actionHref: actionHref ?? "/employee/ai",
+              sourceType,
+              sourceId: sourceId ?? null,
+              dedupeKey: `${sourceType}:${dedupeSourceId}:${title.toLowerCase().replace(/\s+/g, "-").slice(0, 64)}`,
+              actorUserId: user.id,
+              targetUserId: recipientUserId,
+              eventType: "ai_onboarding_notification_created",
+              metadata: { created_from: "ai_command_assistant" },
+            });
+
+            return notification ?? { skipped: true, reason: "A matching onboarding notification already exists." };
           },
         }),
         proposeWorkflowAction: tool({

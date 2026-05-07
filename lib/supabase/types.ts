@@ -141,6 +141,128 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["ai_digest_runs"]["Insert"]>;
         Relationships: [];
       };
+      hr_candidate_intakes: {
+        Row: {
+          id: string;
+          candidate_name: string;
+          email: string;
+          target_role: string;
+          jurisdiction_state: string | null;
+          source: string | null;
+          status: string;
+          notes: string | null;
+          human_decision: string;
+          human_decision_notes: string | null;
+          decided_by: string | null;
+          decided_at: string | null;
+          converted_user_id: string | null;
+          invite_generated_at: string | null;
+          created_by: string | null;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          candidate_name: string;
+          email: string;
+          target_role?: string;
+          jurisdiction_state?: string | null;
+          source?: string | null;
+          status?: string;
+          notes?: string | null;
+          human_decision?: string;
+          human_decision_notes?: string | null;
+          decided_by?: string | null;
+          decided_at?: string | null;
+          converted_user_id?: string | null;
+          invite_generated_at?: string | null;
+          created_by?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["hr_candidate_intakes"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_payroll_setup_tasks: {
+        Row: {
+          id: string;
+          user_id: string;
+          source_candidate_id: string | null;
+          status: string;
+          jurisdiction_state: string | null;
+          payroll_provider: string | null;
+          due_date: string | null;
+          w4_received: boolean;
+          i9_reviewed: boolean;
+          direct_deposit_ready: boolean;
+          state_new_hire_reported: boolean;
+          benefits_reviewed: boolean;
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+          notes: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          source_candidate_id?: string | null;
+          status?: string;
+          jurisdiction_state?: string | null;
+          payroll_provider?: string | null;
+          due_date?: string | null;
+          w4_received?: boolean;
+          i9_reviewed?: boolean;
+          direct_deposit_ready?: boolean;
+          state_new_hire_reported?: boolean;
+          benefits_reviewed?: boolean;
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+          notes?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_payroll_setup_tasks"]["Insert"]>;
+        Relationships: [];
+      };
+      hr_automation_events: {
+        Row: {
+          id: string;
+          actor_user_id: string | null;
+          target_user_id: string | null;
+          candidate_intake_id: string | null;
+          notification_id: string | null;
+          source_type: string;
+          source_id: string | null;
+          event_type: string;
+          title: string;
+          body: string | null;
+          created_by_ai: boolean;
+          metadata: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          actor_user_id?: string | null;
+          target_user_id?: string | null;
+          candidate_intake_id?: string | null;
+          notification_id?: string | null;
+          source_type: string;
+          source_id?: string | null;
+          event_type: string;
+          title: string;
+          body?: string | null;
+          created_by_ai?: boolean;
+          metadata?: Json;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["hr_automation_events"]["Insert"]>;
+        Relationships: [];
+      };
       time_card_roles: {
         Row: {
           id: string;
@@ -919,6 +1041,7 @@ export type Database = {
           email: string | null;
           profile_status: string;
           time_card_role_id: string | null;
+          work_state: string | null;
           phone: string | null;
           emergency_contact_name: string | null;
           emergency_contact_phone: string | null;
@@ -935,6 +1058,7 @@ export type Database = {
           email?: string | null;
           profile_status?: string;
           time_card_role_id?: string | null;
+          work_state?: string | null;
           phone?: string | null;
           emergency_contact_name?: string | null;
           emergency_contact_phone?: string | null;

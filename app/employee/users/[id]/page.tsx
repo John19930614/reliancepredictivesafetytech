@@ -1,14 +1,21 @@
 import { ArrowLeft, CheckCircle2, ExternalLink, FileSignature, Save, UserRound } from "lucide-react";
 import Link from "next/link";
-import { attachExistingEmployeeDocument, reviewEmployeeOnboardingUpload, updateEmployeeProfileDetails } from "@/app/employee/users/[id]/actions";
+import {
+  attachExistingEmployeeDocument,
+  reviewEmployeeOnboardingUpload,
+  updateEmployeeProfileDetails,
+  updatePayrollSetupTask,
+} from "@/app/employee/users/[id]/actions";
 import type {
   CompanyDocument,
   EmployeeDocumentAssignment,
   EmployeeFormResponse,
+  EmployeePayrollSetupTask,
   EmployeeOnboardingUpload,
   EmployeeOnboardingAuditEvent,
   EmployeeSignedDocument,
   EmployeeDocumentSignature,
+  HrAutomationEvent,
   HrComplianceRequirement,
   HrFormDefinition,
   HrDocumentTemplate,
@@ -86,6 +93,8 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
     { data: signedDocuments },
     { data: onboardingUploads },
     { data: auditEvents },
+    { data: payrollSetupTask },
+    { data: automationEvents },
     { data: allDocuments },
     { data: timeCardRoles },
     { data: chatProfile },
@@ -98,6 +107,8 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
     admin.from("employee_signed_documents").select("*").eq("user_id", id).order("signed_at", { ascending: false }),
     admin.from("employee_onboarding_uploads").select("*").eq("user_id", id).order("created_at", { ascending: false }),
     admin.from("employee_onboarding_audit_events").select("*").eq("user_id", id).order("created_at", { ascending: false }).limit(100),
+    admin.from("employee_payroll_setup_tasks").select("*").eq("user_id", id).maybeSingle(),
+    admin.from("hr_automation_events").select("*").or(`target_user_id.eq.${id},actor_user_id.eq.${id}`).order("created_at", { ascending: false }).limit(20),
     admin.from("company_documents").select("*").order("updated_at", { ascending: false }),
     admin.from("time_card_roles").select("*").order("sort_order"),
     admin.from("employee_chat_profiles").select("last_seen_at").eq("user_id", id).maybeSingle(),
@@ -111,6 +122,8 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
   const typedSignedDocuments = (signedDocuments ?? []) as EmployeeSignedDocument[];
   const typedOnboardingUploads = (onboardingUploads ?? []) as EmployeeOnboardingUpload[];
   const typedAuditEvents = (auditEvents ?? []) as EmployeeOnboardingAuditEvent[];
+  const typedPayrollSetupTask = payrollSetupTask as EmployeePayrollSetupTask | null;
+  const typedAutomationEvents = (automationEvents ?? []) as HrAutomationEvent[];
   const typedAllDocuments = (allDocuments ?? []) as CompanyDocument[];
   const typedTimeCardRoles = (timeCardRoles ?? []) as TimeCardRole[];
   const lastSeenAt = (chatProfile as { last_seen_at?: string | null } | null)?.last_seen_at ?? employee?.last_sign_in_at ?? null;
@@ -242,6 +255,7 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
             <p><strong>Email:</strong> {typedProfile?.email ?? employee?.email ?? "Not provided"}</p>
             <p><strong>Legal name:</strong> {typedProfile?.legal_name ?? "Not provided"}</p>
             <p><strong>Phone:</strong> {typedProfile?.phone ?? "Not provided"}</p>
+            <p><strong>Work state:</strong> {typedProfile?.work_state ?? "Not provided"}</p>
             <p><strong>Emergency contact:</strong> {typedProfile?.emergency_contact_name ?? "Not provided"}</p>
             <p><strong>Emergency phone:</strong> {typedProfile?.emergency_contact_phone ?? "Not provided"}</p>
             <p><strong>Relationship:</strong> {typedProfile?.emergency_contact_relationship ?? "Not provided"}</p>
@@ -276,6 +290,10 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
                 <div className="field">
                   <label htmlFor="phone">Phone</label>
                   <input id="phone" name="phone" defaultValue={typedProfile?.phone ?? ""} />
+                </div>
+                <div className="field">
+                  <label htmlFor="work_state">Work state</label>
+                  <input id="work_state" name="work_state" maxLength={2} defaultValue={typedProfile?.work_state ?? ""} />
                 </div>
                 <div className="field">
                   <label htmlFor="emergency_contact_name">Emergency contact</label>
@@ -322,6 +340,91 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
           )}
         </section>
 
+        <section className="portal-card" id="payroll-setup">
+          <UserRound color="#c9932b" size={28} />
+          <h2>Payroll setup handoff</h2>
+          {typedPayrollSetupTask ? (
+            <>
+              <div className="profile-facts">
+                <p><strong>Status:</strong> {typedPayrollSetupTask.status.replace("_", " ")}</p>
+                <p><strong>Work state:</strong> {typedPayrollSetupTask.jurisdiction_state ?? "Not provided"}</p>
+                <p><strong>Due:</strong> {formatDate(typedPayrollSetupTask.due_date)}</p>
+                <p><strong>Provider:</strong> {typedPayrollSetupTask.payroll_provider ?? "Portal-native handoff"}</p>
+                <p><strong>Reviewed:</strong> {formatDate(typedPayrollSetupTask.reviewed_at)}</p>
+              </div>
+              <form action={updatePayrollSetupTask} className="signature-panel profile-edit-form">
+                <input name="profile_user_id" type="hidden" value={id} />
+                <input name="payroll_setup_task_id" type="hidden" value={typedPayrollSetupTask.id} />
+                <div className="form-grid">
+                  <div className="field">
+                    <label htmlFor="payroll_status">Status</label>
+                    <select id="payroll_status" name="status" defaultValue={typedPayrollSetupTask.status}>
+                      <option value="not_started">Not started</option>
+                      <option value="in_progress">In progress</option>
+                      <option value="ready_for_payroll">Ready for payroll</option>
+                      <option value="completed">Completed</option>
+                      <option value="blocked">Blocked</option>
+                      <option value="not_required">Not required</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="payroll_state">Work state</label>
+                    <input id="payroll_state" name="jurisdiction_state" maxLength={2} defaultValue={typedPayrollSetupTask.jurisdiction_state ?? ""} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="payroll_provider">Payroll provider</label>
+                    <input id="payroll_provider" name="payroll_provider" defaultValue={typedPayrollSetupTask.payroll_provider ?? ""} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="payroll_due_date">Due date</label>
+                    <input id="payroll_due_date" name="due_date" type="date" defaultValue={typedPayrollSetupTask.due_date ?? ""} />
+                  </div>
+                  <label className="checkbox-pill">
+                    <input name="w4_received" type="checkbox" defaultChecked={typedPayrollSetupTask.w4_received} />
+                    W-4 received
+                  </label>
+                  <label className="checkbox-pill">
+                    <input name="i9_reviewed" type="checkbox" defaultChecked={typedPayrollSetupTask.i9_reviewed} />
+                    I-9 reviewed
+                  </label>
+                  <label className="checkbox-pill">
+                    <input name="direct_deposit_ready" type="checkbox" defaultChecked={typedPayrollSetupTask.direct_deposit_ready} />
+                    Direct deposit ready
+                  </label>
+                  <label className="checkbox-pill">
+                    <input name="state_new_hire_reported" type="checkbox" defaultChecked={typedPayrollSetupTask.state_new_hire_reported} />
+                    State new-hire reported
+                  </label>
+                  <label className="checkbox-pill">
+                    <input name="benefits_reviewed" type="checkbox" defaultChecked={typedPayrollSetupTask.benefits_reviewed} />
+                    Benefits reviewed
+                  </label>
+                  <div className="field field-full">
+                    <label htmlFor="payroll_notes">Notes</label>
+                    <textarea id="payroll_notes" name="notes" defaultValue={typedPayrollSetupTask.notes ?? ""} />
+                  </div>
+                </div>
+                <button className="button button-primary" type="submit">
+                  <Save size={16} />
+                  Save Payroll Setup
+                </button>
+              </form>
+            </>
+          ) : (
+            <div className="empty-state">No payroll setup handoff has been created for this employee.</div>
+          )}
+          {typedAutomationEvents.length > 0 ? (
+            <div className="profile-facts audit-event-list">
+              <p><strong>Automation history:</strong></p>
+              {typedAutomationEvents.slice(0, 6).map((event) => (
+                <p key={event.id}>
+                  {event.event_type.replace(/_/g, " ")} - {event.title} - {formatDate(event.created_at)}
+                </p>
+              ))}
+            </div>
+          ) : null}
+        </section>
+
         <section className="hr-document-stack">
           {typedAssignments.length === 0 ? (
             <div className="empty-state">No HR onboarding documents are assigned to this employee.</div>
@@ -342,7 +445,7 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
               const latestUpload = assignmentUploads.find((upload) => upload.upload_status !== "superseded");
 
               return (
-                <article className="doc-card" key={assignment.id}>
+                <article className="doc-card" id={`hr-assignment-${assignment.id}`} key={assignment.id}>
                   <div className="portal-topline" style={{ marginBottom: 12 }}>
                     <div>
                       <h2>{signature?.document_title ?? template?.title ?? "HR document"}</h2>

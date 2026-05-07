@@ -45,5 +45,31 @@ export async function generateWorkflowNotificationsForUser(supabase: PortalClien
     throw new Error(error.message);
   }
 
+  const hrNotifications = (data ?? []).filter((notification) =>
+    [
+      "hr_candidate_intake",
+      "employee_onboarding_profile",
+      "employee_document_assignment",
+      "employee_payroll_setup_task",
+      "hr_compliance_requirement",
+    ].includes(notification.source_type ?? ""),
+  );
+
+  if (hrNotifications.length > 0) {
+    await supabase.from("hr_automation_events").insert(
+      hrNotifications.map((notification) => ({
+        target_user_id: recipientUserId,
+        notification_id: notification.id,
+        source_type: notification.source_type ?? "portal_notification",
+        source_id: notification.source_id,
+        event_type: "workflow_notification_generated",
+        title: notification.title,
+        body: notification.body,
+        created_by_ai: true,
+        metadata: { generated_from: "workflow_scan" },
+      })),
+    );
+  }
+
   return data ?? [];
 }

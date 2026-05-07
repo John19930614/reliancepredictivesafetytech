@@ -4,7 +4,7 @@ import {
   updateHrDocumentTemplate,
   upsertRequiredHrDocumentTemplates,
 } from "@/app/employee/hr-documents/actions";
-import type { CompanyDocument, HrDocumentTemplate } from "@/lib/company-data";
+import type { CompanyDocument, HrComplianceRequirement, HrDocumentTemplate } from "@/lib/company-data";
 import { requiredHrDocumentTemplates } from "@/lib/hr-document-templates";
 import { createClient } from "@/lib/supabase/server";
 import { isPortalAdminRole } from "@/lib/user-management";
@@ -30,16 +30,18 @@ export default async function HrDocumentsPage({ searchParams }: HrDocumentsPageP
       : { data: null };
 
   const canManageHrDocuments = currentRole?.account_status === "active" && isPortalAdminRole(currentRole.role);
-  const [{ data: templates }, { data: documents }] =
+  const [{ data: templates }, { data: documents }, { data: requirements }] =
     supabase && canManageHrDocuments
       ? await Promise.all([
           supabase.from("hr_document_templates").select("*").order("sort_order"),
           supabase.from("company_documents").select("*").order("title"),
+          supabase.from("hr_compliance_requirements").select("*").order("sort_order"),
         ])
-      : [{ data: null }, { data: null }];
+      : [{ data: null }, { data: null }, { data: null }];
 
   const hrTemplates = (templates ?? []) as HrDocumentTemplate[];
   const sourceDocuments = (documents ?? []) as CompanyDocument[];
+  const complianceRequirements = (requirements ?? []) as HrComplianceRequirement[];
   const requiredTemplateKeys = new Set(requiredHrDocumentTemplates.map((template) => `${template.title}:${template.version}`));
   const installedRequiredCount = hrTemplates.filter((template) => requiredTemplateKeys.has(`${template.title}:${template.version}`)).length;
   const missingRequiredCount = requiredHrDocumentTemplates.length - installedRequiredCount;
@@ -148,6 +150,31 @@ export default async function HrDocumentsPage({ searchParams }: HrDocumentsPageP
           </div>
 
           <section className="hr-document-stack">
+            <div className="doc-card">
+              <div className="portal-topline" style={{ marginBottom: 12 }}>
+                <div>
+                  <h2>Compliance review catalog</h2>
+                  <p>Federal and state requirements remain inactive until reviewed and activated by qualified humans.</p>
+                </div>
+                <span className="badge">{complianceRequirements.length} requirements</span>
+              </div>
+              <div className="ai-list">
+                {complianceRequirements.slice(0, 80).map((requirement) => (
+                  <article className="ai-notification-row" id={`compliance-requirement-${requirement.id}`} key={requirement.id}>
+                    <div>
+                      <span className="badge">
+                        {requirement.jurisdiction_state ?? requirement.jurisdiction_level} - {requirement.review_status.replace("_", " ")}
+                      </span>
+                      <h3>{requirement.title}</h3>
+                      <p>
+                        {requirement.category} - {requirement.document_mode.replace("_", " ")} - {requirement.active ? "active" : "inactive"}
+                      </p>
+                      {requirement.review_notes ? <small>{requirement.review_notes}</small> : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
             {hrTemplates.length === 0 ? (
               <div className="empty-state">No HR document templates found.</div>
             ) : (

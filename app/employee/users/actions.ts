@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { ensurePayrollSetupTask, normalizeStateCode } from "@/lib/hr-automation";
 import { assignActiveRequiredHrDocuments } from "@/lib/hr-onboarding";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
@@ -79,6 +80,8 @@ async function createEmployeeProfileAndAssignments(
   email: string,
   timeCardRoleId: string | null,
   assignedBy: string,
+  jurisdictionState: string | null,
+  sourceCandidateId?: string | null,
 ) {
   const { error: profileError } = await admin.from("employee_profiles").upsert({
     user_id: userId,
@@ -87,6 +90,7 @@ async function createEmployeeProfileAndAssignments(
     email,
     profile_status: "active",
     time_card_role_id: timeCardRoleId,
+    work_state: jurisdictionState,
     onboarding_status: "not_started",
   });
 
@@ -94,7 +98,18 @@ async function createEmployeeProfileAndAssignments(
     return profileError;
   }
 
-  return assignActiveRequiredHrDocuments(admin, [userId], assignedBy);
+  const assignmentError = await assignActiveRequiredHrDocuments(admin, [userId], assignedBy);
+
+  if (assignmentError) {
+    return assignmentError;
+  }
+
+  return ensurePayrollSetupTask(admin, {
+    userId,
+    createdBy: assignedBy,
+    jurisdictionState,
+    sourceCandidateId,
+  });
 }
 
 async function upsertEmployeeChatProfile(
@@ -130,6 +145,7 @@ type PortalUserSetupValues = {
   role: PortalUserRole;
   team: string;
   timeCardRoleId: string | null;
+  jurisdictionState: string | null;
 };
 
 function getPortalUserSetupValues(formData: FormData): PortalUserSetupValues {
@@ -137,6 +153,7 @@ function getPortalUserSetupValues(formData: FormData): PortalUserSetupValues {
   const displayName = cleanText(formData.get("display_name"));
   const team = cleanText(formData.get("team"));
   const timeCardRoleId = cleanText(formData.get("time_card_role_id")) || null;
+  const jurisdictionState = normalizeStateCode(cleanText(formData.get("jurisdiction_state")));
   const requestedRole = cleanText(formData.get("role"));
   const role = isPortalUserRole(requestedRole) ? requestedRole : "employee";
 
@@ -146,6 +163,7 @@ function getPortalUserSetupValues(formData: FormData): PortalUserSetupValues {
     role,
     team,
     timeCardRoleId,
+    jurisdictionState,
   };
 }
 
@@ -154,6 +172,7 @@ async function assignPortalUserAccess(
   values: PortalUserSetupValues & {
     assignedBy: string;
     userId: string;
+    sourceCandidateId?: string | null;
   },
 ) {
   const { error: roleError } = await admin.from("user_roles").upsert({
@@ -174,6 +193,8 @@ async function assignPortalUserAccess(
     values.email,
     values.timeCardRoleId,
     values.assignedBy,
+    values.jurisdictionState,
+    values.sourceCandidateId ?? null,
   );
 
   if (onboardingError) {
@@ -192,6 +213,146 @@ async function assignPortalUserAccess(
 
 async function rollbackCreatedAuthUser(admin: SupabaseAdminClient, userId: string) {
   await admin.auth.admin.deleteUser(userId, true);
+}
+
+export async function createCandidateIntake(formData: FormData) {
+  const currentUser = await getAuthorizedAdmin();
+  const admin = getAdminClientOrRedirect();
+  const candidateName = cleanText(formData.get("candidate_name"));
+  const email = cleanText(formData.get("email")).toLowerCase();
+  const targetRole = cleanText(formData.get("target_role")) || "Employee";
+  const jurisdictionState = normalizeStateCode(cleanText(formData.get("jurisdiction_state")));
+  const source = cleanText(formData.get("source")) || null;
+  const notes = cleanText(formData.get("notes")) || null;
+
+  if (!candidateName || !email) {
+    redirect(usersPath({ error: "Candidate name and email are required." }));
+  }
+
+  const { error } = await admin.from("hr_candidate_intakes").insert({
+    candidate_name: candidateName,
+    email,
+    target_role: targetRole,
+    jurisdiction_state: jurisdictionState,
+    source,
+    notes,
+    status: "new",
+    human_decision: "pending",
+    created_by: currentUser.id,
+  });
+
+  if (error) {
+    redirect(usersPath({ error: error.message }));
+  }
+
+  revalidatePath("/employee/users");
+  revalidatePath("/employee/ai");
+  redirect(usersPath({ message: "Candidate intake created for human review." }));
+}
+
+export async function approveCandidateForInvite(formData: FormData) {
+  const currentUser = await getAuthorizedAdmin();
+  const admin = getAdminClientOrRedirect();
+  const candidateId = cleanText(formData.get("candidate_id"));
+  const notes = cleanText(formData.get("human_decision_notes")) || null;
+
+  if (!candidateId) {
+    redirect(usersPath({ error: "Choose a candidate to approve for invite." }));
+  }
+
+  const decidedAt = new Date().toISOString();
+  const { error } = await admin
+    .from("hr_candidate_intakes")
+    .update({
+      status: "approved_for_invite",
+      human_decision: "approved_to_invite",
+      human_decision_notes: notes,
+      decided_by: currentUser.id,
+      decided_at: decidedAt,
+    })
+    .eq("id", candidateId)
+    .in("status", ["new", "screening", "approved_for_invite"]);
+
+  if (error) {
+    redirect(usersPath({ error: error.message }));
+  }
+
+  revalidatePath("/employee/users");
+  revalidatePath("/employee/ai");
+  redirect(usersPath({ message: "Candidate approved for invite. Generate the invite when ready." }));
+}
+
+export async function convertCandidateToInvite(formData: FormData) {
+  const currentUser = await getAuthorizedAdmin();
+  const admin = getAdminClientOrRedirect();
+  const candidateId = cleanText(formData.get("candidate_id"));
+
+  if (!candidateId) {
+    redirect(usersPath({ error: "Choose a candidate before generating an invite." }));
+  }
+
+  const { data: candidate, error: candidateError } = await admin
+    .from("hr_candidate_intakes")
+    .select("*")
+    .eq("id", candidateId)
+    .maybeSingle();
+
+  if (candidateError || !candidate) {
+    redirect(usersPath({ error: candidateError?.message ?? "Candidate intake was not found." }));
+  }
+
+  if (candidate.status !== "approved_for_invite" || candidate.human_decision !== "approved_to_invite") {
+    redirect(usersPath({ error: "A human admin must approve the candidate for invite before conversion." }));
+  }
+
+  const { data, error } = await admin.auth.admin.generateLink({
+    type: "invite",
+    email: candidate.email,
+    options: {
+      data: { display_name: candidate.candidate_name },
+      redirectTo: employeePortalUrl,
+    },
+  });
+
+  if (error || !data.user || !data.properties?.hashed_token) {
+    redirect(usersPath({ error: error?.message ?? "Could not generate candidate invite link." }));
+  }
+
+  const setupError = await assignPortalUserAccess(admin, {
+    displayName: candidate.candidate_name,
+    email: candidate.email,
+    role: "employee",
+    team: "People / HR",
+    timeCardRoleId: null,
+    jurisdictionState: candidate.jurisdiction_state,
+    assignedBy: currentUser.id,
+    userId: data.user.id,
+    sourceCandidateId: candidate.id,
+  });
+
+  if (setupError) {
+    await rollbackCreatedAuthUser(admin, data.user.id);
+    redirect(usersPath({ error: setupError.message }));
+  }
+
+  await admin
+    .from("hr_candidate_intakes")
+    .update({
+      status: "invited",
+      converted_user_id: data.user.id,
+      invite_generated_at: new Date().toISOString(),
+    })
+    .eq("id", candidate.id);
+
+  revalidatePath("/employee/users");
+  revalidatePath("/employee/time-cards");
+  revalidatePath("/employee/ai");
+  redirect(
+    usersPath({
+      message: "Candidate converted to employee invite with onboarding and payroll setup.",
+      invite_link: buildCompanyAuthLink(data.properties.hashed_token, "invite"),
+    }),
+  );
 }
 
 export async function inviteEmployee(formData: FormData) {
@@ -301,6 +462,7 @@ export async function updatePortalUserRole(formData: FormData) {
   const requestedRole = cleanText(formData.get("role"));
   const team = cleanText(formData.get("team"));
   const timeCardRoleId = cleanText(formData.get("time_card_role_id")) || null;
+  const jurisdictionState = normalizeStateCode(cleanText(formData.get("jurisdiction_state")));
   const role = isPortalUserRole(requestedRole) ? requestedRole : "employee";
 
   if (!userId) {
@@ -322,10 +484,21 @@ export async function updatePortalUserRole(formData: FormData) {
     user_id: userId,
     profile_status: "active",
     time_card_role_id: timeCardRoleId,
+    work_state: jurisdictionState,
   });
 
   if (profileError) {
     redirect(usersPath({ error: profileError.message }));
+  }
+
+  const payrollError = await ensurePayrollSetupTask(admin, {
+    userId,
+    createdBy: null,
+    jurisdictionState,
+  });
+
+  if (payrollError) {
+    redirect(usersPath({ error: payrollError.message }));
   }
 
   const { data: existingProfile, error: existingProfileError } = await admin

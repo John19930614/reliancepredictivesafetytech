@@ -1,7 +1,10 @@
-import { Archive, Save, Send, Trash2, Users } from "lucide-react";
+import { Archive, CheckCircle2, Save, Send, Trash2, Users } from "lucide-react";
 import Link from "next/link";
 import {
+  approveCandidateForInvite,
   archivePortalUser,
+  convertCandidateToInvite,
+  createCandidateIntake,
   deletePortalUser,
   generateEmployeeAccessLink,
   inviteEmployee,
@@ -9,7 +12,7 @@ import {
 } from "@/app/employee/users/actions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import type { TimeCardRole } from "@/lib/company-data";
+import type { EmployeePayrollSetupTask, HrCandidateIntake, TimeCardRole } from "@/lib/company-data";
 import { formatPortalRole, getPortalRoleCommandRank, isPortalAdminRole, portalUserRoles } from "@/lib/user-management";
 
 type UsersPageProps = {
@@ -32,6 +35,7 @@ type EmployeeProfileRow = {
   email: string | null;
   profile_status: string;
   time_card_role_id: string | null;
+  work_state: string | null;
   onboarding_status: string;
   onboarding_completed_at: string | null;
 };
@@ -61,17 +65,28 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
   const canManageUsers =
     currentRole?.account_status === "active" && isPortalAdminRole(currentRole.role);
   const admin = canManageUsers ? createAdminClient() : null;
-  const [{ data: authData, error: usersError }, { data: roleRows }, { data: employeeProfiles }, { data: timeCardRoles }] = admin
+  const [
+    { data: authData, error: usersError },
+    { data: roleRows },
+    { data: employeeProfiles },
+    { data: timeCardRoles },
+    { data: candidateIntakes },
+    { data: payrollSetupTasks },
+  ] = admin
     ? await Promise.all([
         admin.auth.admin.listUsers({ page: 1, perPage: 200 }),
         admin.from("user_roles").select("*").order("updated_at", { ascending: false }),
         admin.from("employee_profiles").select("*"),
         admin.from("time_card_roles").select("*").order("sort_order"),
+        admin.from("hr_candidate_intakes").select("*").order("updated_at", { ascending: false }).limit(20),
+        admin.from("employee_payroll_setup_tasks").select("*"),
       ])
-    : [{ data: null, error: null }, { data: null }, { data: null }, { data: null }];
+    : [{ data: null, error: null }, { data: null }, { data: null }, { data: null }, { data: null }, { data: null }];
 
   const rolesByUserId = new Map((roleRows ?? []).map((role) => [role.user_id, role as UserRoleRow]));
   const profilesByUserId = new Map((employeeProfiles ?? []).map((item) => [item.user_id, item as EmployeeProfileRow]));
+  const payrollByUserId = new Map(((payrollSetupTasks ?? []) as EmployeePayrollSetupTask[]).map((task) => [task.user_id, task]));
+  const typedCandidateIntakes = (candidateIntakes ?? []) as HrCandidateIntake[];
   const users = (authData?.users ?? [])
     .map((authUser) => {
       const role = rolesByUserId.get(authUser.id);
@@ -87,6 +102,8 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
         team: role?.team ?? "",
         profileStatus: employeeProfile?.profile_status ?? role?.account_status ?? "no profile",
         timeCardRoleId: employeeProfile?.time_card_role_id ?? "",
+        workState: employeeProfile?.work_state ?? "",
+        payrollStatus: payrollByUserId.get(authUser.id)?.status ?? "not_started",
         accountStatus: role?.account_status ?? "no role",
         createdAt: authUser.created_at,
         lastSignInAt: authUser.last_sign_in_at,
@@ -171,12 +188,51 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                   ))}
                 </select>
               </div>
+              <div className="field">
+                <label htmlFor="jurisdiction_state">Work state</label>
+                <input id="jurisdiction_state" name="jurisdiction_state" maxLength={2} placeholder="TX" />
+              </div>
               <button className="button button-primary" type="submit">
                 <Send size={18} />
                 Generate Invite Link
               </button>
             </div>
           </form>
+
+          <section className="form-panel">
+            <h2>Candidate intake</h2>
+            <p className="muted-copy">Pre-hire records stay human-reviewed before an employee invite is generated.</p>
+            <form action={createCandidateIntake} className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 16 }}>
+              <div className="field">
+                <label htmlFor="candidate_name">Candidate name</label>
+                <input id="candidate_name" name="candidate_name" required />
+              </div>
+              <div className="field">
+                <label htmlFor="candidate_email">Email</label>
+                <input id="candidate_email" name="email" required type="email" />
+              </div>
+              <div className="field">
+                <label htmlFor="target_role">Target role</label>
+                <input id="target_role" name="target_role" defaultValue="Employee" />
+              </div>
+              <div className="field">
+                <label htmlFor="candidate_state">Work state</label>
+                <input id="candidate_state" name="jurisdiction_state" maxLength={2} placeholder="TX" />
+              </div>
+              <div className="field">
+                <label htmlFor="candidate_source">Source</label>
+                <input id="candidate_source" name="source" placeholder="Referral, job board, direct outreach" />
+              </div>
+              <div className="field">
+                <label htmlFor="candidate_notes">Notes</label>
+                <textarea id="candidate_notes" name="notes" />
+              </div>
+              <button className="button button-primary" type="submit">
+                <Send size={18} />
+                Add Candidate
+              </button>
+            </form>
+          </section>
 
           <section className="table-card">
             <div className="user-list-header">
@@ -199,6 +255,8 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                         <span className="badge">{portalUser.onboardingStatus.replace("_", " ")}</span>
                         <span>{formatPortalRole(portalUser.role)}</span>
                         <span>{portalUser.legalName || "No legal name"}</span>
+                        <span>{portalUser.workState || "State not set"}</span>
+                        <span>Payroll {portalUser.payrollStatus.replace("_", " ")}</span>
                         <span>{portalUser.timeCardRoleId ? ((timeCardRoles ?? []) as TimeCardRole[]).find((role) => role.id === portalUser.timeCardRoleId)?.name ?? "Time-card role" : "Time-card role unassigned"}</span>
                         <span>{portalUser.lastSignInAt ? `Last sign-in ${new Date(portalUser.lastSignInAt).toLocaleDateString()}` : "No sign-in yet"}</span>
                       </div>
@@ -231,6 +289,10 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                           ))}
                         </select>
                       </div>
+                      <div className="field">
+                        <label htmlFor={`jurisdiction-state-${portalUser.id}`}>Work state</label>
+                        <input id={`jurisdiction-state-${portalUser.id}`} name="jurisdiction_state" maxLength={2} defaultValue={portalUser.workState} />
+                      </div>
                       <button className="button button-light" type="submit">
                         <Save size={16} />
                         Save
@@ -260,6 +322,61 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                         <button className="button button-danger" type="submit">
                           <Trash2 size={16} />
                           Delete
+                        </button>
+                      </form>
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="table-card">
+            <div className="user-list-header">
+              <div>
+                <h2>Candidate pipeline</h2>
+                <p>{typedCandidateIntakes.length} candidate intake{typedCandidateIntakes.length === 1 ? "" : "s"}</p>
+              </div>
+            </div>
+            <div className="user-list">
+              {typedCandidateIntakes.length === 0 ? (
+                <div className="empty-state">No candidate intakes yet.</div>
+              ) : (
+                typedCandidateIntakes.map((candidate) => (
+                  <article className="user-row" id={`candidate-${candidate.id}`} key={candidate.id}>
+                    <div>
+                      <h3>{candidate.candidate_name}</h3>
+                      <p>{candidate.email}</p>
+                      <div className="user-meta">
+                        <span className="badge">{candidate.status.replace("_", " ")}</span>
+                        <span className="badge">{candidate.human_decision.replace("_", " ")}</span>
+                        <span>{candidate.target_role}</span>
+                        <span>{candidate.jurisdiction_state || "State not set"}</span>
+                        <span>{candidate.source || "No source"}</span>
+                      </div>
+                      {candidate.notes ? <p className="muted-copy">{candidate.notes}</p> : null}
+                    </div>
+                    <div className="user-row-actions">
+                      <form action={approveCandidateForInvite} className="user-row-form">
+                        <input name="candidate_id" type="hidden" value={candidate.id} />
+                        <div className="field">
+                          <label htmlFor={`decision-notes-${candidate.id}`}>Decision notes</label>
+                          <input id={`decision-notes-${candidate.id}`} name="human_decision_notes" placeholder="Human approval notes" />
+                        </div>
+                        <button className="button button-light" disabled={candidate.status === "invited"} type="submit">
+                          <CheckCircle2 size={16} />
+                          Approve
+                        </button>
+                      </form>
+                      <form action={convertCandidateToInvite}>
+                        <input name="candidate_id" type="hidden" value={candidate.id} />
+                        <button
+                          className="button button-primary"
+                          disabled={candidate.status !== "approved_for_invite" || candidate.human_decision !== "approved_to_invite"}
+                          type="submit"
+                        >
+                          <Send size={16} />
+                          Invite
                         </button>
                       </form>
                     </div>

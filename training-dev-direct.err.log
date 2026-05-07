@@ -1,0 +1,9 @@
+⚠ Port 3000 is in use by process 11884, using available port 3001 instead.
+⨯ Another next dev server is already running.
+
+- Local:        http://localhost:3101
+- PID:          25716
+- Dir:          C:\Users\johnh\OneDrive\Desktop\Reliance Predictive Safety Technologies LLC
+- Log:          .next\dev\logs\next-development.log
+
+Run taskkill /PID 25716 /F to stop it.

@@ -16,6 +16,8 @@ const proposalPatchAllowList: Record<string, readonly string[]> = {
   company_documents: ["status", "owner", "notes", "renewal_date", "expiration_date"],
   employee_time_cards: ["status", "review_notes"],
   employee_document_assignments: ["verification_status", "rejection_reason", "notes"],
+  hr_candidate_intakes: ["status", "notes", "human_decision", "human_decision_notes"],
+  employee_payroll_setup_tasks: ["status", "due_date", "notes"],
 };
 
 async function getCurrentUser() {

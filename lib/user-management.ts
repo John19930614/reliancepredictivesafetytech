@@ -100,11 +100,14 @@ export const portalRolePathAccess: Record<PortalUserRole, readonly string[]> = {
 };
 
 function normalizePortalPath(pathname: string) {
-  if (pathname.length > 1 && pathname.endsWith("/")) {
-    return pathname.slice(0, -1);
+  const [pathWithoutHash] = pathname.split("#", 1);
+  const [pathWithoutQuery] = pathWithoutHash.split("?", 1);
+
+  if (pathWithoutQuery.length > 1 && pathWithoutQuery.endsWith("/")) {
+    return pathWithoutQuery.slice(0, -1);
   }
 
-  return pathname;
+  return pathWithoutQuery;
 }
 
 export function canAccessEmployeePath(

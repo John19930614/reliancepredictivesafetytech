@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { normalizeStateCode, payrollSetupStatuses } from "@/lib/hr-automation";
 import { updateEmployeeOnboardingCompletion } from "@/lib/hr-onboarding";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -276,6 +277,7 @@ export async function updateEmployeeProfileDetails(formData: FormData) {
   const emergencyContactRelationship = cleanText(formData.get("emergency_contact_relationship")) || null;
   const profileStatus = cleanText(formData.get("profile_status")) === "archived" ? "archived" : "active";
   const timeCardRoleId = cleanText(formData.get("time_card_role_id")) || null;
+  const workState = normalizeStateCode(cleanText(formData.get("work_state")));
 
   if (!profileUserId) {
     redirect("/employee/users?error=Choose an employee profile to update.");
@@ -318,11 +320,18 @@ export async function updateEmployeeProfileDetails(formData: FormData) {
     emergency_contact_relationship: emergencyContactRelationship,
     profile_status: profileStatus,
     time_card_role_id: timeCardRoleId,
+    work_state: workState,
   });
 
   if (profileError) {
     redirect(`/employee/users/${profileUserId}?error=${encodeURIComponent(profileError.message)}`);
   }
+
+  await admin
+    .from("employee_payroll_setup_tasks")
+    .update({ jurisdiction_state: workState })
+    .eq("user_id", profileUserId)
+    .neq("status", "completed");
 
   const { data: role } = await admin
     .from("user_roles")
@@ -348,4 +357,63 @@ export async function updateEmployeeProfileDetails(formData: FormData) {
   revalidatePath("/employee/company-tree");
   revalidatePath("/employee/time-cards");
   redirect(`/employee/users/${profileUserId}?message=Employee profile updated.`);
+}
+
+export async function updatePayrollSetupTask(formData: FormData) {
+  const profileUserId = cleanText(formData.get("profile_user_id"));
+  const taskId = cleanText(formData.get("payroll_setup_task_id"));
+  const status = cleanText(formData.get("status"));
+  const jurisdictionState = normalizeStateCode(cleanText(formData.get("jurisdiction_state")));
+  const payrollProvider = cleanText(formData.get("payroll_provider")) || null;
+  const dueDate = cleanText(formData.get("due_date")) || null;
+  const notes = cleanText(formData.get("notes")) || null;
+
+  if (!profileUserId || !taskId || !payrollSetupStatuses.includes(status as (typeof payrollSetupStatuses)[number])) {
+    redirect(`/employee/users/${profileUserId || ""}?error=Choose an employee payroll setup task and valid status.`);
+  }
+
+  const currentUser = await getAuthorizedAdmin(profileUserId);
+  const admin = getAdminClientOrRedirect(profileUserId);
+  const reviewed = status === "completed" || status === "not_required";
+  const reviewedAt = reviewed ? new Date().toISOString() : null;
+
+  const { error } = await admin
+    .from("employee_payroll_setup_tasks")
+    .update({
+      status,
+      jurisdiction_state: jurisdictionState,
+      payroll_provider: payrollProvider,
+      due_date: dueDate,
+      w4_received: formData.get("w4_received") === "on",
+      i9_reviewed: formData.get("i9_reviewed") === "on",
+      direct_deposit_ready: formData.get("direct_deposit_ready") === "on",
+      state_new_hire_reported: formData.get("state_new_hire_reported") === "on",
+      benefits_reviewed: formData.get("benefits_reviewed") === "on",
+      reviewed_by: reviewed ? currentUser.id : null,
+      reviewed_at: reviewedAt,
+      notes,
+    })
+    .eq("id", taskId)
+    .eq("user_id", profileUserId);
+
+  if (error) {
+    redirect(`/employee/users/${profileUserId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  await admin.from("hr_automation_events").insert({
+    actor_user_id: currentUser.id,
+    target_user_id: profileUserId,
+    source_type: "employee_payroll_setup_task",
+    source_id: taskId,
+    event_type: "payroll_setup_updated",
+    title: "Payroll setup updated",
+    body: `Payroll setup marked ${status.replace("_", " ")}.`,
+    created_by_ai: false,
+    metadata: { status, due_date: dueDate, jurisdiction_state: jurisdictionState },
+  });
+
+  revalidatePath("/employee/users");
+  revalidatePath(`/employee/users/${profileUserId}`);
+  revalidatePath("/employee/ai");
+  redirect(`/employee/users/${profileUserId}?message=Payroll setup updated.`);
 }

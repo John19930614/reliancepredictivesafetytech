@@ -407,7 +407,7 @@ export default async function HrOnboardingPage({ searchParams }: HrOnboardingPag
                   if (!template) return null;
 
                   return (
-                    <article className="doc-card hr-sign-card" key={assignment.id}>
+                    <article className="doc-card hr-sign-card" id={`hr-assignment-${assignment.id}`} key={assignment.id}>
                       <div className="portal-topline" style={{ marginBottom: 12 }}>
                         <div>
                           <div className="eyebrow">
