@@ -1,13 +1,7 @@
-import { BarChart3, BriefcaseBusiness, ExternalLink, FileCheck2, Gauge, HardHat, LayoutDashboard, Presentation, UserRound } from "lucide-react";
+import { BarChart3, BriefcaseBusiness, ExternalLink, FileCheck2, Gauge, HardHat, Presentation, UserRound } from "lucide-react";
 import { DemoDeckViewer } from "@/components/DemoDeckViewer";
 
 const safetyDocsLinks = [
-  {
-    label: "Dashboard",
-    href: "https://safety360docs.com/dashboard",
-    description: "Executive operating view for the SafetyDocs360 platform.",
-    icon: LayoutDashboard,
-  },
   {
     label: "Field Audits",
     href: "https://safety360docs.com/field-audits",
@@ -21,34 +15,40 @@ const safetyDocsLinks = [
     icon: Presentation,
   },
   {
-    label: "Jobsites",
-    href: "https://safety360docs.com/jobsites",
-    description: "Jobsite records, project context, and safety activity.",
-    icon: HardHat,
-  },
-  {
-    label: "Training Matrix",
-    href: "https://safety360docs.com/training-matrix",
-    description: "Role and project-based safety training visibility.",
-    icon: BriefcaseBusiness,
-  },
-  {
-    label: "Predictive Model",
-    href: "https://safety360docs.com/analytics/predictive-model",
-    description: "Risk forecasting model and predictive safety signals.",
+    label: "Safe Predict",
+    href: "https://safety360docs.com/safe-predict",
+    description: "Predictive safety command center and risk overview.",
     icon: Gauge,
   },
   {
-    label: "Analytics",
-    href: "https://safety360docs.com/analytics",
-    description: "Safety trends, performance views, and reporting.",
+    label: "Workforce",
+    href: "https://safety360docs.com/safe-predict/workforce",
+    description: "Workforce safety signals and crew risk context.",
+    icon: UserRound,
+  },
+  {
+    label: "Safe Predict Analytics",
+    href: "https://safety360docs.com/safe-predict/analytics",
+    description: "Predictive safety trends, analytics, and risk indicators.",
     icon: BarChart3,
   },
   {
-    label: "Profile",
-    href: "https://safety360docs.com/profile",
-    description: "Account profile and platform user settings.",
-    icon: UserRound,
+    label: "Permits",
+    href: "https://safety360docs.com/safe-predict/permits",
+    description: "Permit activity and predictive safety permit review.",
+    icon: BriefcaseBusiness,
+  },
+  {
+    label: "Hazards",
+    href: "https://safety360docs.com/safe-predict/hazards",
+    description: "Hazard tracking and leading risk signals.",
+    icon: FileCheck2,
+  },
+  {
+    label: "Jobsites",
+    href: "https://safety360docs.com/safe-predict/jobsites",
+    description: "Jobsite records, project context, and safety activity.",
+    icon: HardHat,
   },
 ];
 
