@@ -1,0 +1,36 @@
+{
+  "name": "reliance-predictive-safety-technologies",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "dev:clean": "powershell -NoProfile -Command \"$root = (Resolve-Path -LiteralPath '.').Path; $target = Resolve-Path -LiteralPath '.next/dev' -ErrorAction SilentlyContinue; if ($target -and $target.Path.StartsWith($root)) { Remove-Item -LiteralPath $target.Path -Recurse -Force }\"",
+    "build": "next build",
+    "vercel-build": "next build",
+    "lint": "npm run typecheck",
+    "start": "next start",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/react": "^3.0.0",
+    "@react-email/components": "^1.0.12",
+    "@supabase/ssr": "^0.7.0",
+    "@supabase/supabase-js": "^2.105.3",
+    "ai": "^6.0.0",
+    "lucide-react": "^0.555.0",
+    "next": "^16.0.0",
+    "pdf-lib": "^1.17.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "resend": "^6.12.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.5"
+  }
+}

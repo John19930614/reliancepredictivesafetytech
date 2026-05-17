@@ -1,0 +1,12 @@
+.env*.local
+.env*.tmp
+.vercel
+.next
+node_modules
+supabase/.temp
+tsconfig.tsbuildinfo
+next-dev*.log
+next-smoke*.log
+next-*.log
+parking-lots-dev*.log
+codex-*.log

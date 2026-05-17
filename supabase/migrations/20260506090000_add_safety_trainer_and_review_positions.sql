@@ -1,0 +1,68 @@
+insert into public.company_positions
+  (
+    id,
+    title,
+    department,
+    parent_position_id,
+    status,
+    employee_name,
+    job_description,
+    salary_min,
+    salary_max,
+    salary_period,
+    employment_type,
+    location,
+    hiring_priority,
+    sort_order,
+    notes
+  )
+values
+  (
+    '00000000-0000-0000-0000-000000000110',
+    'Safety Trainer',
+    'Safety',
+    '00000000-0000-0000-0000-000000000104',
+    'Needed',
+    null,
+    'Prepare and deliver safety training content, onboarding training, refresher modules, toolbox talks, and role-based safety learning materials.',
+    null,
+    null,
+    'Annual',
+    'Full-time',
+    'Remote / Hybrid',
+    'Medium',
+    72,
+    'Future trainer role for safety content, onboarding, and customer education.'
+  ),
+  (
+    '00000000-0000-0000-0000-000000000111',
+    'PHSEP / CSEP Review Specialist',
+    'Safety',
+    '00000000-0000-0000-0000-000000000104',
+    'Needed',
+    null,
+    'Review PHSEP and CSEP drafts for safety accuracy, completeness, field usability, project alignment, and readiness for admin or owner approval.',
+    null,
+    null,
+    'Annual',
+    'Full-time',
+    'Remote / Hybrid',
+    'High',
+    74,
+    'Dedicated review spot for PHSEP and CSEP document quality control.'
+  )
+on conflict (id) do update set
+  title = excluded.title,
+  department = excluded.department,
+  parent_position_id = excluded.parent_position_id,
+  status = excluded.status,
+  employee_name = excluded.employee_name,
+  job_description = excluded.job_description,
+  salary_min = excluded.salary_min,
+  salary_max = excluded.salary_max,
+  salary_period = excluded.salary_period,
+  employment_type = excluded.employment_type,
+  location = excluded.location,
+  hiring_priority = excluded.hiring_priority,
+  sort_order = excluded.sort_order,
+  notes = excluded.notes;
