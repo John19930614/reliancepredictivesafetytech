@@ -1,0 +1,11 @@
+create index if not exists brainstorming_parking_lot_cards_created_by_user_id_idx
+on public.brainstorming_parking_lot_cards(created_by_user_id)
+where created_by_user_id is not null;
+
+create index if not exists brainstorming_parking_lot_cards_updated_by_user_id_idx
+on public.brainstorming_parking_lot_cards(updated_by_user_id)
+where updated_by_user_id is not null;
+
+create index if not exists brainstorming_parking_lot_cards_archived_by_user_id_idx
+on public.brainstorming_parking_lot_cards(archived_by_user_id)
+where archived_by_user_id is not null;

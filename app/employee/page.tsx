@@ -6,6 +6,7 @@ import {
   BookOpenCheck,
   Bot,
   BriefcaseBusiness,
+  CarFront,
   CheckCircle2,
   Clock3,
   Database,
@@ -42,6 +43,7 @@ const moduleGroups = [
     modules: [
       { title: "AI Command Center", href: "/employee/ai", icon: Bot },
       { title: "Work Management", href: "/employee/work", icon: ListChecks },
+      { title: "Parking Lots", href: "/employee/parking-lots", icon: CarFront },
       { title: "Finance Center", href: "/employee/finance", icon: DollarSign },
       { title: "Operations Database", href: "/employee/operations", icon: Database },
       { title: "Startup Checklist", href: "/employee/checklist", icon: ListChecks },

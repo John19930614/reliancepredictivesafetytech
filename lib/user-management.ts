@@ -40,6 +40,7 @@ const employeeSelfServicePaths = [
   "/employee",
   "/employee/ai",
   "/employee/work",
+  "/employee/parking-lots",
   "/employee/company-tree",
   "/employee/hr-onboarding",
   "/employee/training",

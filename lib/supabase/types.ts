@@ -3,6 +3,78 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 export type Database = {
   public: {
     Tables: {
+      brainstorming_parking_lot_categories: {
+        Row: {
+          id: string;
+          slug: string;
+          title: string;
+          description: string;
+          sort_order: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          slug: string;
+          title: string;
+          description?: string;
+          sort_order?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["brainstorming_parking_lot_categories"]["Insert"]>;
+        Relationships: [];
+      };
+      brainstorming_parking_lot_cards: {
+        Row: {
+          id: string;
+          category_id: string;
+          title: string;
+          description: string;
+          lane: string;
+          sort_order: number;
+          owner: string | null;
+          priority: string;
+          notes: string;
+          is_placeholder: boolean;
+          placeholder_slot: number | null;
+          created_by_user_id: string | null;
+          updated_by_user_id: string | null;
+          archived_by_user_id: string | null;
+          archived_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          category_id: string;
+          title: string;
+          description?: string;
+          lane?: string;
+          sort_order?: number;
+          owner?: string | null;
+          priority?: string;
+          notes?: string;
+          is_placeholder?: boolean;
+          placeholder_slot?: number | null;
+          created_by_user_id?: string | null;
+          updated_by_user_id?: string | null;
+          archived_by_user_id?: string | null;
+          archived_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["brainstorming_parking_lot_cards"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "brainstorming_parking_lot_cards_category_id_fkey";
+            columns: ["category_id"];
+            isOneToOne: false;
+            referencedRelation: "brainstorming_parking_lot_categories";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       portal_notifications: {
         Row: {
           id: string;
