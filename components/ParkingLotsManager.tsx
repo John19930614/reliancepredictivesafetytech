@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
-import { Archive, CarFront, GripVertical, Plus, Save, Search, Wifi, WifiOff } from "lucide-react";
+import { Archive, CarFront, GripVertical, Pencil, Plus, Save, Search, Wifi, WifiOff, X } from "lucide-react";
 import {
   getParkingLotLaneLabel,
   isParkingLotLane,
@@ -100,6 +100,7 @@ export function ParkingLotsManager({ categories, currentUserId, initialCards }: 
   const [cards, setCards] = useState(() => initialCards.sort(sortCards));
   const [activeCategoryId, setActiveCategoryId] = useState(categories[0]?.id ?? "");
   const [drafts, setDrafts] = useState<Record<string, CardDraft>>({});
+  const [editingCardIds, setEditingCardIds] = useState<Record<string, boolean>>({});
   const [createDraft, setCreateDraft] = useState<CreateDraft>(emptyCreateDraft);
   const [search, setSearch] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -238,6 +239,26 @@ export function ParkingLotsManager({ categories, currentUserId, initialCards }: 
     });
   }
 
+  function openCardEditor(cardId: string) {
+    setEditingCardIds((current) => ({
+      ...current,
+      [cardId]: true,
+    }));
+  }
+
+  function closeCardEditor(cardId: string) {
+    setEditingCardIds((current) => {
+      const next = { ...current };
+      delete next[cardId];
+      return next;
+    });
+  }
+
+  function cancelCardEdit(cardId: string) {
+    clearDraft(cardId);
+    closeCardEditor(cardId);
+  }
+
   async function createCard(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -322,6 +343,7 @@ export function ParkingLotsManager({ categories, currentUserId, initialCards }: 
     if (data) {
       setCards((current) => mergeRealtimeCard(current, data as BrainstormingParkingLotCard));
       clearDraft(card.id);
+      closeCardEditor(card.id);
       setStatus("Card saved.");
     }
   }
@@ -353,6 +375,7 @@ export function ParkingLotsManager({ categories, currentUserId, initialCards }: 
 
     setCards((current) => current.filter((item) => item.id !== card.id));
     clearDraft(card.id);
+    closeCardEditor(card.id);
     setStatus("Card archived.");
   }
 
@@ -590,18 +613,20 @@ export function ParkingLotsManager({ categories, currentUserId, initialCards }: 
                     visibleCardsByLane[lane.id].map((card) => {
                       const draftCard = getDraftCard(card);
                       const dirty = Boolean(drafts[card.id]);
+                      const editing = Boolean(editingCardIds[card.id]) || dirty;
 
                       return (
                         <article
-                          className={`parking-card ${card.is_placeholder ? "parking-card-placeholder" : ""}`}
+                          className={`parking-card ${card.is_placeholder ? "parking-card-placeholder" : ""} ${editing ? "parking-card-editing" : ""}`}
                           key={card.id}
+                          onDoubleClick={() => openCardEditor(card.id)}
                           onDragOver={(event) => {
                             event.preventDefault();
                             setDragOverLane(lane.id);
                           }}
                           onDrop={(event) => handleDrop(event, lane.id, card.id)}
                         >
-                          <div className="parking-card-title-row">
+                          <div className="parking-card-summary">
                             <button
                               aria-label={`Drag ${card.title}`}
                               className="parking-card-drag"
@@ -615,88 +640,118 @@ export function ParkingLotsManager({ categories, currentUserId, initialCards }: 
                             >
                               <GripVertical size={17} />
                             </button>
-                            <div>
-                              <span className="record-badge">{draftCard.priority}</span>
-                              {card.is_placeholder ? <span className="record-badge record-badge-neutral">Placeholder</span> : null}
-                              {dirty ? <span className="record-badge record-badge-gold">Unsaved</span> : null}
+
+                            <div className="parking-card-main">
+                              <div className="parking-card-title-line">
+                                <h4>{String(draftCard.title ?? "")}</h4>
+                                <div className="parking-card-badges">
+                                  <span className="record-badge">{String(draftCard.priority ?? card.priority)}</span>
+                                  {card.is_placeholder ? <span className="record-badge record-badge-neutral">Placeholder</span> : null}
+                                  {dirty ? <span className="record-badge record-badge-gold">Unsaved</span> : null}
+                                </div>
+                              </div>
+                              {String(draftCard.description ?? "").trim() ? <p>{String(draftCard.description ?? "")}</p> : null}
+                              <div className="parking-card-meta">
+                                <span>{getParkingLotLaneLabel(String(draftCard.lane ?? card.lane))}</span>
+                                <span>{draftCard.owner ? `Owner: ${draftCard.owner}` : "Unassigned"}</span>
+                                {String(draftCard.notes ?? "").trim() ? <span>Has notes</span> : null}
+                              </div>
+                            </div>
+
+                            <div className="parking-card-quick-actions">
+                              <button
+                                aria-expanded={editing}
+                                className="button button-secondary button-neutral"
+                                disabled={savingId === card.id || archivingId === card.id}
+                                onClick={() => openCardEditor(card.id)}
+                                type="button"
+                              >
+                                <Pencil size={15} />
+                                Edit
+                              </button>
+                              <button className="button button-danger" disabled={savingId === card.id || archivingId === card.id} onClick={() => void archiveCard(card)} type="button">
+                                <Archive size={15} />
+                                {archivingId === card.id ? "Archiving..." : "Archive"}
+                              </button>
                             </div>
                           </div>
 
-                          <div className="parking-card-fields">
-                            <div className="field">
-                              <label htmlFor={`parking-title-${card.id}`}>Title</label>
-                              <input
-                                id={`parking-title-${card.id}`}
-                                value={String(draftCard.title ?? "")}
-                                onChange={(event) => updateDraft(card.id, { title: event.target.value })}
-                              />
-                            </div>
-                            <div className="field">
-                              <label htmlFor={`parking-lane-${card.id}`}>Lane</label>
-                              <select
-                                id={`parking-lane-${card.id}`}
-                                value={normalizeLane(String(draftCard.lane ?? card.lane))}
-                                onChange={(event) => updateDraft(card.id, { lane: normalizeLane(event.target.value) })}
-                              >
-                                {parkingLotLanes.map((laneOption) => (
-                                  <option key={laneOption.id} value={laneOption.id}>
-                                    {laneOption.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                            <div className="field">
-                              <label htmlFor={`parking-priority-${card.id}`}>Priority</label>
-                              <select
-                                id={`parking-priority-${card.id}`}
-                                value={String(draftCard.priority ?? card.priority)}
-                                onChange={(event) => updateDraft(card.id, { priority: event.target.value })}
-                              >
-                                {parkingLotPriorities.map((priority) => (
-                                  <option key={priority}>{priority}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div className="field">
-                              <label htmlFor={`parking-owner-${card.id}`}>Owner</label>
-                              <input
-                                id={`parking-owner-${card.id}`}
-                                value={draftCard.owner ?? ""}
-                                onChange={(event) => updateDraft(card.id, { owner: event.target.value })}
-                                placeholder="Unassigned"
-                              />
-                            </div>
-                            <div className="field-full">
-                              <label htmlFor={`parking-description-${card.id}`}>Description</label>
-                              <textarea
-                                id={`parking-description-${card.id}`}
-                                value={String(draftCard.description ?? "")}
-                                onChange={(event) => updateDraft(card.id, { description: event.target.value })}
-                              />
-                            </div>
-                            <div className="field-full">
-                              <label htmlFor={`parking-notes-${card.id}`}>Notes</label>
-                              <textarea
-                                id={`parking-notes-${card.id}`}
-                                value={String(draftCard.notes ?? "")}
-                                onChange={(event) => updateDraft(card.id, { notes: event.target.value })}
-                              />
-                            </div>
-                          </div>
+                          {editing ? (
+                            <div className="parking-card-edit-panel">
+                              <div className="parking-card-fields">
+                                <div className="field">
+                                  <label htmlFor={`parking-title-${card.id}`}>Title</label>
+                                  <input
+                                    id={`parking-title-${card.id}`}
+                                    value={String(draftCard.title ?? "")}
+                                    onChange={(event) => updateDraft(card.id, { title: event.target.value })}
+                                  />
+                                </div>
+                                <div className="field">
+                                  <label htmlFor={`parking-lane-${card.id}`}>Lane</label>
+                                  <select
+                                    id={`parking-lane-${card.id}`}
+                                    value={normalizeLane(String(draftCard.lane ?? card.lane))}
+                                    onChange={(event) => updateDraft(card.id, { lane: normalizeLane(event.target.value) })}
+                                  >
+                                    {parkingLotLanes.map((laneOption) => (
+                                      <option key={laneOption.id} value={laneOption.id}>
+                                        {laneOption.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div className="field">
+                                  <label htmlFor={`parking-priority-${card.id}`}>Priority</label>
+                                  <select
+                                    id={`parking-priority-${card.id}`}
+                                    value={String(draftCard.priority ?? card.priority)}
+                                    onChange={(event) => updateDraft(card.id, { priority: event.target.value })}
+                                  >
+                                    {parkingLotPriorities.map((priority) => (
+                                      <option key={priority}>{priority}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div className="field">
+                                  <label htmlFor={`parking-owner-${card.id}`}>Owner</label>
+                                  <input
+                                    id={`parking-owner-${card.id}`}
+                                    value={draftCard.owner ?? ""}
+                                    onChange={(event) => updateDraft(card.id, { owner: event.target.value })}
+                                    placeholder="Unassigned"
+                                  />
+                                </div>
+                                <div className="field-full">
+                                  <label htmlFor={`parking-description-${card.id}`}>Description</label>
+                                  <textarea
+                                    id={`parking-description-${card.id}`}
+                                    value={String(draftCard.description ?? "")}
+                                    onChange={(event) => updateDraft(card.id, { description: event.target.value })}
+                                  />
+                                </div>
+                                <div className="field-full">
+                                  <label htmlFor={`parking-notes-${card.id}`}>Notes</label>
+                                  <textarea
+                                    id={`parking-notes-${card.id}`}
+                                    value={String(draftCard.notes ?? "")}
+                                    onChange={(event) => updateDraft(card.id, { notes: event.target.value })}
+                                  />
+                                </div>
+                              </div>
 
-                          <div className="parking-card-actions">
-                            <button className="button button-primary" disabled={!dirty || savingId === card.id || archivingId === card.id} onClick={() => void saveCard(card)} type="button">
-                              <Save size={16} />
-                              {savingId === card.id ? "Saving..." : "Save"}
-                            </button>
-                            <button className="button button-secondary button-neutral" disabled={!dirty || savingId === card.id || archivingId === card.id} onClick={() => clearDraft(card.id)} type="button">
-                              Cancel
-                            </button>
-                            <button className="button button-danger" disabled={savingId === card.id || archivingId === card.id} onClick={() => void archiveCard(card)} type="button">
-                              <Archive size={16} />
-                              {archivingId === card.id ? "Archiving..." : "Archive"}
-                            </button>
-                          </div>
+                              <div className="parking-card-actions">
+                                <button className="button button-primary" disabled={!dirty || savingId === card.id || archivingId === card.id} onClick={() => void saveCard(card)} type="button">
+                                  <Save size={16} />
+                                  {savingId === card.id ? "Saving..." : "Save"}
+                                </button>
+                                <button className="button button-secondary button-neutral" disabled={savingId === card.id || archivingId === card.id} onClick={() => cancelCardEdit(card.id)} type="button">
+                                  <X size={16} />
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
                         </article>
                       );
                     })

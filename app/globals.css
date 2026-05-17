@@ -1844,7 +1844,7 @@ textarea {
 
 .parking-card {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   border: 1px solid #e1e7ef;
   border-radius: 8px;
   padding: 12px;
@@ -1852,20 +1852,82 @@ textarea {
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
 }
 
+.parking-card-editing {
+  border-color: rgba(201, 147, 43, 0.55);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
 .parking-card-placeholder {
   border-style: dashed;
   background: #fffdf5;
 }
 
-.parking-card-title-row {
+.parking-card-summary {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.parking-card-main {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
+.parking-card-title-line,
+.parking-card-badges,
+.parking-card-meta,
+.parking-card-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.parking-card-title-line {
   justify-content: space-between;
 }
 
-.parking-card-title-row > div {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
+.parking-card-title-line h4,
+.parking-card-main p {
+  margin: 0;
+}
+
+.parking-card-title-line h4 {
+  min-width: 0;
+  color: #111827;
+  font-size: 0.96rem;
+  line-height: 1.35;
+}
+
+.parking-card-main p {
+  color: #475467;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.parking-card-meta {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.parking-card-meta span {
+  border-radius: 999px;
+  background: #f3f6f9;
+  padding: 3px 7px;
+}
+
+.parking-card-quick-actions {
+  grid-column: 2;
+}
+
+.parking-card-quick-actions .button,
+.parking-card-actions .button {
+  min-height: 34px;
+  padding: 8px 10px;
+  font-size: 0.78rem;
 }
 
 .parking-card-drag {
@@ -1885,10 +1947,21 @@ textarea {
   cursor: grabbing;
 }
 
+.parking-card-edit-panel {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #e1e7ef;
+  padding-top: 10px;
+}
+
 .parking-card-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.parking-card-fields textarea {
+  min-height: 86px;
 }
 
 .parking-card-actions {
