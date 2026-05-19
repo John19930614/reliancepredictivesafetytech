@@ -2575,9 +2575,13 @@ textarea {
 
 .user-admin-layout {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) 1fr;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
   gap: 18px;
   align-items: start;
+}
+
+.user-admin-layout > .table-card {
+  grid-column: 1 / -1;
 }
 
 .portal-alert {
@@ -2626,14 +2630,15 @@ textarea {
 
 .user-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(280px, 1fr) auto;
   grid-template-areas:
     "identity actions"
     "editor editor";
-  gap: 14px 18px;
+  gap: 16px 22px;
   align-items: start;
   border-bottom: 1px solid #ececec;
-  padding: 18px 20px;
+  padding: 20px;
+  background: #fff;
 }
 
 .user-row > div:first-child {
@@ -2648,11 +2653,13 @@ textarea {
 .user-row h3 {
   margin: 0 0 4px;
   font-size: 1rem;
+  overflow-wrap: anywhere;
 }
 
 .user-row p {
   margin: 0;
   color: #666;
+  overflow-wrap: anywhere;
 }
 
 .user-meta,
@@ -2669,23 +2676,45 @@ textarea {
   font-size: 0.85rem;
 }
 
+.user-meta span:not(.badge) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border: 1px solid #ece7dc;
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: #fbfaf7;
+  color: #53504a;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
 .user-row-form {
   grid-area: editor;
   display: grid;
-  grid-template-columns: minmax(150px, 220px) minmax(150px, 1fr) minmax(180px, 260px) 112px;
+  grid-template-columns: minmax(160px, 220px) minmax(160px, 1fr) minmax(190px, 270px) minmax(90px, 120px) 112px;
   gap: 10px;
   align-items: end;
-  max-width: 860px;
+  max-width: 1040px;
 }
 
 .user-row-actions {
   grid-area: actions;
   justify-content: flex-end;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-self: start;
 }
 
-.user-row-actions .button,
+.user-row-actions form {
+  flex: 0 0 auto;
+}
+
+.user-row-actions .button {
+  width: auto;
+  min-width: 104px;
+  white-space: nowrap;
+}
+
 .user-row-form .button {
   width: 100%;
   min-width: 104px;
