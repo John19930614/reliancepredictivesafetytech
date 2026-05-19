@@ -12,7 +12,7 @@ import type {
 } from "@/lib/company-data";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
 import { createClient } from "@/lib/supabase/server";
-import { isPortalOwnerRole } from "@/lib/user-management";
+import { canAccessEmployeePath, hasFullPortalVisibility, isPortalOwnerRole } from "@/lib/user-management";
 
 export default async function FinanceCenterPage() {
   const supabase = await createClient();
@@ -47,12 +47,25 @@ export default async function FinanceCenterPage() {
     supabase.from("user_roles").select("role, account_status").eq("user_id", user.id).maybeSingle(),
     supabase.from("company_finance_authorized_users").select("*").eq("user_id", user.id).maybeSingle(),
   ]);
+  const { data: moduleAccess } = hasFullPortalVisibility(role?.role, role?.account_status)
+    ? { data: [] }
+    : await supabase.from("portal_user_module_access").select("module_key").eq("user_id", user.id);
 
   const canManageAuthorization = role?.account_status === "active" && isPortalOwnerRole(role.role);
   const canManageRecords = Boolean(financeAuthorization);
+  const canViewFinanceModule = canAccessEmployeePath(
+    role?.role,
+    role?.account_status,
+    "/employee/finance",
+    (moduleAccess ?? []).map((access) => access.module_key),
+  );
 
   if (financeAuthorizationError && !isMissingSchemaRelationError(financeAuthorizationError)) {
     console.error("Could not load finance authorization.", financeAuthorizationError);
+  }
+
+  if (!canViewFinanceModule) {
+    return <section className="portal-card empty-state">Finance Center is not visible for this account.</section>;
   }
 
   const [

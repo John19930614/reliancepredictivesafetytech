@@ -36,73 +36,36 @@ export function isPortalSuperAdminRole(role: string | null | undefined) {
   return role === "super_admin";
 }
 
-const employeeSelfServicePaths = [
-  "/employee",
-  "/employee/ai",
-  "/employee/work",
-  "/employee/parking-lots",
-  "/employee/company-tree",
-  "/employee/hr-onboarding",
-  "/employee/training",
-  "/employee/time-cards",
+export const portalModuleCatalog = [
+  { key: "dashboard", label: "Dashboard", group: "Command", pathPrefixes: ["/employee"] },
+  { key: "ai_command", label: "AI Command", group: "Command", pathPrefixes: ["/employee/ai"] },
+  { key: "website_operations", label: "Website Ops", group: "Command", pathPrefixes: ["/employee/website-operations"] },
+  { key: "work_management", label: "Work Management", group: "Command", pathPrefixes: ["/employee/work"] },
+  { key: "parking_lots", label: "Parking Lots", group: "Command", pathPrefixes: ["/employee/parking-lots"] },
+  { key: "finance", label: "Finance Center", group: "Command", pathPrefixes: ["/employee/finance"] },
+  { key: "operations_database", label: "Operations Database", group: "Command", pathPrefixes: ["/employee/operations"] },
+  { key: "startup_checklist", label: "Startup Checklist", group: "Command", pathPrefixes: ["/employee/checklist"] },
+  { key: "demo_showcase", label: "Demo Showcase", group: "Commercial", pathPrefixes: ["/employee/demo-showcase"] },
+  { key: "request_inbox", label: "Request Inbox", group: "Commercial", pathPrefixes: ["/employee/inbox"] },
+  { key: "sales_pipeline", label: "Sales Pipeline", group: "Commercial", pathPrefixes: ["/employee/sales"] },
+  { key: "active_companies", label: "Active Companies", group: "Commercial", pathPrefixes: ["/employee/active-companies", "/employee/clients"] },
+  { key: "company_tree", label: "Company Tree", group: "People", pathPrefixes: ["/employee/company-tree"] },
+  { key: "hr_onboarding", label: "HR Onboarding", group: "People", pathPrefixes: ["/employee/hr-onboarding"] },
+  { key: "training", label: "Training", group: "People", pathPrefixes: ["/employee/training"] },
+  { key: "hr_documents", label: "HR Documents", group: "People", pathPrefixes: ["/employee/hr-documents"] },
+  { key: "time_cards", label: "Time Cards", group: "People", pathPrefixes: ["/employee/time-cards"] },
+  { key: "master_document_library", label: "Master Document Library", group: "Governance", pathPrefixes: ["/employee/documents"] },
+  { key: "legal_issues", label: "Legal Issues", group: "Governance", pathPrefixes: ["/employee/legal-issues"] },
+  { key: "required_documents", label: "Required Documents", group: "Governance", pathPrefixes: ["/employee/required-documents"] },
+  { key: "launch_gate", label: "Launch Gate", group: "Governance", pathPrefixes: ["/employee/launch-gate"] },
+  { key: "users", label: "Users", group: "Admin", pathPrefixes: ["/employee/users"] },
+  { key: "settings", label: "Settings", group: "Admin", pathPrefixes: ["/employee/settings"] },
 ] as const;
 
-const commercialPaths = [
-  "/employee/demo-showcase",
-  "/employee/inbox",
-  "/employee/sales",
-  "/employee/active-companies",
-  "/employee/clients",
-] as const;
+export type PortalModule = (typeof portalModuleCatalog)[number];
+export type PortalModuleKey = PortalModule["key"];
 
-const operationsPaths = [
-  "/employee/operations",
-  "/employee/checklist",
-  "/employee/launch-gate",
-] as const;
-
-const governancePaths = [
-  "/employee/documents",
-  "/employee/legal-issues",
-  "/employee/required-documents",
-] as const;
-
-const adminPaths = [
-  "/employee/website-operations",
-  "/employee/hr-documents",
-  "/employee/users",
-  "/employee/settings",
-] as const;
-
-const ownerOnlyPaths = ["/employee/finance"] as const;
-
-const allPortalPaths = [
-  ...employeeSelfServicePaths,
-  ...commercialPaths,
-  ...operationsPaths,
-  ...governancePaths,
-  ...adminPaths,
-] as const;
-
-export const portalRolePathAccess: Record<PortalUserRole, readonly string[]> = {
-  platform_admin: [...allPortalPaths, ...ownerOnlyPaths],
-  super_admin: [...allPortalPaths, ...ownerOnlyPaths],
-  company_admin: allPortalPaths,
-  admin: allPortalPaths,
-  internal_reviewer: [
-    ...employeeSelfServicePaths,
-    ...operationsPaths,
-    ...governancePaths,
-    "/employee/active-companies",
-  ],
-  marketing: [
-    ...employeeSelfServicePaths,
-    ...commercialPaths,
-    "/employee/documents",
-    "/employee/required-documents",
-  ],
-  employee: employeeSelfServicePaths,
-};
+export const portalModuleKeys = portalModuleCatalog.map((module) => module.key);
 
 function normalizePortalPath(pathname: string) {
   const [pathWithoutHash] = pathname.split("#", 1);
@@ -115,24 +78,81 @@ function normalizePortalPath(pathname: string) {
   return pathWithoutQuery;
 }
 
+function isPortalModuleKey(value: string | null | undefined): value is PortalModuleKey {
+  return portalModuleKeys.includes(value as PortalModuleKey);
+}
+
+function moduleMatchesPath(module: PortalModule, pathname: string) {
+  return module.pathPrefixes.some((pathPrefix) => {
+    if (pathPrefix === "/employee") {
+      return pathname === pathPrefix;
+    }
+
+    return pathname === pathPrefix || pathname.startsWith(`${pathPrefix}/`);
+  });
+}
+
+export function getPortalModuleForPath(pathname: string) {
+  const normalizedPath = normalizePortalPath(pathname);
+
+  return portalModuleCatalog.find((module) => moduleMatchesPath(module, normalizedPath)) ?? null;
+}
+
+export function normalizePortalModuleKeys(moduleKeys: readonly (string | null | undefined)[] | null | undefined) {
+  return [...new Set((moduleKeys ?? []).filter(isPortalModuleKey))];
+}
+
+export function buildPortalModuleAccessRows(
+  userId: string,
+  grantedBy: string,
+  moduleKeys: readonly (string | null | undefined)[] | null | undefined,
+) {
+  return normalizePortalModuleKeys(moduleKeys).map((moduleKey) => ({
+    user_id: userId,
+    module_key: moduleKey,
+    granted_by: grantedBy,
+  }));
+}
+
+export function hasFullPortalVisibility(role: string | null | undefined, accountStatus: string | null | undefined) {
+  return accountStatus === "active" && isPortalOwnerRole(role);
+}
+
 export function isFinancePortalPath(pathname: string) {
   const normalizedPath = normalizePortalPath(pathname);
-  return ownerOnlyPaths.some((allowedPath) => normalizedPath === allowedPath || normalizedPath.startsWith(`${allowedPath}/`));
+  return moduleMatchesPath(portalModuleCatalog.find((module) => module.key === "finance")!, normalizedPath);
+}
+
+export function canAccessPortalModule(
+  role: string | null | undefined,
+  accountStatus: string | null | undefined,
+  moduleKey: string | null | undefined,
+  moduleKeys: readonly (string | null | undefined)[] | null | undefined,
+) {
+  if (hasFullPortalVisibility(role, accountStatus)) {
+    return true;
+  }
+
+  if (accountStatus !== "active" || !portalUserRoles.includes(role as PortalUserRole) || !isPortalModuleKey(moduleKey)) {
+    return false;
+  }
+
+  return normalizePortalModuleKeys(moduleKeys).includes(moduleKey);
 }
 
 export function canAccessEmployeePath(
   role: string | null | undefined,
   accountStatus: string | null | undefined,
   pathname: string,
+  moduleKeys: readonly (string | null | undefined)[] | null | undefined = [],
 ) {
-  if (accountStatus !== "active" || !portalUserRoles.includes(role as PortalUserRole)) {
+  const module = getPortalModuleForPath(pathname);
+
+  if (!module) {
     return false;
   }
 
-  const normalizedPath = normalizePortalPath(pathname);
-  const allowedPaths = portalRolePathAccess[role as PortalUserRole];
-
-  return allowedPaths.some((allowedPath) => normalizedPath === allowedPath || normalizedPath.startsWith(`${allowedPath}/`));
+  return canAccessPortalModule(role, accountStatus, module.key, moduleKeys);
 }
 
 export function formatPortalRole(role: string | null | undefined) {

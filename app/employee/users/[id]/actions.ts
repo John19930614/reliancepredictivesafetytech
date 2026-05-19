@@ -6,10 +6,20 @@ import { normalizeStateCode, payrollSetupStatuses } from "@/lib/hr-automation";
 import { updateEmployeeOnboardingCompletion } from "@/lib/hr-onboarding";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { isPortalAdminRole, isPortalSuperAdminRole } from "@/lib/user-management";
+import {
+  buildPortalModuleAccessRows,
+  isPortalAdminRole,
+  isPortalSuperAdminRole,
+  portalModuleKeys,
+  type PortalModuleKey,
+} from "@/lib/user-management";
 
 function cleanText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
+}
+
+function isPortalModuleKey(value: string): value is PortalModuleKey {
+  return portalModuleKeys.includes(value as PortalModuleKey);
 }
 
 async function getAuthorizedAdmin(profileUserId: string) {
@@ -357,6 +367,45 @@ export async function updateEmployeeProfileDetails(formData: FormData) {
   revalidatePath("/employee/company-tree");
   revalidatePath("/employee/time-cards");
   redirect(`/employee/users/${profileUserId}?message=Employee profile updated.`);
+}
+
+export async function updatePortalModuleAccess(formData: FormData) {
+  const profileUserId = cleanText(formData.get("profile_user_id"));
+
+  if (!profileUserId) {
+    redirect("/employee/users?error=Choose an employee profile to update.");
+  }
+
+  const currentUser = await getAuthorizedSuperAdmin(profileUserId);
+  const admin = getAdminClientOrRedirect(profileUserId);
+  const moduleKeys = [
+    ...new Set(
+      formData
+        .getAll("module_key")
+        .map((value) => cleanText(value))
+        .filter(isPortalModuleKey),
+    ),
+  ];
+
+  const { error: deleteError } = await admin.from("portal_user_module_access").delete().eq("user_id", profileUserId);
+
+  if (deleteError) {
+    redirect(`/employee/users/${profileUserId}?error=${encodeURIComponent(deleteError.message)}`);
+  }
+
+  const rows = buildPortalModuleAccessRows(profileUserId, currentUser.id, moduleKeys);
+
+  if (rows.length > 0) {
+    const { error: insertError } = await admin.from("portal_user_module_access").insert(rows);
+
+    if (insertError) {
+      redirect(`/employee/users/${profileUserId}?error=${encodeURIComponent(insertError.message)}`);
+    }
+  }
+
+  revalidatePath("/employee/users");
+  revalidatePath(`/employee/users/${profileUserId}`);
+  redirect(`/employee/users/${profileUserId}?message=Portal visibility updated.`);
 }
 
 export async function updatePayrollSetupTask(formData: FormData) {

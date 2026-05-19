@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/lib/supabase/types";
-import { canAccessEmployeePath } from "@/lib/user-management";
+import { canAccessEmployeePath, hasFullPortalVisibility } from "@/lib/user-management";
 
 export async function updateSession(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -71,7 +71,23 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(loginUrl);
     }
 
-    if (!canAccessEmployeePath(role.role, role.account_status, request.nextUrl.pathname)) {
+    const { data: moduleAccess } = hasFullPortalVisibility(role.role, role.account_status)
+      ? { data: [] }
+      : await supabase
+          .from("portal_user_module_access")
+          .select("module_key")
+          .eq("user_id", userId);
+
+    const moduleKeys = (moduleAccess ?? []).map((access) => access.module_key);
+
+    if (!canAccessEmployeePath(role.role, role.account_status, request.nextUrl.pathname, moduleKeys)) {
+      if (!canAccessEmployeePath(role.role, role.account_status, "/employee", moduleKeys)) {
+        const loginUrl = request.nextUrl.clone();
+        loginUrl.pathname = "/employee-login";
+        loginUrl.searchParams.set("message", "portal-module-required");
+        return NextResponse.redirect(loginUrl);
+      }
+
       const dashboardUrl = request.nextUrl.clone();
       dashboardUrl.pathname = "/employee";
       dashboardUrl.searchParams.set("message", "role-access-required");

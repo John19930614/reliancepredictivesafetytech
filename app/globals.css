@@ -423,6 +423,15 @@ textarea {
   width: auto;
 }
 
+.visibility-module-group {
+  display: grid;
+  gap: 10px;
+}
+
+.visibility-module-group h3 {
+  margin: 10px 0 0;
+}
+
 .success-box {
   border: 1px solid rgba(201, 147, 43, 0.4);
   border-radius: 8px;

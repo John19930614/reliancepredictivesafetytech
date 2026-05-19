@@ -4,6 +4,7 @@ import {
   attachExistingEmployeeDocument,
   reviewEmployeeOnboardingUpload,
   updateEmployeeProfileDetails,
+  updatePortalModuleAccess,
   updatePayrollSetupTask,
 } from "@/app/employee/users/[id]/actions";
 import type {
@@ -24,7 +25,7 @@ import type {
 } from "@/lib/company-data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { isPortalAdminRole, isPortalSuperAdminRole } from "@/lib/user-management";
+import { isPortalAdminRole, isPortalSuperAdminRole, portalModuleCatalog } from "@/lib/user-management";
 
 type EmployeeProfilePageProps = {
   params: Promise<{ id: string }>;
@@ -98,6 +99,7 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
     { data: allDocuments },
     { data: timeCardRoles },
     { data: chatProfile },
+    { data: moduleAccess },
   ] = await Promise.all([
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
     admin.from("employee_profiles").select("*").eq("user_id", id).maybeSingle(),
@@ -112,6 +114,7 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
     admin.from("company_documents").select("*").order("updated_at", { ascending: false }),
     admin.from("time_card_roles").select("*").order("sort_order"),
     admin.from("employee_chat_profiles").select("last_seen_at").eq("user_id", id).maybeSingle(),
+    admin.from("portal_user_module_access").select("*").eq("user_id", id).order("module_key"),
   ]);
 
   const employee = authData.users.find((authUser) => authUser.id === id);
@@ -127,6 +130,11 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
   const typedAllDocuments = (allDocuments ?? []) as CompanyDocument[];
   const typedTimeCardRoles = (timeCardRoles ?? []) as TimeCardRole[];
   const lastSeenAt = (chatProfile as { last_seen_at?: string | null } | null)?.last_seen_at ?? employee?.last_sign_in_at ?? null;
+  const grantedModuleKeys = new Set((moduleAccess ?? []).map((access) => access.module_key));
+  const moduleGroups = portalModuleCatalog.reduce<Record<string, (typeof portalModuleCatalog)[number][]>>((groups, module) => {
+    groups[module.group] = [...(groups[module.group] ?? []), module];
+    return groups;
+  }, {});
   const templateIds = [...new Set(typedAssignments.map((assignment) => assignment.template_id))];
   const { data: templates } =
     templateIds.length > 0
@@ -337,6 +345,54 @@ export default async function EmployeeProfilePage({ params, searchParams }: Empl
             </form>
           ) : (
             <div className="success-box">Only super admins can edit profile details.</div>
+          )}
+        </section>
+
+        <section className="portal-card" id="portal-visibility">
+          <UserRound color="#c9932b" size={28} />
+          <h2>Portal visibility</h2>
+          <p>Choose exactly which employee portal modules this user can see. Platform admins and super admins still have full visibility.</p>
+          {canEditProfile ? (
+            <form action={updatePortalModuleAccess} className="signature-panel profile-edit-form">
+              <input name="profile_user_id" type="hidden" value={id} />
+              {Object.entries(moduleGroups).map(([group, modules]) => (
+                <section className="visibility-module-group" key={group}>
+                  <h3>{group}</h3>
+                  <div className="form-grid">
+                    {modules.map((module) => (
+                      <label className="checkbox-pill" key={module.key}>
+                        <input
+                          name="module_key"
+                          type="checkbox"
+                          value={module.key}
+                          defaultChecked={grantedModuleKeys.has(module.key)}
+                        />
+                        {module.label}
+                      </label>
+                    ))}
+                  </div>
+                </section>
+              ))}
+              <button className="button button-primary" type="submit">
+                <Save size={16} />
+                Save Visibility
+              </button>
+            </form>
+          ) : (
+            <div className="profile-facts">
+              {portalModuleCatalog.filter((module) => grantedModuleKeys.has(module.key)).length === 0 ? (
+                <p>No portal modules are explicitly assigned.</p>
+              ) : (
+                portalModuleCatalog
+                  .filter((module) => grantedModuleKeys.has(module.key))
+                  .map((module) => (
+                    <p key={module.key}>
+                      <strong>{module.group}:</strong> {module.label}
+                    </p>
+                  ))
+              )}
+              <div className="success-box">Only super admins can edit portal visibility.</div>
+            </div>
           )}
         </section>
 

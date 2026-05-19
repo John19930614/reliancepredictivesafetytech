@@ -95,6 +95,7 @@ type EmployeeSidebarProps = {
   accountStatus?: string | null;
   canAccessFinance?: boolean;
   currentRole?: string | null;
+  moduleKeys?: readonly string[];
   unreadNotificationCount?: number;
 };
 
@@ -102,6 +103,7 @@ export function EmployeeSidebar({
   accountStatus = "active",
   canAccessFinance = false,
   currentRole = "employee",
+  moduleKeys = [],
   unreadNotificationCount = 0,
 }: EmployeeSidebarProps) {
   const pathname = usePathname();
@@ -110,8 +112,8 @@ export function EmployeeSidebar({
       ...group,
       items: group.items.filter((item) =>
         "financeOnly" in item && item.financeOnly
-          ? accountStatus === "active" && canAccessFinance
-          : canAccessEmployeePath(currentRole, accountStatus, item.href),
+          ? accountStatus === "active" && canAccessFinance && canAccessEmployeePath(currentRole, accountStatus, item.href, moduleKeys)
+          : canAccessEmployeePath(currentRole, accountStatus, item.href, moduleKeys),
       ),
     }))
     .filter((group) => group.items.length > 0);

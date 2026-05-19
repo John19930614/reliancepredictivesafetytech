@@ -2037,6 +2037,24 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["user_roles"]["Insert"]>;
         Relationships: [];
       };
+      portal_user_module_access: {
+        Row: {
+          user_id: string;
+          module_key: string;
+          granted_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          module_key: string;
+          granted_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["portal_user_module_access"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -2053,6 +2071,10 @@ export type Database = {
         Returns: boolean;
       };
       is_company_portal_owner: {
+        Args: Record<PropertyKey, never>;
+        Returns: boolean;
+      };
+      is_company_portal_super_admin: {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
       };
