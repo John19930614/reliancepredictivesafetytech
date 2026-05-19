@@ -482,6 +482,18 @@ export const financeBudgetTypes = ["income", "expense"] as const;
 export const financeBudgetPeriods = ["monthly", "yearly"] as const;
 export const financeRecurringCadences = ["weekly", "monthly", "quarterly", "yearly"] as const;
 export const financeRecurringStatuses = ["active", "paused", "ended"] as const;
+export const employeeExpenseStatuses = ["submitted", "needs_info", "approved", "rejected", "reimbursed", "cancelled"] as const;
+export const employeeExpenseCategories = [
+  "Hotel",
+  "Fuel",
+  "Flight",
+  "Meals",
+  "Parking",
+  "Rideshare / Taxi",
+  "Supplies",
+  "Training / Certifications",
+  "Other",
+] as const;
 export const financeCategories = [
   "Sales / Revenue",
   "Software / Hosting",
@@ -831,6 +843,38 @@ export type EmployeeTimeCardPayroll = {
   paid_value: number;
   created_at: string;
   updated_at: string;
+};
+
+export type EmployeeExpenseReport = {
+  id: string;
+  employee_user_id: string;
+  title: string;
+  category: (typeof employeeExpenseCategories)[number];
+  amount: number;
+  expense_date: string;
+  merchant: string | null;
+  payment_method: string | null;
+  business_purpose: string;
+  notes: string | null;
+  status: (typeof employeeExpenseStatuses)[number];
+  finance_notes: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  reimbursed_by: string | null;
+  reimbursed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EmployeeExpenseReceipt = {
+  id: string;
+  expense_report_id: string;
+  file_path: string;
+  file_name: string;
+  file_type: string | null;
+  file_size: number | null;
+  uploaded_by: string | null;
+  created_at: string;
 };
 
 export type CompanyFinanceAuthorizedUser = {

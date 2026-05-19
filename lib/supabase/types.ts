@@ -1487,6 +1487,82 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["employee_profiles"]["Insert"]>;
         Relationships: [];
       };
+      employee_expense_reports: {
+        Row: {
+          id: string;
+          employee_user_id: string;
+          title: string;
+          category: string;
+          amount: number;
+          expense_date: string;
+          merchant: string | null;
+          payment_method: string | null;
+          business_purpose: string;
+          notes: string | null;
+          status: string;
+          finance_notes: string | null;
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+          reimbursed_by: string | null;
+          reimbursed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          employee_user_id: string;
+          title: string;
+          category: string;
+          amount: number;
+          expense_date?: string;
+          merchant?: string | null;
+          payment_method?: string | null;
+          business_purpose: string;
+          notes?: string | null;
+          status?: string;
+          finance_notes?: string | null;
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+          reimbursed_by?: string | null;
+          reimbursed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_expense_reports"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_expense_receipts: {
+        Row: {
+          id: string;
+          expense_report_id: string;
+          file_path: string;
+          file_name: string;
+          file_type: string | null;
+          file_size: number | null;
+          uploaded_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          expense_report_id: string;
+          file_path: string;
+          file_name: string;
+          file_type?: string | null;
+          file_size?: number | null;
+          uploaded_by?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_expense_receipts"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "employee_expense_receipts_expense_report_id_fkey";
+            columns: ["expense_report_id"];
+            isOneToOne: false;
+            referencedRelation: "employee_expense_reports";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       hr_compliance_requirements: {
         Row: {
           id: string;

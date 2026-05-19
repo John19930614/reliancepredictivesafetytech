@@ -1499,6 +1499,10 @@ textarea {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
+.expense-center .finance-kpi-strip {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .finance-kpi-card .kpi-value {
   font-size: 1.55rem;
 }
@@ -1560,6 +1564,42 @@ textarea {
   color: #334155;
   font-size: 0.86rem;
   font-weight: 800;
+}
+
+.finance-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.expense-record-card textarea {
+  min-height: 86px;
+}
+
+.expense-review-summary,
+.expense-review-form {
+  display: grid;
+  gap: 10px;
+}
+
+.expense-review-summary {
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfe;
+}
+
+.expense-review-summary p {
+  margin: 0;
+}
+
+.expense-finance-notes {
+  padding: 12px;
+}
+
+.expense-empty-receipts {
+  padding: 14px;
+  text-align: left;
 }
 
 .work-management-grid {
@@ -4094,6 +4134,10 @@ textarea {
   .parking-lane-grid {
     grid-template-columns: 1fr;
   }
+
+  .finance-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
@@ -4138,7 +4182,8 @@ textarea {
   .module-group-grid,
   .readiness-grid,
   .parking-create-grid,
-  .parking-card-fields {
+  .parking-card-fields,
+  .finance-filters {
     grid-template-columns: 1fr;
   }
 

@@ -42,6 +42,7 @@ export const portalModuleCatalog = [
   { key: "website_operations", label: "Website Ops", group: "Command", pathPrefixes: ["/employee/website-operations"] },
   { key: "work_management", label: "Work Management", group: "Command", pathPrefixes: ["/employee/work"] },
   { key: "parking_lots", label: "Parking Lots", group: "Command", pathPrefixes: ["/employee/parking-lots"] },
+  { key: "employee_expenses", label: "Expenses", group: "Command", pathPrefixes: ["/employee/expenses"] },
   { key: "finance", label: "Finance Center", group: "Command", pathPrefixes: ["/employee/finance"] },
   { key: "operations_database", label: "Operations Database", group: "Command", pathPrefixes: ["/employee/operations"] },
   { key: "startup_checklist", label: "Startup Checklist", group: "Command", pathPrefixes: ["/employee/checklist"] },
