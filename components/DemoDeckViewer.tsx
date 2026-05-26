@@ -3,7 +3,7 @@
 import { ChevronLeft, ChevronRight, Maximize2, Minimize2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const TOTAL_DECK_PAGES = 18;
+const TOTAL_DECK_PAGES = 29;
 const SLIDE_PATH = "/demo-deck-slides";
 
 function getSlideSrc(page: number) {
