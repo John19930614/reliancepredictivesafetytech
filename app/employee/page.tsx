@@ -47,6 +47,7 @@ const moduleGroups = [
       { title: "Parking Lots", href: "/employee/parking-lots", icon: CarFront },
       { title: "Employee Expenses", href: "/employee/expenses", icon: ReceiptText },
       { title: "Finance Center", href: "/employee/finance", icon: DollarSign },
+      { title: "Payroll Tracker", href: "/employee/payroll", icon: ReceiptText },
       { title: "Operations Database", href: "/employee/operations", icon: Database },
       { title: "Startup Checklist", href: "/employee/checklist", icon: ListChecks },
       { title: "Launch Gate", href: "/employee/launch-gate", icon: BookOpenCheck },
@@ -173,11 +174,14 @@ export default async function EmployeeDashboardPage() {
   const canAccessFinance = Boolean(
     currentRole?.account_status === "active" && canViewFinanceModule && (isPortalOwnerRole(currentRole.role) || financeAuthorization),
   );
+  const canAccessPayroll = Boolean(currentRole?.account_status === "active" && isPortalOwnerRole(currentRole.role));
   const canManageFinanceRecords = Boolean(financeAuthorization && canViewFinanceModule);
   const canOpenPath = (href: string) =>
     !supabase ||
     (href === "/employee/finance"
       ? canAccessFinance && canAccessEmployeePath(currentRole?.role, currentRole?.account_status, href, moduleKeys)
+      : href === "/employee/payroll"
+        ? canAccessPayroll && canAccessEmployeePath(currentRole?.role, currentRole?.account_status, href, moduleKeys)
       : canAccessEmployeePath(currentRole?.role, currentRole?.account_status, href, moduleKeys));
   const [
     { count: checklistCount },

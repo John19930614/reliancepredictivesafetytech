@@ -473,6 +473,8 @@ export const legalIssueStatuses = ["Open", "In Review", "Waiting", "Resolved", "
 
 export const clientStatuses = ["Active", "Paused", "Lost", "Archived"] as const;
 export const timeCardStatuses = ["draft", "submitted", "approved", "rejected"] as const;
+export const payrollRunStatuses = ["draft", "ready", "paid", "held"] as const;
+export const payrollRunItemStatuses = ["ready", "paid", "held"] as const;
 
 export const financeTransactionTypes = ["income", "expense"] as const;
 export const financeIncomeStatuses = ["expected", "invoiced", "received", "cancelled"] as const;
@@ -845,6 +847,33 @@ export type EmployeeTimeCardPayroll = {
   updated_at: string;
 };
 
+export type EmployeePayrollRun = {
+  id: string;
+  period_start: string;
+  period_end: string;
+  status: (typeof payrollRunStatuses)[number];
+  notes: string | null;
+  created_by: string | null;
+  paid_at: string | null;
+  paid_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EmployeePayrollRunItem = {
+  id: string;
+  payroll_run_id: string;
+  time_card_id: string;
+  employee_user_id: string | null;
+  total_hours: number;
+  hourly_rate: number;
+  gross_pay: number;
+  item_status: (typeof payrollRunItemStatuses)[number];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type EmployeeExpenseReport = {
   id: string;
   employee_user_id: string;
@@ -974,9 +1003,6 @@ export type CompanyPosition = {
   department: string;
   parent_position_id: string | null;
   status: string;
-  employee_name: string | null;
-  employee_email: string | null;
-  employee_phone: string | null;
   portal_user_id: string | null;
   job_description: string | null;
   salary_min: number | null;
@@ -1107,9 +1133,6 @@ export const companyPositionSeed: CompanyPosition[] = [
     department: "Leadership",
     parent_position_id: null,
     status: "Filled",
-    employee_name: "John",
-    employee_email: null,
-    employee_phone: null,
     portal_user_id: null,
     job_description: null,
     salary_min: null,
@@ -1129,9 +1152,6 @@ export const companyPositionSeed: CompanyPosition[] = [
     department: "Technology / Product",
     parent_position_id: "00000000-0000-0000-0000-000000000101",
     status: "Filled",
-    employee_name: "Steven",
-    employee_email: null,
-    employee_phone: null,
     portal_user_id: null,
     job_description: null,
     salary_min: null,
@@ -1151,9 +1171,6 @@ export const companyPositionSeed: CompanyPosition[] = [
     department: "Sales / Marketing",
     parent_position_id: "00000000-0000-0000-0000-000000000101",
     status: "Filled",
-    employee_name: "Ryan",
-    employee_email: null,
-    employee_phone: null,
     portal_user_id: null,
     job_description: null,
     salary_min: null,
@@ -1173,9 +1190,6 @@ export const companyPositionSeed: CompanyPosition[] = [
     department: "Safety",
     parent_position_id: "00000000-0000-0000-0000-000000000102",
     status: "Open",
-    employee_name: null,
-    employee_email: null,
-    employee_phone: null,
     portal_user_id: null,
     job_description:
       "Support safety product accuracy by reviewing CSEP, PSHSEP, JSA, permit, incident, SOR, and corrective action workflows for field realism and compliance readiness.",
@@ -1196,9 +1210,6 @@ export const companyPositionSeed: CompanyPosition[] = [
     department: "Customer Success",
     parent_position_id: "00000000-0000-0000-0000-000000000101",
     status: "Open",
-    employee_name: null,
-    employee_email: null,
-    employee_phone: null,
     portal_user_id: null,
     job_description:
       "Own customer onboarding from signed agreement through setup, training, documentation collection, feedback capture, and active company readiness.",
@@ -1219,9 +1230,6 @@ export const companyPositionSeed: CompanyPosition[] = [
     department: "Safety",
     parent_position_id: "00000000-0000-0000-0000-000000000104",
     status: "Needed",
-    employee_name: null,
-    employee_email: null,
-    employee_phone: null,
     portal_user_id: null,
     job_description:
       "Prepare and deliver safety training content, onboarding training, refresher modules, toolbox talks, and role-based safety learning materials.",
@@ -1242,9 +1250,6 @@ export const companyPositionSeed: CompanyPosition[] = [
     department: "Safety",
     parent_position_id: "00000000-0000-0000-0000-000000000104",
     status: "Needed",
-    employee_name: null,
-    employee_email: null,
-    employee_phone: null,
     portal_user_id: null,
     job_description:
       "Review PHSEP and CSEP drafts for safety accuracy, completeness, field usability, project alignment, and readiness for admin or owner approval.",
@@ -1265,9 +1270,6 @@ export const companyPositionSeed: CompanyPosition[] = [
     department: "Sales / Marketing",
     parent_position_id: "00000000-0000-0000-0000-000000000103",
     status: "Needed",
-    employee_name: null,
-    employee_email: null,
-    employee_phone: null,
     portal_user_id: null,
     job_description:
       "Prospect contractor, safety, and operations buyers; qualify demo requests; prepare outreach lists; and keep early sales follow-up organized.",
@@ -1288,9 +1290,6 @@ export const companyPositionSeed: CompanyPosition[] = [
     department: "Legal / Compliance",
     parent_position_id: "00000000-0000-0000-0000-000000000101",
     status: "Needed",
-    employee_name: null,
-    employee_email: null,
-    employee_phone: null,
     portal_user_id: null,
     job_description:
       "Coordinate legal documents, compliance packets, review dates, renewal records, insurance updates, vendor forms, and audit-ready operating files.",
@@ -1311,9 +1310,6 @@ export const companyPositionSeed: CompanyPosition[] = [
     department: "Finance",
     parent_position_id: "00000000-0000-0000-0000-000000000101",
     status: "Needed",
-    employee_name: null,
-    employee_email: null,
-    employee_phone: null,
     portal_user_id: null,
     job_description:
       "Support invoicing, billing records, cost tracking, bookkeeping coordination, budget reporting, and monthly close preparation.",
@@ -1334,9 +1330,6 @@ export const companyPositionSeed: CompanyPosition[] = [
     department: "Technology / Product",
     parent_position_id: "00000000-0000-0000-0000-000000000102",
     status: "Needed",
-    employee_name: null,
-    employee_email: null,
-    employee_phone: null,
     portal_user_id: null,
     job_description:
       "Build and maintain the Reliance platform, Supabase-backed workflows, document generation tools, admin dashboards, quality checks, and customer-facing product improvements.",

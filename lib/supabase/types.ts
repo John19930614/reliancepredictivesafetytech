@@ -705,6 +705,64 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["employee_time_card_payroll"]["Insert"]>;
         Relationships: [];
       };
+      employee_payroll_runs: {
+        Row: {
+          id: string;
+          period_start: string;
+          period_end: string;
+          status: string;
+          notes: string | null;
+          created_by: string | null;
+          paid_at: string | null;
+          paid_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          period_start: string;
+          period_end: string;
+          status?: string;
+          notes?: string | null;
+          created_by?: string | null;
+          paid_at?: string | null;
+          paid_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_payroll_runs"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_payroll_run_items: {
+        Row: {
+          id: string;
+          payroll_run_id: string;
+          time_card_id: string;
+          employee_user_id: string | null;
+          total_hours: number;
+          hourly_rate: number;
+          gross_pay: number;
+          item_status: string;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          payroll_run_id: string;
+          time_card_id: string;
+          employee_user_id?: string | null;
+          total_hours?: number;
+          hourly_rate?: number;
+          gross_pay?: number;
+          item_status?: string;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_payroll_run_items"]["Insert"]>;
+        Relationships: [];
+      };
       company_finance_authorized_users: {
         Row: {
           user_id: string;
@@ -1325,9 +1383,6 @@ export type Database = {
           department: string;
           parent_position_id: string | null;
           status: string;
-          employee_name: string | null;
-          employee_email: string | null;
-          employee_phone: string | null;
           portal_user_id: string | null;
           job_description: string | null;
           salary_min: number | null;
@@ -1347,9 +1402,6 @@ export type Database = {
           department?: string;
           parent_position_id?: string | null;
           status?: string;
-          employee_name?: string | null;
-          employee_email?: string | null;
-          employee_phone?: string | null;
           portal_user_id?: string | null;
           job_description?: string | null;
           salary_min?: number | null;
@@ -2132,7 +2184,30 @@ export type Database = {
         Relationships: [];
       };
     };
-    Views: Record<string, never>;
+    Views: {
+      company_position_employee_directory: {
+        Row: {
+          position_id: string;
+          user_id: string;
+          display_name: string | null;
+          legal_name: string | null;
+          email: string | null;
+          phone: string | null;
+          profile_status: string | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "company_positions_portal_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+    };
     Functions: {
       is_company_portal_admin: {
         Args: Record<PropertyKey, never>;

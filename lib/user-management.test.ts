@@ -34,7 +34,14 @@ describe("portal module access", () => {
     expect(hasFullPortalVisibility("platform_admin", "active")).toBe(true);
     expect(hasFullPortalVisibility("super_admin", "active")).toBe(true);
     expect(canAccessEmployeePath("super_admin", "active", "/employee/finance", [])).toBe(true);
+    expect(canAccessEmployeePath("super_admin", "active", "/employee/payroll", [])).toBe(true);
     expect(canAccessEmployeePath("super_admin", "archived", "/employee/finance", [])).toBe(false);
+  });
+
+  it("maps payroll tracker routes to the payroll module", () => {
+    expect(getPortalModuleForPath("/employee/payroll")?.key).toBe("payroll_tracker");
+    expect(canAccessEmployeePath("employee", "active", "/employee/payroll", ["payroll_tracker"])).toBe(true);
+    expect(canAccessEmployeePath("employee", "active", "/employee/payroll/history", ["dashboard"])).toBe(false);
   });
 
   it("normalizes selected module keys for visibility updates", () => {

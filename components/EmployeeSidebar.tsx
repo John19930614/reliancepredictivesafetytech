@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { logout } from "@/app/employee-login/actions";
 import { COMPANY_NAME, TAGLINE } from "@/lib/company-data";
-import { canAccessEmployeePath } from "@/lib/user-management";
+import { canAccessEmployeePath, isPortalOwnerRole } from "@/lib/user-management";
 
 const navGroups = [
   {
@@ -44,6 +44,7 @@ const navGroups = [
       { href: "/employee/parking-lots", label: "Parking Lots", icon: CarFront },
       { href: "/employee/expenses", label: "Expenses", icon: ReceiptText },
       { href: "/employee/finance", label: "Finance Center", icon: DollarSign, financeOnly: true },
+      { href: "/employee/payroll", label: "Payroll Tracker", icon: ReceiptText, ownerOnly: true },
       { href: "/employee/operations", label: "Operations Database", icon: Database },
       { href: "/employee/checklist", label: "Startup Checklist", icon: ListChecks },
     ],
@@ -112,11 +113,17 @@ export function EmployeeSidebar({
   const visibleGroups = navGroups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) =>
-        "financeOnly" in item && item.financeOnly
-          ? accountStatus === "active" && canAccessFinance && canAccessEmployeePath(currentRole, accountStatus, item.href, moduleKeys)
-          : canAccessEmployeePath(currentRole, accountStatus, item.href, moduleKeys),
-      ),
+      items: group.items.filter((item) => {
+        if ("ownerOnly" in item && item.ownerOnly) {
+          return accountStatus === "active" && isPortalOwnerRole(currentRole) && canAccessEmployeePath(currentRole, accountStatus, item.href, moduleKeys);
+        }
+
+        if ("financeOnly" in item && item.financeOnly) {
+          return accountStatus === "active" && canAccessFinance && canAccessEmployeePath(currentRole, accountStatus, item.href, moduleKeys);
+        }
+
+        return canAccessEmployeePath(currentRole, accountStatus, item.href, moduleKeys);
+      }),
     }))
     .filter((group) => group.items.length > 0);
 

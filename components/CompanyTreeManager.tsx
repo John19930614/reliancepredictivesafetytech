@@ -32,7 +32,7 @@ type CompanyTreeManagerProps = {
   canManagePositions: boolean;
   canViewCompensation: boolean;
   employeeOptions: CurrentEmployeeOption[];
-  initialPositions: CompanyPosition[];
+  initialPositions: CompanyTreePosition[];
 };
 
 export type CurrentEmployeeOption = {
@@ -44,10 +44,16 @@ export type CurrentEmployeeOption = {
   profile_status: string | null;
 };
 
+export type CompanyTreePosition = CompanyPosition & {
+  assigned_employee_name: string | null;
+  assigned_employee_email: string | null;
+  assigned_employee_phone: string | null;
+};
+
 type PositionStatusFilter = "All" | (typeof companyPositionStatuses)[number];
 type OrgMapMode = "chart" | "list";
 
-type PositionNode = CompanyPosition & {
+type PositionNode = CompanyTreePosition & {
   children: PositionNode[];
   matchesFilter: boolean;
 };
@@ -125,7 +131,14 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
       const matchesStatus = statusFilter === "All" || position.status === statusFilter;
       const matchesQuery =
         !normalizedQuery ||
-        [position.title, position.department, position.employee_name, position.employee_email, position.location, position.hiring_priority]
+        [
+          position.title,
+          position.department,
+          position.assigned_employee_name,
+          position.assigned_employee_email,
+          position.location,
+          position.hiring_priority,
+        ]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(normalizedQuery));
 
@@ -215,43 +228,33 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
     });
   }
 
-  function getEmployeeAssignmentPatch(selectedUserId: string, existingPosition?: CompanyPosition) {
-    if (
-      selectedUserId.startsWith("legacy:") ||
-      (existingPosition?.portal_user_id && selectedUserId === existingPosition.portal_user_id && !employeesByUserId.has(selectedUserId))
-    ) {
-      return {
-        portal_user_id: existingPosition?.portal_user_id ?? null,
-        employee_name: existingPosition?.employee_name ?? null,
-        employee_email: existingPosition?.employee_email ?? null,
-        employee_phone: existingPosition?.employee_phone ?? null,
-      };
-    }
-
-    const selectedEmployee = employeesByUserId.get(selectedUserId);
-
-    if (!selectedEmployee) {
-      return {
-        portal_user_id: null,
-        employee_name: null,
-        employee_email: null,
-        employee_phone: null,
-      };
-    }
-
+  function getEmployeeAssignmentPatch(selectedUserId: string) {
     return {
-      portal_user_id: selectedEmployee.user_id,
-      employee_name: getEmployeeName(selectedEmployee),
-      employee_email: selectedEmployee.email,
-      employee_phone: selectedEmployee.phone,
+      portal_user_id: employeesByUserId.get(selectedUserId)?.user_id ?? null,
     };
   }
 
-  function renderEmployeeSelect(id: string, defaultValue: string, legacyLabel?: string | null) {
+  function getAssignedEmployeeFields(selectedUserId: string) {
+    const selectedEmployee = employeesByUserId.get(selectedUserId);
+
+    return {
+      assigned_employee_name: selectedEmployee ? getEmployeeName(selectedEmployee) : null,
+      assigned_employee_email: selectedEmployee?.email ?? null,
+      assigned_employee_phone: selectedEmployee?.phone ?? null,
+    };
+  }
+
+  function buildCompanyTreePosition(position: CompanyPosition, selectedUserId = position.portal_user_id ?? ""): CompanyTreePosition {
+    return {
+      ...position,
+      ...getAssignedEmployeeFields(selectedUserId),
+    };
+  }
+
+  function renderEmployeeSelect(id: string, defaultValue: string) {
     return (
       <select id={id} name="portal_user_id" defaultValue={defaultValue} disabled={!canManagePositions}>
         <option value="">Unassigned</option>
-        {legacyLabel ? <option value={defaultValue}>{legacyLabel} (not linked)</option> : null}
         {employeeOptions.map((employee) => (
           <option key={employee.user_id} value={employee.user_id}>
             {getEmployeeLabel(employee)}
@@ -269,6 +272,7 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
       return;
     }
 
+    const selectedUserId = String(formData.get("portal_user_id") ?? "");
     const payload: Partial<CompanyPosition> & {
       department: string;
       sort_order: number;
@@ -279,7 +283,7 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
       department: String(formData.get("department") ?? "Operations"),
       parent_position_id: String(formData.get("parent_position_id") ?? "") || null,
       status: String(formData.get("status") ?? "Needed"),
-      ...getEmployeeAssignmentPatch(String(formData.get("portal_user_id") ?? "")),
+      ...getEmployeeAssignmentPatch(selectedUserId),
       job_description: String(formData.get("job_description") ?? "").trim() || null,
       employment_type: String(formData.get("employment_type") ?? "Full-time"),
       location: String(formData.get("location") ?? "").trim() || null,
@@ -306,12 +310,12 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
     }
 
     if (data) {
-      setPositions((current) => [...current, data as CompanyPosition]);
+      setPositions((current) => [...current, buildCompanyTreePosition(data as CompanyPosition, selectedUserId)]);
       setMessage("Position added.");
     }
   }
 
-  async function updatePosition(position: CompanyPosition, formData: FormData) {
+  async function updatePosition(position: CompanyTreePosition, formData: FormData) {
     setMessage("");
     const supabase = createClient();
     if (!supabase || !canManagePositions) {
@@ -319,9 +323,10 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
       return;
     }
 
+    const selectedUserId = String(formData.get("portal_user_id") ?? "");
     const patch: Partial<CompanyPosition> = {
       status: String(formData.get("status") ?? position.status),
-      ...getEmployeeAssignmentPatch(String(formData.get("portal_user_id") ?? ""), position),
+      ...getEmployeeAssignmentPatch(selectedUserId),
       job_description: String(formData.get("job_description") ?? "").trim() || null,
       employment_type: String(formData.get("employment_type") ?? position.employment_type ?? "Full-time"),
       location: String(formData.get("location") ?? "").trim() || null,
@@ -342,7 +347,11 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
     }
 
     if (data) {
-      setPositions((current) => current.map((item) => (item.id === position.id ? (data as CompanyPosition) : item)));
+      setPositions((current) =>
+        current.map((item) =>
+          item.id === position.id ? buildCompanyTreePosition(data as CompanyPosition, selectedUserId) : item,
+        ),
+      );
       setMessage("Position updated.");
     }
   }
@@ -351,13 +360,7 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
     const reportsTo = position.parent_position_id ? positionsById.get(position.parent_position_id)?.title : null;
     const isHiringRole = position.status === "Open" || position.status === "Needed";
     const directReportCount = childCountByPositionId.get(position.id) ?? 0;
-    const hasUnlinkedEmployee = !position.portal_user_id && Boolean(position.employee_name);
-    const linkedEmployeeMissing = Boolean(position.portal_user_id && !employeesByUserId.has(position.portal_user_id));
-    const employeeSelectDefault = position.portal_user_id ?? (hasUnlinkedEmployee ? `legacy:${position.id}` : "");
-    const preservedEmployeeLabel =
-      hasUnlinkedEmployee || linkedEmployeeMissing
-        ? position.employee_name || position.employee_email || "Assigned employee"
-        : null;
+    const employeeSelectDefault = position.portal_user_id ?? "";
 
     return (
       <li className="org-tree-item" key={position.id}>
@@ -380,7 +383,7 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
           <div className="org-node-facts">
             <span>
               <Users size={15} />
-              {position.employee_name || (isHiringRole ? "Hiring needed" : "Unassigned")}
+              {position.assigned_employee_name || (isHiringRole ? "Hiring needed" : "Unassigned")}
             </span>
             <span>
               <BriefcaseBusiness size={15} />
@@ -412,11 +415,11 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
             <div className="position-detail-grid position-contact-grid">
               <span>
                 <Mail size={15} />
-                {position.employee_email || "No email"}
+                {position.assigned_employee_email || "No email"}
               </span>
               <span>
                 <Phone size={15} />
-                {position.employee_phone || "No phone"}
+                {position.assigned_employee_phone || "No phone"}
               </span>
             </div>
             <form action={(formData) => updatePosition(position, formData)} className="position-editor">
@@ -431,7 +434,7 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
                 </div>
                 <div className="field">
                   <label>Employee</label>
-                  {renderEmployeeSelect(`employee-${position.id}`, employeeSelectDefault, preservedEmployeeLabel)}
+                  {renderEmployeeSelect(`employee-${position.id}`, employeeSelectDefault)}
                 </div>
                 {canViewCompensation ? (
                   <>
@@ -530,7 +533,7 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
             </div>
             <div className="org-chart-assignee">
               <Users size={15} />
-              <span>{position.employee_name || (isHiringRole ? "Hiring needed" : "Unassigned")}</span>
+              <span>{position.assigned_employee_name || (isHiringRole ? "Hiring needed" : "Unassigned")}</span>
             </div>
             <div className="org-chart-meta">
               <span>{reportsTo ? `Reports to ${reportsTo}` : "Top level"}</span>
@@ -589,8 +592,8 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
             </select>
           </div>
           <div className="field">
-            <label htmlFor="employee_name">Employee</label>
-            {renderEmployeeSelect("employee_name", "")}
+            <label htmlFor="portal_user_id">Employee</label>
+            {renderEmployeeSelect("portal_user_id", "")}
           </div>
           {canViewCompensation ? (
             <>
