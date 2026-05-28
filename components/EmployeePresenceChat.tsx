@@ -127,6 +127,7 @@ function StreamTile({
   stream: MediaStream | null;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [videoReady, setVideoReady] = useState(false);
 
   useEffect(() => {
@@ -168,12 +169,34 @@ function StreamTile({
   }, [stream]);
 
   const hasVideo = Boolean(stream?.getVideoTracks().some((track) => track.enabled && track.readyState === "live"));
+  const hasAudio = Boolean(stream?.getAudioTracks().some((track) => track.readyState === "live"));
+
+  useEffect(() => {
+    const audio = audioRef.current;
+
+    if (!audio || !stream || muted || !hasAudio) {
+      if (audio) {
+        audio.srcObject = null;
+      }
+
+      return;
+    }
+
+    if (audio.srcObject !== stream) {
+      audio.srcObject = stream;
+    }
+
+    void audio.play().catch(() => {
+      // Remote audio can require another user gesture in some browser states.
+    });
+  }, [hasAudio, muted, stream]);
 
   return (
     <div className={featured ? "employee-call-tile employee-call-tile-featured" : "employee-call-tile"}>
+      {hasAudio && !muted ? <audio className="employee-call-audio" ref={audioRef} autoPlay playsInline /> : null}
       {hasVideo ? (
         <>
-          <video className={videoReady ? undefined : "employee-call-video-pending"} ref={videoRef} autoPlay playsInline muted={muted} />
+          <video className={videoReady ? undefined : "employee-call-video-pending"} ref={videoRef} autoPlay playsInline muted />
           {!videoReady ? <div className="employee-call-avatar employee-call-avatar-overlay">{label.slice(0, 1)}</div> : null}
         </>
       ) : (
