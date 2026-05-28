@@ -4409,6 +4409,7 @@ textarea {
 
 .sales-meeting-room {
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 14px;
   min-height: 100vh;
   padding: 24px;
@@ -4428,7 +4429,7 @@ textarea {
 
 .sales-meeting-room-header h1 {
   margin: 5px 0 0;
-  font-size: clamp(1.8rem, 4vw, 3.4rem);
+  font-size: clamp(1.8rem, 3vw, 2.8rem);
   line-height: 1;
 }
 
@@ -4441,26 +4442,71 @@ textarea {
 }
 
 .sales-meeting-call-tray {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  justify-content: space-between;
   align-self: stretch;
+  gap: 16px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
+  padding: 16px;
   background: #121b24;
   color: #fff;
 }
 
 .sales-meeting-call-tray .employee-call-stage {
-  min-height: 62vh;
+  display: grid;
+  min-height: min(52vh, 520px);
+  align-content: center;
+  justify-content: center;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 360px));
+  gap: 14px;
+  overflow: visible;
 }
 
 .sales-meeting-call-tray .employee-call-tile {
-  flex-basis: min(360px, 100%);
-  min-height: 260px;
+  width: 100%;
+  min-height: 0;
+  aspect-ratio: 16 / 10;
+  flex: none;
 }
 
-.sales-meeting-call-tray.employee-call-tray-screen-share .employee-call-tile-featured,
+.sales-meeting-call-tray .employee-call-tile video,
+.sales-meeting-call-tray .employee-call-avatar,
+.sales-meeting-call-tray .employee-call-sharing-placeholder {
+  min-height: 0;
+}
+
 .sales-meeting-call-tray .employee-call-tile-featured {
-  flex-basis: min(1180px, 100%);
-  min-height: min(68vh, 720px);
+  aspect-ratio: 16 / 10;
+}
+
+.sales-meeting-call-tray.employee-call-tray-screen-share .employee-call-stage {
+  min-height: min(64vh, 680px);
+  align-content: stretch;
+  justify-content: stretch;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 220px);
+}
+
+.sales-meeting-call-tray.employee-call-tray-screen-share .employee-call-tile {
+  grid-column: 2;
+  aspect-ratio: 4 / 3;
+}
+
+.sales-meeting-call-tray.employee-call-tray-screen-share .employee-call-tile-featured {
+  grid-column: 1;
+  grid-row: 1 / span 8;
+  aspect-ratio: auto;
+  min-height: min(64vh, 680px);
+}
+
+.sales-meeting-call-tray .employee-call-controls {
+  justify-content: center;
+}
+
+.sales-meeting-call-tray .employee-call-participants {
+  justify-content: center;
 }
 
 .employee-chat-tabs {
