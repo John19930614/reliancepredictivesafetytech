@@ -619,6 +619,12 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
       }
 
       const result = await joinSalesMeetingByToken(guestToken, guestName);
+
+      if (!result.ok) {
+        setStatusMessage(result.error);
+        return;
+      }
+
       await connectToMeeting(result);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Could not join the meeting.");

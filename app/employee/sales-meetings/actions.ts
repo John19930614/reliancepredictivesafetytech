@@ -49,6 +49,13 @@ export type SalesMeetingJoinResult = {
   participants: SalesMeetingParticipant[];
 };
 
+export type SalesMeetingGuestJoinResult =
+  | (SalesMeetingJoinResult & { ok: true })
+  | {
+      ok: false;
+      error: string;
+    };
+
 type SupabaseAdminClient = NonNullable<ReturnType<typeof createAdminClient>>;
 
 function cleanText(value: string | null | undefined) {
@@ -464,111 +471,123 @@ export async function joinSalesMeetingAsEmployee(meetingId: string): Promise<Sal
   };
 }
 
-export async function joinSalesMeetingByToken(token: string, displayName: string): Promise<SalesMeetingJoinResult> {
-  const { user } = await getCurrentUser();
-  const admin = getAdminClient();
-  const cleanToken = cleanText(token);
+export async function joinSalesMeetingByToken(token: string, displayName: string): Promise<SalesMeetingGuestJoinResult> {
+  try {
+    const { user } = await getCurrentUser();
+    const admin = getAdminClient();
+    const cleanToken = cleanText(token);
 
-  if (!cleanToken) {
-    throw new Error("Meeting link is missing.");
+    if (!cleanToken) {
+      return { ok: false, error: "Meeting link is missing." };
+    }
+
+    const { data: invite, error: inviteError } = await admin
+      .from("sales_video_meeting_invites")
+      .select("*")
+      .eq("token_hash", hashToken(cleanToken))
+      .maybeSingle();
+
+    if (inviteError) {
+      throw new Error(inviteError.message);
+    }
+
+    if (!invite || invite.revoked_at || invite.status === "revoked") {
+      return { ok: false, error: "This meeting invite is no longer available." };
+    }
+
+    const { data: meeting, error: meetingError } = await admin
+      .from("sales_video_meetings")
+      .select("*")
+      .eq("id", invite.meeting_id)
+      .maybeSingle();
+
+    if (meetingError) {
+      throw new Error(meetingError.message);
+    }
+
+    if (!meeting || meeting.status === "cancelled") {
+      return { ok: false, error: "This sales meeting was cancelled by the host." };
+    }
+
+    if (meeting.status === "ended") {
+      return { ok: false, error: "This sales meeting has ended. Ask your Reliance contact to send a new meeting link." };
+    }
+
+    const guestName = cleanText(displayName) || invite.recipient_name || invite.recipient_email;
+    const { data: existing, error: existingError } = await admin
+      .from("sales_video_meeting_participants")
+      .select("*")
+      .eq("meeting_id", meeting.id)
+      .eq("guest_user_id", user.id)
+      .maybeSingle();
+
+    if (existingError) {
+      throw new Error(existingError.message);
+    }
+
+    const now = new Date().toISOString();
+    const participantPayload = {
+      meeting_id: meeting.id,
+      invite_id: invite.id,
+      guest_user_id: user.id,
+      participant_type: "guest",
+      display_name: guestName,
+      email: invite.recipient_email,
+      status: "joined",
+      joined_at: now,
+      left_at: null,
+    };
+
+    const { data: participant, error: participantError } = existing
+      ? await admin
+          .from("sales_video_meeting_participants")
+          .update(participantPayload)
+          .eq("id", existing.id)
+          .select("*")
+          .single()
+      : await admin
+          .from("sales_video_meeting_participants")
+          .insert(participantPayload)
+          .select("*")
+          .single();
+
+    if (participantError || !participant) {
+      throw new Error(participantError?.message ?? "Could not join the meeting.");
+    }
+
+    const { data: activeMeeting, error: updateError } = await admin
+      .from("sales_video_meetings")
+      .update({
+        status: "active",
+        started_at: meeting.started_at ?? now,
+      })
+      .eq("id", meeting.id)
+      .select("*")
+      .single();
+
+    if (updateError || !activeMeeting) {
+      throw new Error(updateError?.message ?? "Could not open the meeting.");
+    }
+
+    await admin
+      .from("sales_video_meeting_invites")
+      .update({ status: "accepted", accepted_at: invite.accepted_at ?? now })
+      .eq("id", invite.id);
+
+    const participants = await loadParticipants(admin, meeting.id);
+
+    return {
+      ok: true,
+      meeting: activeMeeting as SalesMeeting,
+      participant: participant as SalesMeetingParticipant,
+      participants,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not join the meeting.",
+    };
   }
-
-  const { data: invite, error: inviteError } = await admin
-    .from("sales_video_meeting_invites")
-    .select("*")
-    .eq("token_hash", hashToken(cleanToken))
-    .maybeSingle();
-
-  if (inviteError) {
-    throw new Error(inviteError.message);
-  }
-
-  if (!invite || invite.revoked_at || invite.status === "revoked") {
-    throw new Error("This meeting invite is expired or no longer available.");
-  }
-
-  const { data: meeting, error: meetingError } = await admin
-    .from("sales_video_meetings")
-    .select("*")
-    .eq("id", invite.meeting_id)
-    .maybeSingle();
-
-  if (meetingError) {
-    throw new Error(meetingError.message);
-  }
-
-  if (!meeting || meeting.status === "ended" || meeting.status === "cancelled") {
-    throw new Error("This sales meeting is no longer available.");
-  }
-
-  const guestName = cleanText(displayName) || invite.recipient_name || invite.recipient_email;
-  const { data: existing, error: existingError } = await admin
-    .from("sales_video_meeting_participants")
-    .select("*")
-    .eq("meeting_id", meeting.id)
-    .eq("guest_user_id", user.id)
-    .maybeSingle();
-
-  if (existingError) {
-    throw new Error(existingError.message);
-  }
-
-  const now = new Date().toISOString();
-  const participantPayload = {
-    meeting_id: meeting.id,
-    invite_id: invite.id,
-    guest_user_id: user.id,
-    participant_type: "guest",
-    display_name: guestName,
-    email: invite.recipient_email,
-    status: "joined",
-    joined_at: now,
-    left_at: null,
-  };
-
-  const { data: participant, error: participantError } = existing
-    ? await admin
-        .from("sales_video_meeting_participants")
-        .update(participantPayload)
-        .eq("id", existing.id)
-        .select("*")
-        .single()
-    : await admin
-        .from("sales_video_meeting_participants")
-        .insert(participantPayload)
-        .select("*")
-        .single();
-
-  if (participantError || !participant) {
-    throw new Error(participantError?.message ?? "Could not join the meeting.");
-  }
-
-  const { data: activeMeeting, error: updateError } = await admin
-    .from("sales_video_meetings")
-    .update({
-      status: "active",
-      started_at: meeting.started_at ?? now,
-    })
-    .eq("id", meeting.id)
-    .select("*")
-    .single();
-
-  if (updateError || !activeMeeting) {
-    throw new Error(updateError?.message ?? "Could not open the meeting.");
-  }
-
-  await admin
-    .from("sales_video_meeting_invites")
-    .update({ status: "accepted", accepted_at: invite.accepted_at ?? now })
-    .eq("id", invite.id);
-
-  const participants = await loadParticipants(admin, meeting.id);
-
-  return {
-    meeting: activeMeeting as SalesMeeting,
-    participant: participant as SalesMeetingParticipant,
-    participants,
-  };
 }
 
 export async function updateSalesMeetingMediaState(input: {
