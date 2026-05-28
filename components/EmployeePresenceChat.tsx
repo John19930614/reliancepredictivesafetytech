@@ -114,11 +114,9 @@ function stopStream(stream: MediaStream | null) {
 }
 
 function shouldHideLocalScreenPreview(track: MediaStreamTrack) {
-  const settings = track.getSettings() as MediaTrackSettings & { displaySurface?: string };
   const label = track.label.toLowerCase();
 
   return (
-    settings.displaySurface === "browser" ||
     label.includes("reliancepredictivesafetytechnologies") ||
     label.includes("reliance predictive safety") ||
     label.includes("safetydocs360") ||
