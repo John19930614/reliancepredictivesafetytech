@@ -113,6 +113,29 @@ function stopStream(stream: MediaStream | null) {
   stream?.getTracks().forEach((track) => track.stop());
 }
 
+function shouldHideLocalScreenPreview(track: MediaStreamTrack) {
+  const settings = track.getSettings() as MediaTrackSettings & { displaySurface?: string };
+  const label = track.label.toLowerCase();
+
+  return (
+    settings.displaySurface === "browser" ||
+    label.includes("reliancepredictivesafetytechnologies") ||
+    label.includes("reliance predictive safety") ||
+    label.includes("safetydocs360") ||
+    label.includes("team chat")
+  );
+}
+
+const screenShareCaptureOptions = {
+  audio: false,
+  video: true,
+  selfBrowserSurface: "exclude",
+  surfaceSwitching: "include",
+} as DisplayMediaStreamOptions & {
+  selfBrowserSurface?: "include" | "exclude";
+  surfaceSwitching?: "include" | "exclude";
+};
+
 function getAudioContextConstructor() {
   return window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
 }
@@ -306,6 +329,7 @@ export function EmployeePresenceChat({
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
+  const [hideLocalScreenPreview, setHideLocalScreenPreview] = useState(false);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const activeCallRef = useRef<EmployeeChatCall | null>(null);
   const callChannelRef = useRef<RealtimeChannel | null>(null);
@@ -449,6 +473,7 @@ export function EmployeePresenceChat({
       setMuted(false);
       setCameraOff(false);
       setScreenSharing(false);
+      setHideLocalScreenPreview(false);
       setCallStatusMessage("");
     },
     [closePeerConnections, supabase],
@@ -1218,6 +1243,7 @@ export function EmployeePresenceChat({
     localStreamRef.current = cameraStreamRef.current;
     setLocalStream(cameraStreamRef.current);
     setScreenSharing(false);
+    setHideLocalScreenPreview(false);
     updateParticipantMedia({
       audio_enabled: !muted,
       video_enabled: !cameraOff,
@@ -1237,7 +1263,7 @@ export function EmployeePresenceChat({
     }
 
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const stream = await navigator.mediaDevices.getDisplayMedia(screenShareCaptureOptions);
       const screenTrack = stream.getVideoTracks()[0];
 
       if (!screenTrack) {
@@ -1260,6 +1286,7 @@ export function EmployeePresenceChat({
       localStreamRef.current = previewStream;
       setLocalStream(previewStream);
       setScreenSharing(true);
+      setHideLocalScreenPreview(shouldHideLocalScreenPreview(screenTrack));
       setChatExpanded(true);
       updateParticipantMedia({
         audio_enabled: !muted,
@@ -1356,9 +1383,9 @@ export function EmployeePresenceChat({
                   featured={screenSharing}
                   label="You"
                   muted
-                  sharingPlaceholder={screenSharing}
+                  sharingPlaceholder={screenSharing && hideLocalScreenPreview}
                   state={`${muted ? "Muted" : "Mic on"}${screenSharing ? " - Sharing screen" : cameraOff ? " - Camera off" : ""}`}
-                  stream={screenSharing ? null : localStream}
+                  stream={screenSharing && hideLocalScreenPreview ? null : localStream}
                 />
                 {Object.entries(remoteStreams).map(([userId, remote]) => (
                   <StreamTile

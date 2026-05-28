@@ -50,6 +50,29 @@ function stopStream(stream: MediaStream | null) {
   stream?.getTracks().forEach((track) => track.stop());
 }
 
+function shouldHideLocalScreenPreview(track: MediaStreamTrack) {
+  const settings = track.getSettings() as MediaTrackSettings & { displaySurface?: string };
+  const label = track.label.toLowerCase();
+
+  return (
+    settings.displaySurface === "browser" ||
+    label.includes("reliancepredictivesafetytechnologies") ||
+    label.includes("reliance predictive safety") ||
+    label.includes("safetydocs360") ||
+    label.includes("sales meeting")
+  );
+}
+
+const screenShareCaptureOptions = {
+  audio: false,
+  video: true,
+  selfBrowserSurface: "exclude",
+  surfaceSwitching: "include",
+} as DisplayMediaStreamOptions & {
+  selfBrowserSurface?: "include" | "exclude";
+  surfaceSwitching?: "include" | "exclude";
+};
+
 function mergeParticipant(participants: SalesMeetingParticipant[], participant: SalesMeetingParticipant) {
   const nextParticipants = participants.filter((item) => item.id !== participant.id);
   return [...nextParticipants, participant].sort((first, second) => first.created_at.localeCompare(second.created_at));
@@ -156,6 +179,7 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
+  const [hideLocalScreenPreview, setHideLocalScreenPreview] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const meetingRef = useRef<SalesMeeting | null>(null);
   const participantRef = useRef<SalesMeetingParticipant | null>(null);
@@ -243,6 +267,7 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
       setMuted(false);
       setCameraOff(false);
       setScreenSharing(false);
+      setHideLocalScreenPreview(false);
     },
     [closePeerConnections, supabase],
   );
@@ -643,6 +668,7 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
     localStreamRef.current = cameraStreamRef.current;
     setLocalStream(cameraStreamRef.current);
     setScreenSharing(false);
+    setHideLocalScreenPreview(false);
     updateMediaState({
       audio_enabled: !muted,
       video_enabled: !cameraOff,
@@ -662,7 +688,7 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const stream = await navigator.mediaDevices.getDisplayMedia(screenShareCaptureOptions);
       const screenTrack = stream.getVideoTracks()[0];
 
       if (!screenTrack) {
@@ -685,6 +711,7 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
       localStreamRef.current = previewStream;
       setLocalStream(previewStream);
       setScreenSharing(true);
+      setHideLocalScreenPreview(shouldHideLocalScreenPreview(screenTrack));
       updateMediaState({
         audio_enabled: !muted,
         video_enabled: true,
@@ -757,9 +784,9 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
                 featured={screenSharing}
                 label="You"
                 muted
-                sharingPlaceholder={screenSharing}
+                sharingPlaceholder={screenSharing && hideLocalScreenPreview}
                 state={`${muted ? "Muted" : "Mic on"}${screenSharing ? " - Sharing screen" : cameraOff ? " - Camera off" : ""}`}
-                stream={screenSharing ? null : localStream}
+                stream={screenSharing && hideLocalScreenPreview ? null : localStream}
               />
               {Object.entries(remoteStreams).map(([participantId, remote]) => (
                 <MeetingStreamTile
