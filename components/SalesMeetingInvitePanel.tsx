@@ -43,6 +43,10 @@ function getDefaultScheduledAt() {
   return offsetDate.toISOString().slice(0, 16);
 }
 
+function datetimeLocalToIso(value: string) {
+  return value ? new Date(value).toISOString() : null;
+}
+
 function formatMeetingTime(value: string | null) {
   if (!value) {
     return "Ready now";
@@ -95,7 +99,7 @@ export function SalesMeetingInvitePanel({
       const inviteResult = await createSalesMeetingInvite({
         title,
         recipients: parseRecipients(recipients),
-        scheduledAt,
+        scheduledAt: datetimeLocalToIso(scheduledAt),
         clientId,
         demoRequestId,
       });
