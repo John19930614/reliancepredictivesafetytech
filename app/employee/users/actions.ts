@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { ensurePayrollSetupTask, normalizeStateCode } from "@/lib/hr-automation";
 import { assignActiveRequiredHrDocuments } from "@/lib/hr-onboarding";
+import { buildCompanyAuthLink, getCompanyAuthFallbackPath } from "@/lib/company-auth-links";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
 import { createClient } from "@/lib/supabase/server";
@@ -12,7 +13,8 @@ import { isPortalAdminRole, portalUserRoles, type PortalUserRole } from "@/lib/u
 type SupabaseAdminClient = NonNullable<ReturnType<typeof createAdminClient>>;
 
 const siteUrl = "https://reliancepredictivesafetytechnologies.com";
-const employeePortalUrl = `${siteUrl}/employee`;
+const invitePasswordSetupUrl = new URL(getCompanyAuthFallbackPath("invite"), siteUrl).toString();
+const recoveryPasswordSetupUrl = new URL(getCompanyAuthFallbackPath("recovery"), siteUrl).toString();
 
 function usersPath(params: Record<string, string>) {
   const searchParams = new URLSearchParams(params);
@@ -21,14 +23,6 @@ function usersPath(params: Record<string, string>) {
 
 function cleanText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
-}
-
-function buildCompanyAuthLink(tokenHash: string, type: "invite" | "recovery") {
-  const url = new URL("/auth/confirm", siteUrl);
-  url.searchParams.set("token_hash", tokenHash);
-  url.searchParams.set("type", type);
-  url.searchParams.set("next", type === "recovery" ? "/auth/update-password" : "/employee");
-  return url.toString();
 }
 
 function isPortalUserRole(value: string): value is PortalUserRole {
@@ -260,8 +254,30 @@ export async function approveCandidateForInvite(formData: FormData) {
     redirect(usersPath({ error: "Choose a candidate to approve for invite." }));
   }
 
+  const { data: candidate, error: candidateError } = await admin
+    .from("hr_candidate_intakes")
+    .select("id, status, human_decision")
+    .eq("id", candidateId)
+    .maybeSingle();
+
+  if (candidateError || !candidate) {
+    redirect(usersPath({ error: candidateError?.message ?? "Candidate intake was not found." }));
+  }
+
+  if (candidate.status === "invited") {
+    redirect(usersPath({ message: "Candidate has already been invited." }));
+  }
+
+  if (candidate.status === "rejected" || candidate.status === "archived") {
+    redirect(usersPath({ error: "This candidate cannot be approved because the intake is closed." }));
+  }
+
+  if (candidate.status === "approved_for_invite" && candidate.human_decision === "approved_to_invite") {
+    redirect(usersPath({ message: "Candidate is already approved. Use Invite to generate the access link." }));
+  }
+
   const decidedAt = new Date().toISOString();
-  const { error } = await admin
+  const { data: approvedCandidate, error } = await admin
     .from("hr_candidate_intakes")
     .update({
       status: "approved_for_invite",
@@ -271,10 +287,12 @@ export async function approveCandidateForInvite(formData: FormData) {
       decided_at: decidedAt,
     })
     .eq("id", candidateId)
-    .in("status", ["new", "screening", "approved_for_invite"]);
+    .in("status", ["new", "screening"])
+    .select("id")
+    .maybeSingle();
 
-  if (error) {
-    redirect(usersPath({ error: error.message }));
+  if (error || !approvedCandidate) {
+    redirect(usersPath({ error: error?.message ?? "Candidate status changed before approval. Refresh and try again." }));
   }
 
   revalidatePath("/employee/users");
@@ -310,7 +328,7 @@ export async function convertCandidateToInvite(formData: FormData) {
     email: candidate.email,
     options: {
       data: { display_name: candidate.candidate_name },
-      redirectTo: employeePortalUrl,
+      redirectTo: invitePasswordSetupUrl,
     },
   });
 
@@ -350,7 +368,7 @@ export async function convertCandidateToInvite(formData: FormData) {
   redirect(
     usersPath({
       message: "Candidate converted to employee invite with onboarding and payroll setup.",
-      invite_link: buildCompanyAuthLink(data.properties.hashed_token, "invite"),
+      invite_link: buildCompanyAuthLink(siteUrl, data.properties.hashed_token, "invite"),
     }),
   );
 }
@@ -369,7 +387,7 @@ export async function inviteEmployee(formData: FormData) {
     email: values.email,
     options: {
       data: values.displayName ? { display_name: values.displayName } : undefined,
-      redirectTo: employeePortalUrl,
+      redirectTo: invitePasswordSetupUrl,
     },
   });
 
@@ -390,7 +408,7 @@ export async function inviteEmployee(formData: FormData) {
 
   revalidatePath("/employee/users");
   revalidatePath("/employee/time-cards");
-  redirect(usersPath({ message: "Employee invite link generated with HR onboarding assigned.", invite_link: buildCompanyAuthLink(data.properties.hashed_token, "invite") }));
+  redirect(usersPath({ message: "Employee invite link generated with HR onboarding assigned.", invite_link: buildCompanyAuthLink(siteUrl, data.properties.hashed_token, "invite") }));
 }
 
 export async function createPortalUser(formData: FormData) {
@@ -443,7 +461,7 @@ export async function generateEmployeeAccessLink(formData: FormData) {
     type: "recovery",
     email,
     options: {
-      redirectTo: employeePortalUrl,
+      redirectTo: recoveryPasswordSetupUrl,
     },
   });
 
@@ -452,7 +470,7 @@ export async function generateEmployeeAccessLink(formData: FormData) {
   }
 
   revalidatePath("/employee/users");
-  redirect(usersPath({ message: `Access link generated for ${email}.`, invite_link: buildCompanyAuthLink(data.properties.hashed_token, "recovery") }));
+  redirect(usersPath({ message: `Access link generated for ${email}.`, invite_link: buildCompanyAuthLink(siteUrl, data.properties.hashed_token, "recovery") }));
 }
 
 export async function updatePortalUserRole(formData: FormData) {

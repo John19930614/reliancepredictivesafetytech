@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/client";
 
 type UpdatePasswordFormProps = {
   message?: string;
+  mode?: "invite" | "reset";
 };
 
 function getInitialMessage(message?: string) {
@@ -23,8 +24,9 @@ function getInitialMessage(message?: string) {
   return message || null;
 }
 
-export function UpdatePasswordForm({ message }: UpdatePasswordFormProps) {
+export function UpdatePasswordForm({ message, mode = "reset" }: UpdatePasswordFormProps) {
   const supabase = useMemo(() => createClient(), []);
+  const isInviteMode = mode === "invite";
   const [email, setEmail] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(() => getInitialMessage(message));
   const [isReady, setIsReady] = useState(false);
@@ -116,8 +118,8 @@ export function UpdatePasswordForm({ message }: UpdatePasswordFormProps) {
       <section className="auth-card">
         <Image className="auth-logo" alt={`${COMPANY_NAME} logo`} height={120} src="/reliance-logo-transparent.png" width={406} />
         <div className="eyebrow">Employee Portal</div>
-        <h1>Choose a new password</h1>
-        <p>{email ?? "Open the latest reset link from your email before choosing a new password."}</p>
+        <h1>{isInviteMode ? "Create your password" : "Choose a new password"}</h1>
+        <p>{email ?? (isInviteMode ? "Open the latest employee invite link before creating your password." : "Open the latest reset link from your email before choosing a new password.")}</p>
         {status ? <div className="success-box">{status}</div> : null}
         {email ? (
           <form className="form-grid" onSubmit={handleSubmit} style={{ gridTemplateColumns: "1fr", marginTop: 18 }}>
@@ -131,7 +133,7 @@ export function UpdatePasswordForm({ message }: UpdatePasswordFormProps) {
             </div>
             <button className="button button-primary" disabled={!isReady || isSubmitting} type="submit">
               <KeyRound size={18} />
-              {isSubmitting ? "Updating..." : "Update Password"}
+              {isSubmitting ? "Updating..." : isInviteMode ? "Create Password" : "Update Password"}
             </button>
           </form>
         ) : (

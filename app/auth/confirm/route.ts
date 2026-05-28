@@ -1,26 +1,11 @@
 import { redirect } from "next/navigation";
+import { getSafeCompanyAuthNext, type CompanyAuthConfirmType } from "@/lib/company-auth-links";
 import { createClient } from "@/lib/supabase/server";
 
-type ConfirmType = "invite" | "recovery" | "magiclink" | "email";
+const allowedTypes = new Set<CompanyAuthConfirmType>(["invite", "recovery", "magiclink", "email"]);
 
-const allowedTypes = new Set<ConfirmType>(["invite", "recovery", "magiclink", "email"]);
-
-function isConfirmType(value: string): value is ConfirmType {
-  return allowedTypes.has(value as ConfirmType);
-}
-
-function getSafeNext(value: string | null, type: ConfirmType) {
-  const fallback = type === "recovery" ? "/auth/update-password" : "/employee";
-
-  if (!value || value.startsWith("/employee-login")) {
-    return fallback;
-  }
-
-  if (value.startsWith("/employee") || value.startsWith("/auth/update-password")) {
-    return value;
-  }
-
-  return fallback;
+function isConfirmType(value: string): value is CompanyAuthConfirmType {
+  return allowedTypes.has(value as CompanyAuthConfirmType);
 }
 
 export async function GET(request: Request) {
@@ -32,7 +17,7 @@ export async function GET(request: Request) {
     redirect(`/employee-login?message=${encodeURIComponent("Invalid or expired employee access link.")}`);
   }
 
-  const next = getSafeNext(requestUrl.searchParams.get("next"), requestedType);
+  const next = getSafeCompanyAuthNext(requestUrl.searchParams.get("next"), requestedType);
 
   const supabase = await createClient();
 
