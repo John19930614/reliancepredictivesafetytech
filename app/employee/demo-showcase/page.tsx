@@ -1,5 +1,6 @@
 import { BarChart3, BriefcaseBusiness, ExternalLink, FileCheck2, Gauge, HardHat, Presentation, UserRound } from "lucide-react";
 import { DemoDeckViewer } from "@/components/DemoDeckViewer";
+import { SalesMeetingInvitePanel } from "@/components/SalesMeetingInvitePanel";
 
 const safetyDocsLinks = [
   {
@@ -77,6 +78,8 @@ export default function DemoShowcasePage() {
           </div>
           <DemoDeckViewer />
         </section>
+
+        <SalesMeetingInvitePanel compact defaultTitle="SafetyDocs360 demo presentation" />
 
         <section className="command-panel" aria-labelledby="safetydocs-links-title">
           <div className="panel-heading">

@@ -4159,6 +4159,209 @@ textarea {
   font-weight: 800;
 }
 
+.sales-meeting-panel {
+  display: grid;
+  gap: 14px;
+  border: 1px solid #d9e0ea;
+  border-radius: 8px;
+  padding: 18px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+}
+
+.sales-meeting-panel-compact {
+  box-shadow: none;
+}
+
+.sales-meeting-panel-head,
+.sales-meeting-link-row,
+.sales-meeting-room-header {
+  display: flex;
+  align-items: center;
+}
+
+.sales-meeting-panel-head {
+  gap: 11px;
+}
+
+.sales-meeting-panel-head > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 8px;
+  background: #0f2f4f;
+  color: #fff;
+}
+
+.sales-meeting-panel-head strong {
+  display: block;
+  color: #172033;
+  font-size: 1rem;
+}
+
+.sales-meeting-panel-head p {
+  margin: 2px 0 0;
+  color: #64748b;
+  font-size: 0.84rem;
+}
+
+.sales-meeting-form {
+  display: grid;
+  gap: 12px;
+}
+
+.sales-meeting-form input,
+.sales-meeting-form textarea {
+  width: 100%;
+  border: 1px solid #d9e0ea;
+  border-radius: 6px;
+  padding: 10px 11px;
+  background: #fff;
+  color: #172033;
+  font: inherit;
+}
+
+.sales-meeting-form textarea {
+  min-height: 86px;
+  resize: vertical;
+}
+
+.sales-meeting-status {
+  border: 1px solid rgba(201, 147, 43, 0.28);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff8e8;
+  color: #6b4c00;
+  font-size: 0.88rem;
+  font-weight: 750;
+}
+
+.sales-meeting-links {
+  display: grid;
+  gap: 9px;
+}
+
+.sales-meeting-link-row {
+  justify-content: space-between;
+  gap: 9px;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  padding: 9px;
+  background: #f8fafc;
+}
+
+.sales-meeting-link-row div {
+  min-width: 0;
+}
+
+.sales-meeting-link-row strong,
+.sales-meeting-link-row span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sales-meeting-link-row strong {
+  color: #172033;
+  font-size: 0.84rem;
+}
+
+.sales-meeting-link-row span {
+  color: #667085;
+  font-size: 0.76rem;
+}
+
+.sales-meeting-public {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background:
+    linear-gradient(180deg, rgba(15, 47, 79, 0.82), rgba(15, 47, 79, 0.92)),
+    url("https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1800&q=80");
+  background-position: center;
+  background-size: cover;
+}
+
+.sales-meeting-lobby {
+  width: min(560px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 28px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 28px 90px rgba(5, 8, 12, 0.32);
+}
+
+.sales-meeting-lobby h1 {
+  margin: 8px 0;
+  color: #172033;
+  font-size: clamp(2rem, 6vw, 3.3rem);
+  line-height: 1;
+}
+
+.sales-meeting-lobby p {
+  margin: 0 0 18px;
+  color: #536173;
+}
+
+.sales-meeting-room {
+  display: grid;
+  gap: 14px;
+  min-height: 100vh;
+  padding: 24px;
+  background: #101820;
+  color: #fff;
+}
+
+.portal-main .sales-meeting-room {
+  min-height: calc(100vh - 48px);
+  border-radius: 8px;
+}
+
+.sales-meeting-room-header {
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.sales-meeting-room-header h1 {
+  margin: 5px 0 0;
+  font-size: clamp(1.8rem, 4vw, 3.4rem);
+  line-height: 1;
+}
+
+.sales-meeting-room-header > span {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 8px 11px;
+  background: rgba(255, 255, 255, 0.08);
+  font-weight: 850;
+}
+
+.sales-meeting-call-tray {
+  align-self: stretch;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: #121b24;
+  color: #fff;
+}
+
+.sales-meeting-call-tray .employee-call-stage {
+  min-height: 62vh;
+}
+
+.sales-meeting-call-tray .employee-call-tile {
+  flex-basis: min(360px, 100%);
+  min-height: 260px;
+}
+
+.sales-meeting-call-tray.employee-call-tray-screen-share .employee-call-tile-featured,
+.sales-meeting-call-tray .employee-call-tile-featured {
+  flex-basis: min(1180px, 100%);
+  min-height: min(68vh, 720px);
+}
+
 .employee-chat-tabs {
   gap: 8px;
   border-bottom: 1px solid #eceff3;

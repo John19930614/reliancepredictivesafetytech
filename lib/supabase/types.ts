@@ -1099,6 +1099,148 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["company_sales_activities"]["Insert"]>;
         Relationships: [];
       };
+      sales_video_meetings: {
+        Row: {
+          id: string;
+          title: string;
+          created_by: string | null;
+          client_id: string | null;
+          demo_request_id: string | null;
+          status: string;
+          scheduled_at: string | null;
+          started_at: string | null;
+          ended_at: string | null;
+          expires_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          title: string;
+          created_by?: string | null;
+          client_id?: string | null;
+          demo_request_id?: string | null;
+          status?: string;
+          scheduled_at?: string | null;
+          started_at?: string | null;
+          ended_at?: string | null;
+          expires_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["sales_video_meetings"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "sales_video_meetings_client_id_fkey";
+            columns: ["client_id"];
+            isOneToOne: false;
+            referencedRelation: "company_clients";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "sales_video_meetings_demo_request_id_fkey";
+            columns: ["demo_request_id"];
+            isOneToOne: false;
+            referencedRelation: "demo_requests";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      sales_video_meeting_invites: {
+        Row: {
+          id: string;
+          meeting_id: string;
+          recipient_email: string;
+          recipient_name: string | null;
+          token_hash: string;
+          status: string;
+          sent_at: string | null;
+          accepted_at: string | null;
+          revoked_at: string | null;
+          expires_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          meeting_id: string;
+          recipient_email: string;
+          recipient_name?: string | null;
+          token_hash: string;
+          status?: string;
+          sent_at?: string | null;
+          accepted_at?: string | null;
+          revoked_at?: string | null;
+          expires_at: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["sales_video_meeting_invites"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "sales_video_meeting_invites_meeting_id_fkey";
+            columns: ["meeting_id"];
+            isOneToOne: false;
+            referencedRelation: "sales_video_meetings";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      sales_video_meeting_participants: {
+        Row: {
+          id: string;
+          meeting_id: string;
+          invite_id: string | null;
+          user_id: string | null;
+          guest_user_id: string | null;
+          participant_type: string;
+          display_name: string;
+          email: string | null;
+          status: string;
+          audio_enabled: boolean;
+          video_enabled: boolean;
+          screen_sharing: boolean;
+          joined_at: string | null;
+          left_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          meeting_id: string;
+          invite_id?: string | null;
+          user_id?: string | null;
+          guest_user_id?: string | null;
+          participant_type: string;
+          display_name: string;
+          email?: string | null;
+          status?: string;
+          audio_enabled?: boolean;
+          video_enabled?: boolean;
+          screen_sharing?: boolean;
+          joined_at?: string | null;
+          left_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["sales_video_meeting_participants"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "sales_video_meeting_participants_invite_id_fkey";
+            columns: ["invite_id"];
+            isOneToOne: false;
+            referencedRelation: "sales_video_meeting_invites";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "sales_video_meeting_participants_meeting_id_fkey";
+            columns: ["meeting_id"];
+            isOneToOne: false;
+            referencedRelation: "sales_video_meetings";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       company_document_requirements: {
         Row: {
           id: string;

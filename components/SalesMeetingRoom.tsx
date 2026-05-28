@@ -1,0 +1,797 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import type { RealtimeChannel } from "@supabase/supabase-js";
+import { LogIn, Mic, MicOff, PhoneOff, ScreenShare, ScreenShareOff, Video, VideoOff } from "lucide-react";
+import {
+  endSalesMeeting,
+  joinSalesMeetingAsEmployee,
+  joinSalesMeetingByToken,
+  leaveSalesMeeting,
+  updateSalesMeetingMediaState,
+  type SalesMeetingJoinResult,
+} from "@/app/employee/sales-meetings/actions";
+import { createClient } from "@/lib/supabase/client";
+import type { Database } from "@/lib/supabase/types";
+
+type SalesMeeting = Database["public"]["Tables"]["sales_video_meetings"]["Row"];
+type SalesMeetingParticipant = Database["public"]["Tables"]["sales_video_meeting_participants"]["Row"];
+
+type SalesMeetingRoomProps =
+  | {
+      mode: "guest";
+      token: string;
+    }
+  | {
+      mode: "employee";
+      meetingId: string;
+    };
+
+type SignalPayload = {
+  meeting_id: string;
+  from: string;
+  to?: string;
+  description?: RTCSessionDescriptionInit;
+  candidate?: RTCIceCandidateInit;
+  audio_enabled?: boolean;
+  video_enabled?: boolean;
+  screen_sharing?: boolean;
+};
+
+type RemoteStreamState = {
+  stream: MediaStream;
+  audioEnabled: boolean;
+  videoEnabled: boolean;
+  screenSharing: boolean;
+  connectionState: RTCPeerConnectionState;
+};
+
+function stopStream(stream: MediaStream | null) {
+  stream?.getTracks().forEach((track) => track.stop());
+}
+
+function mergeParticipant(participants: SalesMeetingParticipant[], participant: SalesMeetingParticipant) {
+  const nextParticipants = participants.filter((item) => item.id !== participant.id);
+  return [...nextParticipants, participant].sort((first, second) => first.created_at.localeCompare(second.created_at));
+}
+
+function MeetingStreamTile({
+  label,
+  muted,
+  featured,
+  state,
+  stream,
+}: {
+  label: string;
+  muted?: boolean;
+  featured?: boolean;
+  state?: string;
+  stream: MediaStream | null;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [videoReady, setVideoReady] = useState(false);
+  const hasVideo = Boolean(stream?.getVideoTracks().some((track) => track.enabled && track.readyState === "live"));
+  const hasAudio = Boolean(stream?.getAudioTracks().some((track) => track.readyState === "live"));
+
+  useEffect(() => {
+    const video = videoRef.current;
+    setVideoReady(false);
+
+    if (!video || !stream || !hasVideo) {
+      if (video) {
+        video.srcObject = null;
+      }
+      return;
+    }
+
+    video.srcObject = stream;
+    const markReady = () => setVideoReady(video.videoWidth > 0 && video.videoHeight > 0);
+    video.addEventListener("loadeddata", markReady);
+    video.addEventListener("playing", markReady);
+    void video.play().then(markReady).catch(() => setVideoReady(false));
+    const readyCheckId = window.setTimeout(markReady, 900);
+
+    return () => {
+      window.clearTimeout(readyCheckId);
+      video.removeEventListener("loadeddata", markReady);
+      video.removeEventListener("playing", markReady);
+    };
+  }, [hasVideo, stream]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+
+    if (!audio || !stream || muted || !hasAudio) {
+      if (audio) {
+        audio.srcObject = null;
+      }
+      return;
+    }
+
+    audio.srcObject = stream;
+    void audio.play().catch(() => undefined);
+  }, [hasAudio, muted, stream]);
+
+  return (
+    <div className={featured ? "employee-call-tile employee-call-tile-featured" : "employee-call-tile"}>
+      {hasAudio && !muted ? <audio className="employee-call-audio" ref={audioRef} autoPlay playsInline /> : null}
+      {hasVideo ? (
+        <>
+          <video className={videoReady ? undefined : "employee-call-video-pending"} ref={videoRef} autoPlay playsInline muted />
+          {!videoReady ? <div className="employee-call-avatar employee-call-avatar-overlay">{label.slice(0, 1)}</div> : null}
+        </>
+      ) : (
+        <div className="employee-call-avatar">{label.slice(0, 1)}</div>
+      )}
+      <div>
+        <strong>{label}</strong>
+        {state ? <span>{state}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
+  const mode = props.mode;
+  const guestToken = props.mode === "guest" ? props.token : "";
+  const employeeMeetingId = props.mode === "employee" ? props.meetingId : "";
+  const supabase = useMemo(() => createClient(), []);
+  const [guestName, setGuestName] = useState("");
+  const [meeting, setMeeting] = useState<SalesMeeting | null>(null);
+  const [participant, setParticipant] = useState<SalesMeetingParticipant | null>(null);
+  const [participants, setParticipants] = useState<SalesMeetingParticipant[]>([]);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, RemoteStreamState>>({});
+  const [statusMessage, setStatusMessage] = useState(props.mode === "employee" ? "Opening host room..." : "");
+  const [joining, setJoining] = useState(props.mode === "employee");
+  const [muted, setMuted] = useState(false);
+  const [cameraOff, setCameraOff] = useState(false);
+  const [screenSharing, setScreenSharing] = useState(false);
+  const channelRef = useRef<RealtimeChannel | null>(null);
+  const meetingRef = useRef<SalesMeeting | null>(null);
+  const participantRef = useRef<SalesMeetingParticipant | null>(null);
+  const peerConnectionsRef = useRef<Record<string, RTCPeerConnection>>({});
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  const employeeJoinStartedRef = useRef(false);
+
+  const participantById = useMemo(() => new Map(participants.map((item) => [item.id, item])), [participants]);
+  const joinedCount = participants.filter((item) => item.status === "joined").length || (participant ? 1 : 0);
+  const screenShareActive = screenSharing || Object.values(remoteStreams).some((remote) => remote.screenSharing);
+
+  const getParticipantLabel = useCallback(
+    (participantId: string) => (participantId === participantRef.current?.id ? "You" : participantById.get(participantId)?.display_name || "Guest"),
+    [participantById],
+  );
+
+  const sendSignal = useCallback(async (event: string, payload: Omit<SignalPayload, "meeting_id" | "from">) => {
+    if (!channelRef.current || !meetingRef.current || !participantRef.current) {
+      return;
+    }
+
+    await channelRef.current.send({
+      type: "broadcast",
+      event,
+      payload: {
+        ...payload,
+        meeting_id: meetingRef.current.id,
+        from: participantRef.current.id,
+      } satisfies SignalPayload,
+    });
+  }, []);
+
+  const updateMediaState = useCallback(
+    (patch: Pick<SignalPayload, "audio_enabled" | "video_enabled" | "screen_sharing">) => {
+      void sendSignal("media_state", patch);
+
+      if (meetingRef.current && participantRef.current) {
+        void updateSalesMeetingMediaState({
+          meetingId: meetingRef.current.id,
+          participantId: participantRef.current.id,
+          audioEnabled: patch.audio_enabled,
+          videoEnabled: patch.video_enabled,
+          screenSharing: patch.screen_sharing,
+        }).catch((error) => setStatusMessage(error instanceof Error ? error.message : "Could not update media state."));
+      }
+    },
+    [sendSignal],
+  );
+
+  const closePeerConnections = useCallback(() => {
+    Object.values(peerConnectionsRef.current).forEach((connection) => connection.close());
+    peerConnectionsRef.current = {};
+    setRemoteStreams({});
+  }, []);
+
+  const cleanupMeeting = useCallback(
+    async (notifyServer?: boolean) => {
+      const currentMeetingId = meetingRef.current?.id;
+      const currentParticipantId = participantRef.current?.id;
+
+      if (notifyServer && currentMeetingId && currentParticipantId) {
+        await leaveSalesMeeting(currentMeetingId, currentParticipantId).catch(() => undefined);
+      }
+
+      if (channelRef.current && supabase) {
+        void channelRef.current.untrack();
+        void supabase.removeChannel(channelRef.current);
+      }
+
+      channelRef.current = null;
+      meetingRef.current = null;
+      participantRef.current = null;
+      closePeerConnections();
+      stopStream(screenStreamRef.current);
+      stopStream(cameraStreamRef.current);
+      screenStreamRef.current = null;
+      cameraStreamRef.current = null;
+      localStreamRef.current = null;
+      setLocalStream(null);
+      setMeeting(null);
+      setParticipant(null);
+      setParticipants([]);
+      setMuted(false);
+      setCameraOff(false);
+      setScreenSharing(false);
+    },
+    [closePeerConnections, supabase],
+  );
+
+  const ensurePeerConnection = useCallback(
+    (remoteParticipantId: string) => {
+      if (peerConnectionsRef.current[remoteParticipantId]) {
+        return peerConnectionsRef.current[remoteParticipantId];
+      }
+
+      const connection = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+
+      localStreamRef.current?.getTracks().forEach((track) => {
+        if (localStreamRef.current) {
+          connection.addTrack(track, localStreamRef.current);
+        }
+      });
+
+      connection.onicecandidate = (event) => {
+        if (event.candidate) {
+          void sendSignal("ice_candidate", { to: remoteParticipantId, candidate: event.candidate.toJSON() });
+        }
+      };
+
+      connection.ontrack = (event) => {
+        const [stream] = event.streams;
+
+        if (!stream) {
+          return;
+        }
+
+        setRemoteStreams((currentStreams) => ({
+          ...currentStreams,
+          [remoteParticipantId]: {
+            stream,
+            audioEnabled: currentStreams[remoteParticipantId]?.audioEnabled ?? true,
+            videoEnabled: currentStreams[remoteParticipantId]?.videoEnabled ?? true,
+            screenSharing: currentStreams[remoteParticipantId]?.screenSharing ?? false,
+            connectionState: connection.connectionState,
+          },
+        }));
+      };
+
+      connection.onconnectionstatechange = () => {
+        setRemoteStreams((currentStreams) => {
+          const current = currentStreams[remoteParticipantId];
+
+          if (!current) {
+            return currentStreams;
+          }
+
+          return {
+            ...currentStreams,
+            [remoteParticipantId]: {
+              ...current,
+              connectionState: connection.connectionState,
+            },
+          };
+        });
+      };
+
+      peerConnectionsRef.current[remoteParticipantId] = connection;
+      return connection;
+    },
+    [sendSignal],
+  );
+
+  const createOfferForParticipant = useCallback(
+    async (remoteParticipantId: string) => {
+      const connection = ensurePeerConnection(remoteParticipantId);
+
+      if (connection.signalingState !== "stable") {
+        return;
+      }
+
+      const offer = await connection.createOffer();
+      await connection.setLocalDescription(offer);
+      await sendSignal("offer", { to: remoteParticipantId, description: connection.localDescription?.toJSON() });
+    },
+    [ensurePeerConnection, sendSignal],
+  );
+
+  const acquireMeetingMedia = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("This browser does not support microphone and camera calls.");
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      cameraStreamRef.current = stream;
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+    } catch (videoError) {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      cameraStreamRef.current = stream;
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+      setCameraOff(true);
+      setStatusMessage(videoError instanceof Error ? `Camera unavailable. Joined with audio only: ${videoError.message}` : "Camera unavailable. Joined with audio only.");
+    }
+  }, []);
+
+  const connectToMeeting = useCallback(
+    async (result: SalesMeetingJoinResult) => {
+      if (!supabase) {
+        throw new Error("Supabase is not configured.");
+      }
+
+      await cleanupMeeting();
+      setMeeting(result.meeting);
+      setParticipant(result.participant);
+      setParticipants(result.participants);
+      meetingRef.current = result.meeting;
+      participantRef.current = result.participant;
+
+      await acquireMeetingMedia();
+
+      const channel = supabase.channel(`sales-meeting:${result.meeting.id}`, {
+        config: {
+          private: true,
+          broadcast: { ack: true },
+          presence: { key: result.participant.id },
+        },
+      });
+
+      channelRef.current = channel;
+
+      channel
+        .on("broadcast", { event: "offer" }, async ({ payload }: { payload: SignalPayload }) => {
+          if (payload.meeting_id !== result.meeting.id || payload.to !== result.participant.id || payload.from === result.participant.id || !payload.description) {
+            return;
+          }
+
+          const connection = ensurePeerConnection(payload.from);
+          await connection.setRemoteDescription(new RTCSessionDescription(payload.description));
+          const answer = await connection.createAnswer();
+          await connection.setLocalDescription(answer);
+          await sendSignal("answer", { to: payload.from, description: connection.localDescription?.toJSON() });
+        })
+        .on("broadcast", { event: "answer" }, async ({ payload }: { payload: SignalPayload }) => {
+          if (payload.meeting_id !== result.meeting.id || payload.to !== result.participant.id || payload.from === result.participant.id || !payload.description) {
+            return;
+          }
+
+          const connection = peerConnectionsRef.current[payload.from];
+          if (connection && connection.signalingState !== "stable") {
+            await connection.setRemoteDescription(new RTCSessionDescription(payload.description));
+          }
+        })
+        .on("broadcast", { event: "ice_candidate" }, async ({ payload }: { payload: SignalPayload }) => {
+          if (payload.meeting_id !== result.meeting.id || payload.to !== result.participant.id || payload.from === result.participant.id || !payload.candidate) {
+            return;
+          }
+
+          const connection = ensurePeerConnection(payload.from);
+          await connection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+        })
+        .on("broadcast", { event: "media_state" }, ({ payload }: { payload: SignalPayload }) => {
+          if (payload.meeting_id !== result.meeting.id || payload.from === result.participant.id) {
+            return;
+          }
+
+          setRemoteStreams((currentStreams) => {
+            const current = currentStreams[payload.from];
+
+            if (!current) {
+              return currentStreams;
+            }
+
+            return {
+              ...currentStreams,
+              [payload.from]: {
+                ...current,
+                audioEnabled: payload.audio_enabled ?? current.audioEnabled,
+                videoEnabled: payload.video_enabled ?? current.videoEnabled,
+                screenSharing: payload.screen_sharing ?? current.screenSharing,
+              },
+            };
+          });
+        })
+        .on("broadcast", { event: "leave" }, ({ payload }: { payload: SignalPayload }) => {
+          if (payload.meeting_id !== result.meeting.id || payload.from === result.participant.id) {
+            return;
+          }
+
+          peerConnectionsRef.current[payload.from]?.close();
+          delete peerConnectionsRef.current[payload.from];
+          setRemoteStreams((currentStreams) => {
+            const nextStreams = { ...currentStreams };
+            delete nextStreams[payload.from];
+            return nextStreams;
+          });
+        })
+        .on("broadcast", { event: "end" }, ({ payload }: { payload: SignalPayload }) => {
+          if (payload.meeting_id === result.meeting.id && payload.from !== result.participant.id) {
+            void cleanupMeeting();
+            setStatusMessage("The meeting has ended.");
+          }
+        })
+        .on("presence", { event: "sync" }, () => {
+          const state = channel.presenceState();
+          Object.keys(state).forEach((remoteParticipantId) => {
+            if (remoteParticipantId !== result.participant.id && result.participant.id < remoteParticipantId) {
+              void createOfferForParticipant(remoteParticipantId);
+            }
+          });
+        })
+        .subscribe(async (status) => {
+          if (status === "SUBSCRIBED") {
+            await channel.track({
+              participant_id: result.participant.id,
+              display_name: result.participant.display_name,
+              joined_at: new Date().toISOString(),
+            });
+            await sendSignal("media_state", {
+              audio_enabled: !muted,
+              video_enabled: !cameraOff,
+              screen_sharing: screenSharing,
+            });
+          }
+
+          if (status === "CHANNEL_ERROR") {
+            setStatusMessage("Could not connect to the meeting channel.");
+          }
+        });
+    },
+    [
+      acquireMeetingMedia,
+      cameraOff,
+      cleanupMeeting,
+      createOfferForParticipant,
+      ensurePeerConnection,
+      muted,
+      screenSharing,
+      sendSignal,
+      supabase,
+    ],
+  );
+
+  useEffect(() => {
+    if (!supabase || !meeting) {
+      return;
+    }
+
+    const channel = supabase
+      .channel(`sales-meeting-state-${meeting.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "sales_video_meeting_participants",
+          filter: `meeting_id=eq.${meeting.id}`,
+        },
+        (payload) => {
+          const nextParticipant = payload.new as SalesMeetingParticipant;
+          setParticipants((currentParticipants) => mergeParticipant(currentParticipants, nextParticipant));
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "sales_video_meetings",
+          filter: `id=eq.${meeting.id}`,
+        },
+        (payload) => {
+          const nextMeeting = payload.new as SalesMeeting;
+          setMeeting(nextMeeting);
+          meetingRef.current = nextMeeting;
+
+          if (nextMeeting.status === "ended" || nextMeeting.status === "cancelled") {
+            void cleanupMeeting();
+            setStatusMessage("The meeting has ended.");
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [cleanupMeeting, meeting, supabase]);
+
+  useEffect(() => {
+    if (mode !== "employee" || employeeJoinStartedRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+    employeeJoinStartedRef.current = true;
+    setJoining(true);
+
+    joinSalesMeetingAsEmployee(employeeMeetingId)
+      .then(async (result) => {
+        if (!cancelled) {
+          await connectToMeeting(result);
+          setStatusMessage("");
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setStatusMessage(error instanceof Error ? error.message : "Could not open the meeting.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setJoining(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connectToMeeting, employeeMeetingId, mode]);
+
+  useEffect(
+    () => () => {
+      void cleanupMeeting();
+    },
+    [cleanupMeeting],
+  );
+
+  async function handleGuestJoin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (mode !== "guest" || joining) {
+      return;
+    }
+
+    setJoining(true);
+    setStatusMessage("");
+
+    try {
+      if (!supabase) {
+        throw new Error("Supabase is not configured.");
+      }
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        const { error } = await supabase.auth.signInAnonymously();
+
+        if (error) {
+          throw new Error(error.message);
+        }
+      }
+
+      const result = await joinSalesMeetingByToken(guestToken, guestName);
+      await connectToMeeting(result);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not join the meeting.");
+    } finally {
+      setJoining(false);
+    }
+  }
+
+  function toggleMute() {
+    const nextMuted = !muted;
+    localStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = !nextMuted;
+    });
+    setMuted(nextMuted);
+    updateMediaState({
+      audio_enabled: !nextMuted,
+      video_enabled: !cameraOff,
+      screen_sharing: screenSharing,
+    });
+  }
+
+  function toggleCamera() {
+    const nextCameraOff = !cameraOff;
+    cameraStreamRef.current?.getVideoTracks().forEach((track) => {
+      track.enabled = !nextCameraOff;
+    });
+    setCameraOff(nextCameraOff);
+    updateMediaState({
+      audio_enabled: !muted,
+      video_enabled: !nextCameraOff,
+      screen_sharing: screenSharing,
+    });
+  }
+
+  async function stopScreenShare() {
+    const cameraVideoTrack = cameraStreamRef.current?.getVideoTracks()[0] ?? null;
+
+    Object.values(peerConnectionsRef.current).forEach((connection) => {
+      const sender = connection.getSenders().find((item) => item.track?.kind === "video");
+      void sender?.replaceTrack(cameraVideoTrack);
+    });
+
+    stopStream(screenStreamRef.current);
+    screenStreamRef.current = null;
+    localStreamRef.current = cameraStreamRef.current;
+    setLocalStream(cameraStreamRef.current);
+    setScreenSharing(false);
+    updateMediaState({
+      audio_enabled: !muted,
+      video_enabled: !cameraOff,
+      screen_sharing: false,
+    });
+  }
+
+  async function toggleScreenShare() {
+    if (screenSharing) {
+      await stopScreenShare();
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setStatusMessage("This browser does not support screen sharing.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const screenTrack = stream.getVideoTracks()[0];
+
+      if (!screenTrack) {
+        stopStream(stream);
+        return;
+      }
+
+      screenStreamRef.current = stream;
+      screenTrack.onended = () => {
+        void stopScreenShare();
+      };
+
+      Object.values(peerConnectionsRef.current).forEach((connection) => {
+        const sender = connection.getSenders().find((item) => item.track?.kind === "video");
+        void sender?.replaceTrack(screenTrack);
+      });
+
+      const audioTracks = cameraStreamRef.current?.getAudioTracks() ?? [];
+      const previewStream = new MediaStream([...audioTracks, screenTrack]);
+      localStreamRef.current = previewStream;
+      setLocalStream(previewStream);
+      setScreenSharing(true);
+      updateMediaState({
+        audio_enabled: !muted,
+        video_enabled: true,
+        screen_sharing: true,
+      });
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not start screen sharing.");
+    }
+  }
+
+  async function handleLeave() {
+    await sendSignal("leave", {});
+    await cleanupMeeting(true);
+    setStatusMessage("You left the meeting.");
+  }
+
+  async function handleEnd() {
+    if (!meeting) {
+      return;
+    }
+
+    try {
+      await sendSignal("end", {});
+      await endSalesMeeting(meeting.id);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not end the meeting.");
+    } finally {
+      await cleanupMeeting();
+    }
+  }
+
+  if (mode === "guest" && !participant) {
+    return (
+      <main className="sales-meeting-public">
+        <section className="sales-meeting-lobby" aria-labelledby="sales-meeting-lobby-title">
+          <span className="eyebrow">Reliance Sales Meeting</span>
+          <h1 id="sales-meeting-lobby-title">Join video presentation</h1>
+          <p>Enter your name, then allow microphone and camera access when your browser asks.</p>
+          <form className="sales-meeting-form" onSubmit={handleGuestJoin}>
+            <div className="field">
+              <label htmlFor="guest-name">Display name</label>
+              <input id="guest-name" value={guestName} onChange={(event) => setGuestName(event.target.value)} placeholder="Your name" />
+            </div>
+            <button className="button button-primary" type="submit" disabled={joining}>
+              <LogIn size={17} />
+              {joining ? "Joining..." : "Join meeting"}
+            </button>
+          </form>
+          {statusMessage ? <div className="sales-meeting-status">{statusMessage}</div> : null}
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="sales-meeting-room">
+      <header className="sales-meeting-room-header">
+        <div>
+          <span className="eyebrow">Reliance Sales Meeting</span>
+          <h1>{meeting?.title ?? "Video presentation"}</h1>
+        </div>
+        <span>{joining ? "Connecting..." : `${joinedCount} in meeting`}</span>
+      </header>
+      {statusMessage ? <div className="sales-meeting-status">{statusMessage}</div> : null}
+      {participant ? (
+        <>
+          <section className={screenShareActive ? "employee-call-tray employee-call-tray-screen-share sales-meeting-call-tray" : "employee-call-tray sales-meeting-call-tray"} aria-label="Sales video meeting">
+            <div className="employee-call-stage">
+              <MeetingStreamTile
+                featured={screenSharing}
+                label="You"
+                muted
+                state={`${muted ? "Muted" : "Mic on"}${screenSharing ? " - Sharing screen" : cameraOff ? " - Camera off" : ""}`}
+                stream={localStream}
+              />
+              {Object.entries(remoteStreams).map(([participantId, remote]) => (
+                <MeetingStreamTile
+                  featured={remote.screenSharing}
+                  key={participantId}
+                  label={getParticipantLabel(participantId)}
+                  state={`${remote.audioEnabled ? "Mic on" : "Muted"}${remote.screenSharing ? " - Sharing screen" : remote.videoEnabled ? "" : " - Camera off"}`}
+                  stream={remote.stream}
+                />
+              ))}
+            </div>
+            <div className="employee-call-controls">
+              <button className={muted ? "active" : undefined} type="button" onClick={toggleMute} aria-label={muted ? "Unmute microphone" : "Mute microphone"}>
+                {muted ? <MicOff size={17} /> : <Mic size={17} />}
+              </button>
+              <button className={cameraOff ? "active" : undefined} type="button" onClick={toggleCamera} aria-label={cameraOff ? "Turn camera on" : "Turn camera off"}>
+                {cameraOff ? <VideoOff size={17} /> : <Video size={17} />}
+              </button>
+              <button className={screenSharing ? "active" : undefined} type="button" onClick={() => void toggleScreenShare()} aria-label={screenSharing ? "Stop sharing screen" : "Share screen"}>
+                {screenSharing ? <ScreenShareOff size={17} /> : <ScreenShare size={17} />}
+              </button>
+              {mode === "employee" ? (
+                <button className="employee-call-end" type="button" onClick={() => void handleEnd()} aria-label="End meeting for everyone">
+                  <PhoneOff size={17} />
+                  End
+                </button>
+              ) : null}
+              <button type="button" onClick={() => void handleLeave()}>
+                Leave
+              </button>
+            </div>
+            <div className="employee-call-participants">
+              {participants.map((item) => (
+                <span key={item.id}>
+                  {item.display_name} - {item.status}
+                </span>
+              ))}
+            </div>
+          </section>
+        </>
+      ) : null}
+    </main>
+  );
+}
