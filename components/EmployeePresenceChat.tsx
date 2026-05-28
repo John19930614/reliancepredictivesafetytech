@@ -1,15 +1,42 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, MessageCircle, Radio, Send, Users, X } from "lucide-react";
+import type { RealtimeChannel } from "@supabase/supabase-js";
+import {
+  Bell,
+  MessageCircle,
+  Mic,
+  MicOff,
+  Phone,
+  PhoneOff,
+  Radio,
+  ScreenShare,
+  ScreenShareOff,
+  Send,
+  Users,
+  Video,
+  VideoOff,
+  X,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
-import { ensureDirectThread, markChatNotificationsRead, sendChatMessage } from "@/app/employee/chat/actions";
+import {
+  declineChatCall,
+  endChatCall,
+  ensureDirectThread,
+  joinChatCall,
+  leaveChatCall,
+  markChatNotificationsRead,
+  sendChatMessage,
+  startChatCall,
+} from "@/app/employee/chat/actions";
 import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/supabase/types";
 
 type EmployeeChatProfile = Database["public"]["Tables"]["employee_chat_profiles"]["Row"];
 type EmployeeChatThread = Database["public"]["Tables"]["employee_chat_threads"]["Row"];
 type EmployeeChatMessage = Database["public"]["Tables"]["employee_chat_messages"]["Row"];
+type EmployeeChatCall = Database["public"]["Tables"]["employee_chat_calls"]["Row"];
+type EmployeeChatCallParticipant = Database["public"]["Tables"]["employee_chat_call_participants"]["Row"];
 type PortalNotification = Database["public"]["Tables"]["portal_notifications"]["Row"];
 
 type EmployeePresenceChatProps = {
@@ -31,6 +58,31 @@ type PresencePayload = {
   online_at: string;
 };
 
+type CallPresencePayload = {
+  user_id: string;
+  display_name: string;
+  joined_at: string;
+};
+
+type SignalPayload = {
+  call_id: string;
+  from: string;
+  to?: string;
+  description?: RTCSessionDescriptionInit;
+  candidate?: RTCIceCandidateInit;
+  audio_enabled?: boolean;
+  video_enabled?: boolean;
+  screen_sharing?: boolean;
+};
+
+type RemoteStreamState = {
+  stream: MediaStream;
+  audioEnabled: boolean;
+  videoEnabled: boolean;
+  screenSharing: boolean;
+  connectionState: RTCPeerConnectionState;
+};
+
 function getProfileName(profile: Pick<EmployeeChatProfile, "display_name" | "email" | "user_id"> | undefined) {
   return profile?.display_name || profile?.email || profile?.user_id.slice(0, 8) || "Employee";
 }
@@ -43,11 +95,52 @@ function mergeMessage(messages: EmployeeChatMessage[], message: EmployeeChatMess
   return [...messages, message].sort((first, second) => first.created_at.localeCompare(second.created_at));
 }
 
+function mergeParticipant(participants: EmployeeChatCallParticipant[], participant: EmployeeChatCallParticipant) {
+  const nextParticipants = participants.filter((item) => item.id !== participant.id && item.user_id !== participant.user_id);
+  return [...nextParticipants, participant].sort((first, second) => first.created_at.localeCompare(second.created_at));
+}
+
 function formatMessageTime(value: string) {
   return new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function stopStream(stream: MediaStream | null) {
+  stream?.getTracks().forEach((track) => track.stop());
+}
+
+function StreamTile({
+  label,
+  muted,
+  state,
+  stream,
+}: {
+  label: string;
+  muted?: boolean;
+  state?: string;
+  stream: MediaStream | null;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (videoRef.current && videoRef.current.srcObject !== stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  const hasVideo = Boolean(stream?.getVideoTracks().some((track) => track.enabled && track.readyState === "live"));
+
+  return (
+    <div className="employee-call-tile">
+      {hasVideo ? <video ref={videoRef} autoPlay playsInline muted={muted} /> : <div className="employee-call-avatar">{label.slice(0, 1)}</div>}
+      <div>
+        <strong>{label}</strong>
+        {state ? <span>{state}</span> : null}
+      </div>
+    </div>
+  );
 }
 
 export function EmployeePresenceChat({
@@ -73,7 +166,23 @@ export function EmployeePresenceChat({
   const [sending, setSending] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(initialUnreadChatNotificationCount);
   const [latestNotificationTitle, setLatestNotificationTitle] = useState("");
+  const [incomingCall, setIncomingCall] = useState<EmployeeChatCall | null>(null);
+  const [activeCall, setActiveCall] = useState<EmployeeChatCall | null>(null);
+  const [callParticipants, setCallParticipants] = useState<EmployeeChatCallParticipant[]>([]);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, RemoteStreamState>>({});
+  const [callStatusMessage, setCallStatusMessage] = useState("");
+  const [callConnecting, setCallConnecting] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [cameraOff, setCameraOff] = useState(false);
+  const [screenSharing, setScreenSharing] = useState(false);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
+  const activeCallRef = useRef<EmployeeChatCall | null>(null);
+  const callChannelRef = useRef<RealtimeChannel | null>(null);
+  const peerConnectionsRef = useRef<Record<string, RTCPeerConnection>>({});
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
 
   const profileByUserId = useMemo(
     () => new Map(initialProfiles.map((profile) => [profile.user_id, profile])),
@@ -102,6 +211,347 @@ export function EmployeePresenceChat({
   const activeMessages = activeThread ? messagesByThread[activeThread.id] ?? [] : [];
   const onlineCount = [...onlineUserIds].filter((userId) => userId !== currentUser.id).length;
   const toggleBadgeCount = unreadChatCount > 0 ? unreadChatCount : onlineCount;
+  const incomingCallerName = incomingCall?.created_by ? getProfileName(profileByUserId.get(incomingCall.created_by)) : "Someone";
+  const callParticipantCount = Math.max(1, Object.keys(remoteStreams).length + (activeCall ? 1 : 0));
+
+  const getUserLabel = useCallback(
+    (userId: string) => (userId === currentUser.id ? "You" : getProfileName(profileByUserId.get(userId))),
+    [currentUser.id, profileByUserId],
+  );
+
+  const setLoadedDirectThread = useCallback(
+    async (thread: EmployeeChatThread) => {
+      if (thread.thread_type !== "direct") {
+        setActiveTab("company");
+        return;
+      }
+
+      const otherUserId = thread.participant_one_user_id === currentUser.id ? thread.participant_two_user_id : thread.participant_one_user_id;
+
+      if (!otherUserId) {
+        return;
+      }
+
+      setDirectThreads((currentThreads) => ({ ...currentThreads, [otherUserId]: thread }));
+      setSelectedRecipientId(otherUserId);
+      setActiveTab("direct");
+    },
+    [currentUser.id],
+  );
+
+  const sendSignal = useCallback(async (event: string, payload: Omit<SignalPayload, "call_id" | "from">) => {
+    if (!callChannelRef.current || !activeCallRef.current) {
+      return;
+    }
+
+    await callChannelRef.current.send({
+      type: "broadcast",
+      event,
+      payload: {
+        ...payload,
+        call_id: activeCallRef.current.id,
+        from: currentUser.id,
+      } satisfies SignalPayload,
+    });
+  }, [currentUser.id]);
+
+  const updateParticipantMedia = useCallback(
+    (patch: Pick<SignalPayload, "audio_enabled" | "video_enabled" | "screen_sharing">) => {
+      if (patch.audio_enabled !== undefined || patch.video_enabled !== undefined || patch.screen_sharing !== undefined) {
+        void sendSignal("media_state", patch);
+      }
+
+      if (supabase && activeCallRef.current) {
+        void supabase
+          .from("employee_chat_call_participants")
+          .update({
+            audio_enabled: patch.audio_enabled,
+            video_enabled: patch.video_enabled,
+            screen_sharing: patch.screen_sharing,
+          })
+          .eq("call_id", activeCallRef.current.id)
+          .eq("user_id", currentUser.id);
+      }
+    },
+    [currentUser.id, sendSignal, supabase],
+  );
+
+  const closePeerConnections = useCallback(() => {
+    Object.values(peerConnectionsRef.current).forEach((connection) => connection.close());
+    peerConnectionsRef.current = {};
+    setRemoteStreams({});
+  }, []);
+
+  const cleanupCall = useCallback(
+    async (options?: { notifyServer?: boolean }) => {
+      const callId = activeCallRef.current?.id;
+
+      if (options?.notifyServer && callId) {
+        await leaveChatCall(callId).catch((error) => {
+          console.error("Could not leave chat call.", error);
+        });
+      }
+
+      if (callChannelRef.current && supabase) {
+        void callChannelRef.current.untrack();
+        void supabase.removeChannel(callChannelRef.current);
+      }
+
+      callChannelRef.current = null;
+      activeCallRef.current = null;
+      closePeerConnections();
+      stopStream(screenStreamRef.current);
+      stopStream(cameraStreamRef.current);
+      screenStreamRef.current = null;
+      cameraStreamRef.current = null;
+      localStreamRef.current = null;
+      setLocalStream(null);
+      setActiveCall(null);
+      setCallParticipants([]);
+      setCallConnecting(false);
+      setMuted(false);
+      setCameraOff(false);
+      setScreenSharing(false);
+      setCallStatusMessage("");
+    },
+    [closePeerConnections, supabase],
+  );
+
+  const ensurePeerConnection = useCallback(
+    (remoteUserId: string) => {
+      if (peerConnectionsRef.current[remoteUserId]) {
+        return peerConnectionsRef.current[remoteUserId];
+      }
+
+      const connection = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+
+      localStreamRef.current?.getTracks().forEach((track) => {
+        if (localStreamRef.current) {
+          connection.addTrack(track, localStreamRef.current);
+        }
+      });
+
+      connection.onicecandidate = (event) => {
+        if (event.candidate) {
+          void sendSignal("ice_candidate", { to: remoteUserId, candidate: event.candidate.toJSON() });
+        }
+      };
+
+      connection.ontrack = (event) => {
+        const [stream] = event.streams;
+
+        if (!stream) {
+          return;
+        }
+
+        setRemoteStreams((currentStreams) => ({
+          ...currentStreams,
+          [remoteUserId]: {
+            stream,
+            audioEnabled: currentStreams[remoteUserId]?.audioEnabled ?? true,
+            videoEnabled: currentStreams[remoteUserId]?.videoEnabled ?? true,
+            screenSharing: currentStreams[remoteUserId]?.screenSharing ?? false,
+            connectionState: connection.connectionState,
+          },
+        }));
+      };
+
+      connection.onconnectionstatechange = () => {
+        setRemoteStreams((currentStreams) => {
+          const current = currentStreams[remoteUserId];
+
+          if (!current) {
+            return currentStreams;
+          }
+
+          return {
+            ...currentStreams,
+            [remoteUserId]: {
+              ...current,
+              connectionState: connection.connectionState,
+            },
+          };
+        });
+      };
+
+      peerConnectionsRef.current[remoteUserId] = connection;
+      return connection;
+    },
+    [sendSignal],
+  );
+
+  const createOfferForUser = useCallback(
+    async (remoteUserId: string) => {
+      const connection = ensurePeerConnection(remoteUserId);
+
+      if (connection.signalingState !== "stable") {
+        return;
+      }
+
+      const offer = await connection.createOffer();
+      await connection.setLocalDescription(offer);
+      await sendSignal("offer", { to: remoteUserId, description: connection.localDescription?.toJSON() });
+    },
+    [ensurePeerConnection, sendSignal],
+  );
+
+  const acquireMeetingMedia = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("This browser does not support microphone and camera calls.");
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      cameraStreamRef.current = stream;
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+      return stream;
+    } catch (videoError) {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      cameraStreamRef.current = stream;
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+      setCameraOff(true);
+      setCallStatusMessage(videoError instanceof Error ? `Camera unavailable. Joined with audio only: ${videoError.message}` : "Camera unavailable. Joined with audio only.");
+      return stream;
+    }
+  }, []);
+
+  const connectToCall = useCallback(
+    async (call: EmployeeChatCall) => {
+      if (!supabase) {
+        return;
+      }
+
+      await cleanupCall();
+      setCallConnecting(true);
+      setActiveCall(call);
+      activeCallRef.current = call;
+      setIncomingCall(null);
+      setOpen(true);
+
+      try {
+        await acquireMeetingMedia();
+      } catch (error) {
+        await cleanupCall();
+        setStatusMessage(error instanceof Error ? error.message : "Could not access your microphone or camera.");
+        return;
+      }
+
+      const channel = supabase.channel(`employee-call:${call.id}`, {
+        config: {
+          private: true,
+          broadcast: { ack: true },
+          presence: { key: currentUser.id },
+        },
+      });
+
+      callChannelRef.current = channel;
+
+      channel
+        .on("broadcast", { event: "offer" }, async ({ payload }: { payload: SignalPayload }) => {
+          if (payload.call_id !== call.id || payload.to !== currentUser.id || payload.from === currentUser.id || !payload.description) {
+            return;
+          }
+
+          const connection = ensurePeerConnection(payload.from);
+          await connection.setRemoteDescription(new RTCSessionDescription(payload.description));
+          const answer = await connection.createAnswer();
+          await connection.setLocalDescription(answer);
+          await sendSignal("answer", { to: payload.from, description: connection.localDescription?.toJSON() });
+        })
+        .on("broadcast", { event: "answer" }, async ({ payload }: { payload: SignalPayload }) => {
+          if (payload.call_id !== call.id || payload.to !== currentUser.id || payload.from === currentUser.id || !payload.description) {
+            return;
+          }
+
+          const connection = peerConnectionsRef.current[payload.from];
+
+          if (connection && connection.signalingState !== "stable") {
+            await connection.setRemoteDescription(new RTCSessionDescription(payload.description));
+          }
+        })
+        .on("broadcast", { event: "ice_candidate" }, async ({ payload }: { payload: SignalPayload }) => {
+          if (payload.call_id !== call.id || payload.to !== currentUser.id || payload.from === currentUser.id || !payload.candidate) {
+            return;
+          }
+
+          const connection = ensurePeerConnection(payload.from);
+          await connection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+        })
+        .on("broadcast", { event: "media_state" }, ({ payload }: { payload: SignalPayload }) => {
+          if (payload.call_id !== call.id || payload.from === currentUser.id) {
+            return;
+          }
+
+          setRemoteStreams((currentStreams) => {
+            const current = currentStreams[payload.from];
+
+            if (!current) {
+              return currentStreams;
+            }
+
+            return {
+              ...currentStreams,
+              [payload.from]: {
+                ...current,
+                audioEnabled: payload.audio_enabled ?? current.audioEnabled,
+                videoEnabled: payload.video_enabled ?? current.videoEnabled,
+                screenSharing: payload.screen_sharing ?? current.screenSharing,
+              },
+            };
+          });
+        })
+        .on("broadcast", { event: "leave" }, ({ payload }: { payload: SignalPayload }) => {
+          if (payload.call_id !== call.id || payload.from === currentUser.id) {
+            return;
+          }
+
+          peerConnectionsRef.current[payload.from]?.close();
+          delete peerConnectionsRef.current[payload.from];
+          setRemoteStreams((currentStreams) => {
+            const nextStreams = { ...currentStreams };
+            delete nextStreams[payload.from];
+            return nextStreams;
+          });
+        })
+        .on("broadcast", { event: "end" }, ({ payload }: { payload: SignalPayload }) => {
+          if (payload.call_id === call.id && payload.from !== currentUser.id) {
+            void cleanupCall();
+          }
+        })
+        .on("presence", { event: "sync" }, () => {
+          const state = channel.presenceState() as Record<string, CallPresencePayload[]>;
+          const presentUserIds = Object.values(state)
+            .flat()
+            .map((presence) => presence.user_id)
+            .filter((userId) => userId && userId !== currentUser.id);
+
+          presentUserIds.forEach((userId) => {
+            if (currentUser.id < userId) {
+              void createOfferForUser(userId);
+            }
+          });
+        })
+        .subscribe(async (status) => {
+          if (status === "SUBSCRIBED") {
+            await channel.track({
+              user_id: currentUser.id,
+              display_name: getUserLabel(currentUser.id),
+              joined_at: new Date().toISOString(),
+            } satisfies CallPresencePayload);
+            await sendSignal("call_accept", {});
+            setCallConnecting(false);
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            setCallStatusMessage("Could not connect to the meeting channel.");
+            setCallConnecting(false);
+          }
+        });
+    },
+    [acquireMeetingMedia, cleanupCall, createOfferForUser, currentUser.id, ensurePeerConnection, getUserLabel, sendSignal, supabase],
+  );
 
   const clearChatNotifications = useCallback((force = false) => {
     if (!force && unreadChatCount === 0 && !latestNotificationTitle) {
@@ -243,6 +693,85 @@ export function EmployeePresenceChat({
     }
 
     const channel = supabase
+      .channel(`employee-chat-calls-${currentUser.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "employee_chat_calls",
+        },
+        (payload) => {
+          const call = payload.new as EmployeeChatCall;
+
+          if (call.created_by !== currentUser.id && call.status === "active") {
+            setIncomingCall(call);
+            setOpen(true);
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "employee_chat_calls",
+        },
+        (payload) => {
+          const call = payload.new as EmployeeChatCall;
+
+          if (call.id === incomingCall?.id && call.status !== "active") {
+            setIncomingCall(null);
+          }
+
+          if (call.id === activeCallRef.current?.id && call.status !== "active") {
+            void cleanupCall();
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "employee_chat_call_participants",
+        },
+        (payload) => {
+          const participant = payload.new as EmployeeChatCallParticipant;
+
+          if (participant.call_id === activeCallRef.current?.id) {
+            setCallParticipants((currentParticipants) => mergeParticipant(currentParticipants, participant));
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "employee_chat_call_participants",
+        },
+        (payload) => {
+          const participant = payload.new as EmployeeChatCallParticipant;
+
+          if (participant.call_id === activeCallRef.current?.id) {
+            setCallParticipants((currentParticipants) => mergeParticipant(currentParticipants, participant));
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [cleanupCall, currentUser.id, incomingCall?.id, supabase]);
+
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+
+    const channel = supabase
       .channel(`employee-chat-notifications-${currentUser.id}`)
       .on(
         "postgres_changes",
@@ -301,6 +830,13 @@ export function EmployeePresenceChat({
       messageEndRef.current?.scrollIntoView({ block: "end" });
     }
   }, [activeMessages.length, open, activeThread?.id]);
+
+  useEffect(
+    () => () => {
+      void cleanupCall();
+    },
+    [cleanupCall],
+  );
 
   async function loadMessages(threadId: string) {
     if (!supabase || messagesByThread[threadId]) {
@@ -375,6 +911,168 @@ export function EmployeePresenceChat({
     }
   }
 
+  async function handleStartCall() {
+    if (!activeThread || activeCall || callConnecting) {
+      return;
+    }
+
+    setCallStatusMessage("");
+    setCallConnecting(true);
+
+    try {
+      const result = await startChatCall(activeThread.id);
+      setCallParticipants(result.participants);
+      await connectToCall(result.call);
+    } catch (error) {
+      setCallConnecting(false);
+      setStatusMessage(error instanceof Error ? error.message : "Could not start the meeting.");
+    }
+  }
+
+  async function handleJoinCall() {
+    if (!incomingCall || activeCall || callConnecting) {
+      return;
+    }
+
+    setCallStatusMessage("");
+    setCallConnecting(true);
+
+    try {
+      const result = await joinChatCall(incomingCall.id);
+      await setLoadedDirectThread(result.thread);
+      setCallParticipants(result.participants);
+      await loadMessages(result.thread.id);
+      await connectToCall(result.call);
+    } catch (error) {
+      setCallConnecting(false);
+      setStatusMessage(error instanceof Error ? error.message : "Could not join the meeting.");
+    }
+  }
+
+  async function handleDeclineCall() {
+    if (!incomingCall) {
+      return;
+    }
+
+    try {
+      await declineChatCall(incomingCall.id);
+      setIncomingCall(null);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not decline the meeting.");
+    }
+  }
+
+  async function handleEndCall() {
+    if (!activeCall) {
+      return;
+    }
+
+    try {
+      await sendSignal("end", {});
+      await endChatCall(activeCall.id);
+    } catch (error) {
+      setCallStatusMessage(error instanceof Error ? error.message : "Could not end the meeting.");
+    } finally {
+      await cleanupCall();
+    }
+  }
+
+  async function handleLeaveCall() {
+    await sendSignal("leave", {});
+    await cleanupCall({ notifyServer: true });
+  }
+
+  function toggleMute() {
+    const nextMuted = !muted;
+    localStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = !nextMuted;
+    });
+    setMuted(nextMuted);
+    updateParticipantMedia({
+      audio_enabled: !nextMuted,
+      video_enabled: !cameraOff,
+      screen_sharing: screenSharing,
+    });
+  }
+
+  function toggleCamera() {
+    const nextCameraOff = !cameraOff;
+    cameraStreamRef.current?.getVideoTracks().forEach((track) => {
+      track.enabled = !nextCameraOff;
+    });
+    setCameraOff(nextCameraOff);
+    updateParticipantMedia({
+      audio_enabled: !muted,
+      video_enabled: !nextCameraOff,
+      screen_sharing: screenSharing,
+    });
+  }
+
+  async function stopScreenShare() {
+    const cameraVideoTrack = cameraStreamRef.current?.getVideoTracks()[0] ?? null;
+
+    Object.values(peerConnectionsRef.current).forEach((connection) => {
+      const sender = connection.getSenders().find((item) => item.track?.kind === "video");
+      void sender?.replaceTrack(cameraVideoTrack);
+    });
+
+    stopStream(screenStreamRef.current);
+    screenStreamRef.current = null;
+    localStreamRef.current = cameraStreamRef.current;
+    setLocalStream(cameraStreamRef.current);
+    setScreenSharing(false);
+    updateParticipantMedia({
+      audio_enabled: !muted,
+      video_enabled: !cameraOff,
+      screen_sharing: false,
+    });
+  }
+
+  async function toggleScreenShare() {
+    if (screenSharing) {
+      await stopScreenShare();
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setCallStatusMessage("This browser does not support screen sharing.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const screenTrack = stream.getVideoTracks()[0];
+
+      if (!screenTrack) {
+        stopStream(stream);
+        return;
+      }
+
+      screenStreamRef.current = stream;
+      screenTrack.onended = () => {
+        void stopScreenShare();
+      };
+
+      Object.values(peerConnectionsRef.current).forEach((connection) => {
+        const sender = connection.getSenders().find((item) => item.track?.kind === "video");
+        void sender?.replaceTrack(screenTrack);
+      });
+
+      const audioTracks = cameraStreamRef.current?.getAudioTracks() ?? [];
+      const previewStream = new MediaStream([...audioTracks, screenTrack]);
+      localStreamRef.current = previewStream;
+      setLocalStream(previewStream);
+      setScreenSharing(true);
+      updateParticipantMedia({
+        audio_enabled: !muted,
+        video_enabled: true,
+        screen_sharing: true,
+      });
+    } catch (error) {
+      setCallStatusMessage(error instanceof Error ? error.message : "Could not start screen sharing.");
+    }
+  }
+
   if (!supabase || !companyThread) {
     return null;
   }
@@ -410,10 +1108,92 @@ export function EmployeePresenceChat({
               <span className="eyebrow">Team Chat</span>
               <h2>{activeTab === "company" ? "Company Room" : selectedRecipient ? getProfileName(selectedRecipient) : "Direct Messages"}</h2>
             </div>
-            <button type="button" className="icon-button employee-chat-close" onClick={() => setOpen(false)} aria-label="Close employee chat">
-              <X size={18} />
-            </button>
+            <div className="employee-chat-header-actions">
+              <button
+                type="button"
+                className="icon-button employee-chat-call-button"
+                onClick={() => void handleStartCall()}
+                disabled={!activeThread || Boolean(activeCall) || callConnecting || (activeTab === "direct" && !selectedRecipient)}
+                aria-label="Start meeting call"
+              >
+                <Phone size={18} />
+              </button>
+              <button type="button" className="icon-button employee-chat-close" onClick={() => setOpen(false)} aria-label="Close employee chat">
+                <X size={18} />
+              </button>
+            </div>
           </div>
+
+          {incomingCall ? (
+            <div className="employee-call-incoming" role="status">
+              <div>
+                <strong>Incoming meeting</strong>
+                <span>{incomingCallerName} is calling this chat.</span>
+              </div>
+              <div>
+                <button className="button button-primary" type="button" onClick={() => void handleJoinCall()} disabled={callConnecting}>
+                  <Phone size={16} />
+                  Join
+                </button>
+                <button className="button button-secondary employee-call-decline" type="button" onClick={() => void handleDeclineCall()}>
+                  <PhoneOff size={16} />
+                  Decline
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {activeCall ? (
+            <section className="employee-call-tray" aria-label="Active meeting call">
+              <div className="employee-call-stage">
+                <StreamTile
+                  label="You"
+                  muted
+                  state={`${muted ? "Muted" : "Mic on"}${screenSharing ? " - Sharing screen" : cameraOff ? " - Camera off" : ""}`}
+                  stream={localStream}
+                />
+                {Object.entries(remoteStreams).map(([userId, remote]) => (
+                  <StreamTile
+                    key={userId}
+                    label={getUserLabel(userId)}
+                    state={`${remote.audioEnabled ? "Mic on" : "Muted"}${remote.screenSharing ? " - Sharing screen" : remote.videoEnabled ? "" : " - Camera off"}`}
+                    stream={remote.stream}
+                  />
+                ))}
+              </div>
+              <div className="employee-call-controls">
+                <span>{callConnecting ? "Connecting..." : `${callParticipantCount} in call`}</span>
+                <button className={muted ? "active" : undefined} type="button" onClick={toggleMute} aria-label={muted ? "Unmute microphone" : "Mute microphone"}>
+                  {muted ? <MicOff size={17} /> : <Mic size={17} />}
+                </button>
+                <button className={cameraOff ? "active" : undefined} type="button" onClick={toggleCamera} aria-label={cameraOff ? "Turn camera on" : "Turn camera off"}>
+                  {cameraOff ? <VideoOff size={17} /> : <Video size={17} />}
+                </button>
+                <button
+                  className={screenSharing ? "active" : undefined}
+                  type="button"
+                  onClick={() => void toggleScreenShare()}
+                  aria-label={screenSharing ? "Stop sharing screen" : "Share screen"}
+                >
+                  {screenSharing ? <ScreenShareOff size={17} /> : <ScreenShare size={17} />}
+                </button>
+                <button className="employee-call-end" type="button" onClick={() => void handleEndCall()} aria-label="End meeting for everyone">
+                  <PhoneOff size={17} />
+                </button>
+                <button type="button" onClick={() => void handleLeaveCall()}>
+                  Leave
+                </button>
+              </div>
+              {callStatusMessage ? <div className="employee-call-status">{callStatusMessage}</div> : null}
+              <div className="employee-call-participants">
+                {callParticipants.map((participant) => (
+                  <span key={participant.id}>
+                    {getUserLabel(participant.user_id)} - {participant.status}
+                  </span>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           <div className="employee-chat-tabs" role="tablist" aria-label="Chat views">
             <button

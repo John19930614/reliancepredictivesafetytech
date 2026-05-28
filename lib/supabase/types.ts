@@ -1501,6 +1501,60 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["employee_chat_messages"]["Insert"]>;
         Relationships: [];
       };
+      employee_chat_calls: {
+        Row: {
+          id: string;
+          thread_id: string;
+          created_by: string | null;
+          status: string;
+          started_at: string | null;
+          ended_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          thread_id: string;
+          created_by?: string | null;
+          status?: string;
+          started_at?: string | null;
+          ended_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_chat_calls"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_chat_call_participants: {
+        Row: {
+          id: string;
+          call_id: string;
+          user_id: string;
+          status: string;
+          audio_enabled: boolean;
+          video_enabled: boolean;
+          screen_sharing: boolean;
+          joined_at: string | null;
+          left_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          call_id: string;
+          user_id: string;
+          status?: string;
+          audio_enabled?: boolean;
+          video_enabled?: boolean;
+          screen_sharing?: boolean;
+          joined_at?: string | null;
+          left_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_chat_call_participants"]["Insert"]>;
+        Relationships: [];
+      };
       employee_profiles: {
         Row: {
           user_id: string;

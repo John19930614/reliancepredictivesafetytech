@@ -3878,8 +3878,8 @@ textarea {
   right: 24px;
   bottom: 88px;
   z-index: 90;
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   width: min(760px, calc(100vw - 48px));
   height: min(760px, calc(100vh - 112px));
   max-height: min(760px, calc(100vh - 112px));
@@ -3913,8 +3913,180 @@ textarea {
   font-size: 1.16rem;
 }
 
+.employee-chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.employee-chat-call-button {
+  color: #16833b;
+}
+
+.employee-chat-call-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .employee-chat-close {
   color: #111;
+}
+
+.employee-call-incoming {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid #eceff3;
+  padding: 12px 14px;
+  background: #111;
+  color: #fff;
+}
+
+.employee-call-incoming strong,
+.employee-call-incoming span {
+  display: block;
+}
+
+.employee-call-incoming span {
+  margin-top: 3px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.84rem;
+}
+
+.employee-call-incoming > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.employee-call-decline {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.employee-call-tray {
+  display: grid;
+  gap: 10px;
+  border-bottom: 1px solid #eceff3;
+  padding: 12px;
+  background: #0f141a;
+  color: #fff;
+}
+
+.employee-call-stage {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.employee-call-tile {
+  position: relative;
+  display: grid;
+  min-height: 128px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: #1b242d;
+}
+
+.employee-call-tile video,
+.employee-call-avatar {
+  width: 100%;
+  height: 100%;
+  min-height: 128px;
+  object-fit: cover;
+}
+
+.employee-call-avatar {
+  display: grid;
+  place-items: center;
+  color: var(--gold-bright);
+  font-size: 2rem;
+  font-weight: 900;
+}
+
+.employee-call-tile > div:last-child {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 7px 8px;
+  background: rgba(5, 8, 12, 0.78);
+  color: #fff;
+  font-size: 0.78rem;
+}
+
+.employee-call-tile span {
+  color: rgba(255, 255, 255, 0.72);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employee-call-controls,
+.employee-call-participants {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.employee-call-controls > span {
+  margin-right: auto;
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.employee-call-controls button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.employee-call-controls button.active {
+  border-color: rgba(240, 200, 106, 0.42);
+  background: rgba(240, 200, 106, 0.16);
+  color: var(--gold-bright);
+}
+
+.employee-call-controls .employee-call-end {
+  border-color: rgba(193, 47, 47, 0.58);
+  background: #c12f2f;
+}
+
+.employee-call-status {
+  border: 1px solid rgba(240, 200, 106, 0.22);
+  border-radius: 6px;
+  padding: 9px 10px;
+  background: rgba(240, 200, 106, 0.12);
+  color: #ffe7ad;
+  font-size: 0.82rem;
+}
+
+.employee-call-participants span {
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.74rem;
+  font-weight: 800;
 }
 
 .employee-chat-tabs {
@@ -3947,6 +4119,7 @@ textarea {
 .employee-chat-body {
   display: grid;
   grid-template-columns: minmax(190px, 240px) minmax(0, 1fr);
+  flex: 1;
   min-height: 0;
   overflow: hidden;
 }
@@ -4455,6 +4628,33 @@ textarea {
     border-bottom: 0;
     border-left: 0;
     border-radius: 8px 8px 0 0;
+  }
+
+  .employee-call-incoming {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .employee-call-incoming > div:last-child,
+  .employee-call-incoming .button {
+    width: 100%;
+  }
+
+  .employee-call-stage {
+    grid-template-columns: 1fr;
+  }
+
+  .employee-call-tile {
+    min-height: 112px;
+  }
+
+  .employee-call-tile video,
+  .employee-call-avatar {
+    min-height: 112px;
+  }
+
+  .employee-call-controls > span {
+    width: 100%;
   }
 
   .employee-chat-body {
