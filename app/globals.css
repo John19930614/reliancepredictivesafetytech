@@ -4010,12 +4010,22 @@ textarea {
   object-fit: cover;
 }
 
+.employee-call-video-pending {
+  opacity: 0;
+}
+
 .employee-call-avatar {
   display: grid;
   place-items: center;
   color: var(--gold-bright);
   font-size: 2rem;
   font-weight: 900;
+}
+
+.employee-call-avatar-overlay {
+  position: absolute;
+  inset: 0;
+  background: #111827;
 }
 
 .employee-call-tile > div:last-child {

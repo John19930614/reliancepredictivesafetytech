@@ -123,18 +123,58 @@ function StreamTile({
   stream: MediaStream | null;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [videoReady, setVideoReady] = useState(false);
 
   useEffect(() => {
-    if (videoRef.current && videoRef.current.srcObject !== stream) {
-      videoRef.current.srcObject = stream;
+    const video = videoRef.current;
+    const hasLiveVideo = Boolean(stream?.getVideoTracks().some((track) => track.enabled && track.readyState === "live"));
+
+    setVideoReady(false);
+
+    if (!video || !stream || !hasLiveVideo) {
+      if (video) {
+        video.srcObject = null;
+      }
+
+      return;
     }
+
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
+    }
+
+    const markReady = () => {
+      setVideoReady(video.videoWidth > 0 && video.videoHeight > 0);
+    };
+
+    video.addEventListener("loadeddata", markReady);
+    video.addEventListener("playing", markReady);
+
+    void video.play().then(markReady).catch(() => {
+      setVideoReady(false);
+    });
+
+    const readyCheckId = window.setTimeout(markReady, 900);
+
+    return () => {
+      window.clearTimeout(readyCheckId);
+      video.removeEventListener("loadeddata", markReady);
+      video.removeEventListener("playing", markReady);
+    };
   }, [stream]);
 
   const hasVideo = Boolean(stream?.getVideoTracks().some((track) => track.enabled && track.readyState === "live"));
 
   return (
     <div className="employee-call-tile">
-      {hasVideo ? <video ref={videoRef} autoPlay playsInline muted={muted} /> : <div className="employee-call-avatar">{label.slice(0, 1)}</div>}
+      {hasVideo ? (
+        <>
+          <video className={videoReady ? undefined : "employee-call-video-pending"} ref={videoRef} autoPlay playsInline muted={muted} />
+          {!videoReady ? <div className="employee-call-avatar employee-call-avatar-overlay">{label.slice(0, 1)}</div> : null}
+        </>
+      ) : (
+        <div className="employee-call-avatar">{label.slice(0, 1)}</div>
+      )}
       <div>
         <strong>{label}</strong>
         {state ? <span>{state}</span> : null}
