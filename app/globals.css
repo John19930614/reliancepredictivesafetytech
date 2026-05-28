@@ -4079,6 +4079,37 @@ textarea {
   font-weight: 900;
 }
 
+.employee-call-sharing-placeholder {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 24px;
+  background: linear-gradient(135deg, #101820, #182433);
+  color: #fff;
+  text-align: center;
+}
+
+.employee-call-sharing-placeholder svg {
+  color: var(--gold-bright);
+}
+
+.employee-call-sharing-placeholder strong,
+.employee-call-sharing-placeholder span {
+  display: block;
+}
+
+.employee-call-sharing-placeholder strong {
+  font-size: 1rem;
+}
+
+.employee-call-sharing-placeholder span {
+  max-width: 240px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.82rem;
+}
+
 .employee-call-avatar-overlay {
   position: absolute;
   inset: 0;

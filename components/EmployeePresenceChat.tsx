@@ -171,12 +171,14 @@ function StreamTile({
   label,
   muted,
   featured,
+  sharingPlaceholder,
   state,
   stream,
 }: {
   label: string;
   muted?: boolean;
   featured?: boolean;
+  sharingPlaceholder?: boolean;
   state?: string;
   stream: MediaStream | null;
 }) {
@@ -248,7 +250,13 @@ function StreamTile({
   return (
     <div className={featured ? "employee-call-tile employee-call-tile-featured" : "employee-call-tile"}>
       {hasAudio && !muted ? <audio className="employee-call-audio" ref={audioRef} autoPlay playsInline /> : null}
-      {hasVideo ? (
+      {sharingPlaceholder ? (
+        <div className="employee-call-sharing-placeholder">
+          <ScreenShare size={30} />
+          <strong>Sharing your screen</strong>
+          <span>Preview hidden to prevent mirror view</span>
+        </div>
+      ) : hasVideo ? (
         <>
           <video className={videoReady ? undefined : "employee-call-video-pending"} ref={videoRef} autoPlay playsInline muted />
           {!videoReady ? <div className="employee-call-avatar employee-call-avatar-overlay">{label.slice(0, 1)}</div> : null}
@@ -1348,8 +1356,9 @@ export function EmployeePresenceChat({
                   featured={screenSharing}
                   label="You"
                   muted
+                  sharingPlaceholder={screenSharing}
                   state={`${muted ? "Muted" : "Mic on"}${screenSharing ? " - Sharing screen" : cameraOff ? " - Camera off" : ""}`}
-                  stream={localStream}
+                  stream={screenSharing ? null : localStream}
                 />
                 {Object.entries(remoteStreams).map(([userId, remote]) => (
                   <StreamTile
