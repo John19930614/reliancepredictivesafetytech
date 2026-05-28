@@ -113,16 +113,42 @@ function stopStream(stream: MediaStream | null) {
   stream?.getTracks().forEach((track) => track.stop());
 }
 
-function playIncomingCallTone() {
-  const AudioContextConstructor =
-    window.AudioContext ||
-    (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+function getAudioContextConstructor() {
+  return window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+}
 
+async function primeIncomingCallAudio(audioContextRef: { current: AudioContext | null }) {
+  const AudioContextConstructor = getAudioContextConstructor();
   if (!AudioContextConstructor) {
+    return false;
+  }
+
+  if (!audioContextRef.current || audioContextRef.current.state === "closed") {
+    audioContextRef.current = new AudioContextConstructor();
+  }
+
+  if (audioContextRef.current.state === "suspended") {
+    await audioContextRef.current.resume();
+  }
+
+  const oscillator = audioContextRef.current.createOscillator();
+  const gain = audioContextRef.current.createGain();
+  gain.gain.setValueAtTime(0.0001, audioContextRef.current.currentTime);
+  oscillator.connect(gain);
+  gain.connect(audioContextRef.current.destination);
+  oscillator.start();
+  oscillator.stop(audioContextRef.current.currentTime + 0.025);
+  return true;
+}
+
+async function playIncomingCallTone(audioContextRef: { current: AudioContext | null }) {
+  const audioReady = await primeIncomingCallAudio(audioContextRef);
+
+  if (!audioReady || !audioContextRef.current) {
     return;
   }
 
-  const audioContext = new AudioContextConstructor();
+  const audioContext = audioContextRef.current;
   const startTime = audioContext.currentTime;
   const tones = [0, 0.18, 0.48, 0.66];
 
@@ -139,10 +165,6 @@ function playIncomingCallTone() {
     oscillator.start(startTime + offset);
     oscillator.stop(startTime + offset + 0.16);
   });
-
-  window.setTimeout(() => {
-    void audioContext.close().catch(() => undefined);
-  }, 1000);
 }
 
 function StreamTile({
@@ -283,6 +305,8 @@ export function EmployeePresenceChat({
   const localStreamRef = useRef<MediaStream | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
+  const incomingCallAudioRef = useRef<AudioContext | null>(null);
+  const incomingCallRingIntervalRef = useRef<number | null>(null);
   const lastIncomingCallToneRef = useRef<string | null>(null);
 
   const profileByUserId = useMemo(
@@ -881,11 +905,53 @@ export function EmployeePresenceChat({
     }
 
     lastIncomingCallToneRef.current = incomingCall.id;
+    void playIncomingCallTone(incomingCallAudioRef).catch(() => undefined);
 
-    try {
-      playIncomingCallTone();
-    } catch {
-      // Browsers can block sound until the user has interacted with the page.
+    if (incomingCallRingIntervalRef.current) {
+      window.clearInterval(incomingCallRingIntervalRef.current);
+    }
+
+    incomingCallRingIntervalRef.current = window.setInterval(() => {
+      void playIncomingCallTone(incomingCallAudioRef).catch(() => undefined);
+    }, 1600);
+
+    return () => {
+      if (incomingCallRingIntervalRef.current) {
+        window.clearInterval(incomingCallRingIntervalRef.current);
+        incomingCallRingIntervalRef.current = null;
+      }
+    };
+  }, [incomingCall]);
+
+  useEffect(() => {
+    const unlockAudio = () => {
+      void primeIncomingCallAudio(incomingCallAudioRef).catch(() => undefined);
+    };
+
+    window.addEventListener("pointerdown", unlockAudio, { capture: true });
+    window.addEventListener("keydown", unlockAudio, { capture: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", unlockAudio, { capture: true });
+      window.removeEventListener("keydown", unlockAudio, { capture: true });
+
+      if (incomingCallRingIntervalRef.current) {
+        window.clearInterval(incomingCallRingIntervalRef.current);
+      }
+
+      void incomingCallAudioRef.current?.close().catch(() => undefined);
+      incomingCallAudioRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (incomingCall) {
+      return;
+    }
+
+    if (incomingCallRingIntervalRef.current) {
+      window.clearInterval(incomingCallRingIntervalRef.current);
+      incomingCallRingIntervalRef.current = null;
     }
   }, [incomingCall]);
 
