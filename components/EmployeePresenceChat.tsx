@@ -4,9 +4,11 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
   Bell,
+  Maximize2,
   MessageCircle,
   Mic,
   MicOff,
+  Minimize2,
   Phone,
   PhoneOff,
   Radio,
@@ -114,11 +116,13 @@ function stopStream(stream: MediaStream | null) {
 function StreamTile({
   label,
   muted,
+  featured,
   state,
   stream,
 }: {
   label: string;
   muted?: boolean;
+  featured?: boolean;
   state?: string;
   stream: MediaStream | null;
 }) {
@@ -166,7 +170,7 @@ function StreamTile({
   const hasVideo = Boolean(stream?.getVideoTracks().some((track) => track.enabled && track.readyState === "live"));
 
   return (
-    <div className="employee-call-tile">
+    <div className={featured ? "employee-call-tile employee-call-tile-featured" : "employee-call-tile"}>
       {hasVideo ? (
         <>
           <video className={videoReady ? undefined : "employee-call-video-pending"} ref={videoRef} autoPlay playsInline muted={muted} />
@@ -193,6 +197,7 @@ export function EmployeePresenceChat({
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [chatExpanded, setChatExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<"company" | "direct">("company");
   const [selectedRecipientId, setSelectedRecipientId] = useState("");
   const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set());
@@ -253,6 +258,10 @@ export function EmployeePresenceChat({
   const toggleBadgeCount = unreadChatCount > 0 ? unreadChatCount : onlineCount;
   const incomingCallerName = incomingCall?.created_by ? getProfileName(profileByUserId.get(incomingCall.created_by)) : "Someone";
   const callParticipantCount = Math.max(1, Object.keys(remoteStreams).length + (activeCall ? 1 : 0));
+  const remoteScreenSharingUserIds = Object.entries(remoteStreams)
+    .filter(([, remote]) => remote.screenSharing)
+    .map(([userId]) => userId);
+  const screenShareActive = screenSharing || remoteScreenSharingUserIds.length > 0;
 
   const getUserLabel = useCallback(
     (userId: string) => (userId === currentUser.id ? "You" : getProfileName(profileByUserId.get(userId))),
@@ -543,6 +552,10 @@ export function EmployeePresenceChat({
               },
             };
           });
+
+          if (payload.screen_sharing) {
+            setChatExpanded(true);
+          }
         })
         .on("broadcast", { event: "leave" }, ({ payload }: { payload: SignalPayload }) => {
           if (payload.call_id !== call.id || payload.from === currentUser.id) {
@@ -1103,6 +1116,7 @@ export function EmployeePresenceChat({
       localStreamRef.current = previewStream;
       setLocalStream(previewStream);
       setScreenSharing(true);
+      setChatExpanded(true);
       updateParticipantMedia({
         audio_enabled: !muted,
         video_enabled: true,
@@ -1142,13 +1156,21 @@ export function EmployeePresenceChat({
       ) : null}
 
       {open ? (
-        <aside className="employee-chat-drawer" aria-label="Employee chat">
+        <aside className={chatExpanded ? "employee-chat-drawer employee-chat-drawer-windowed" : "employee-chat-drawer"} aria-label="Employee chat">
           <div className="employee-chat-header">
             <div>
               <span className="eyebrow">Team Chat</span>
               <h2>{activeTab === "company" ? "Company Room" : selectedRecipient ? getProfileName(selectedRecipient) : "Direct Messages"}</h2>
             </div>
             <div className="employee-chat-header-actions">
+              <button
+                type="button"
+                className="icon-button employee-chat-window-button"
+                onClick={() => setChatExpanded((value) => !value)}
+                aria-label={chatExpanded ? "Restore chat window" : "Expand chat window"}
+              >
+                {chatExpanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+              </button>
               <button
                 type="button"
                 className="icon-button employee-chat-call-button"
@@ -1184,9 +1206,10 @@ export function EmployeePresenceChat({
           ) : null}
 
           {activeCall ? (
-            <section className="employee-call-tray" aria-label="Active meeting call">
+            <section className={screenShareActive ? "employee-call-tray employee-call-tray-screen-share" : "employee-call-tray"} aria-label="Active meeting call">
               <div className="employee-call-stage">
                 <StreamTile
+                  featured={screenSharing}
                   label="You"
                   muted
                   state={`${muted ? "Muted" : "Mic on"}${screenSharing ? " - Sharing screen" : cameraOff ? " - Camera off" : ""}`}
@@ -1194,6 +1217,7 @@ export function EmployeePresenceChat({
                 />
                 {Object.entries(remoteStreams).map(([userId, remote]) => (
                   <StreamTile
+                    featured={remote.screenSharing}
                     key={userId}
                     label={getUserLabel(userId)}
                     state={`${remote.audioEnabled ? "Mic on" : "Muted"}${remote.screenSharing ? " - Sharing screen" : remote.videoEnabled ? "" : " - Camera off"}`}
