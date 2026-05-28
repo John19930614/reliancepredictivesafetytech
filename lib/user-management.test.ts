@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPortalModuleAccessRows,
   canAccessEmployeePath,
+  defaultEmployeePortalModuleKeys,
   getPortalModuleForPath,
   hasFullPortalVisibility,
   normalizePortalModuleKeys,
@@ -51,5 +52,12 @@ describe("portal module access", () => {
       { user_id: "user-1", module_key: "dashboard", granted_by: "admin-1" },
       { user_id: "user-1", module_key: "users", granted_by: "admin-1" },
     ]);
+  });
+
+  it("grants enough default visibility for invited employees to enter onboarding", () => {
+    expect(defaultEmployeePortalModuleKeys).toEqual(["dashboard", "hr_onboarding", "hr_documents", "time_cards"]);
+    expect(canAccessEmployeePath("employee", "active", "/employee", defaultEmployeePortalModuleKeys)).toBe(true);
+    expect(canAccessEmployeePath("employee", "active", "/employee/hr-onboarding", defaultEmployeePortalModuleKeys)).toBe(true);
+    expect(canAccessEmployeePath("employee", "active", "/employee/time-cards", defaultEmployeePortalModuleKeys)).toBe(true);
   });
 });

@@ -8,7 +8,13 @@ import { buildCompanyAuthLink, getCompanyAuthFallbackPath } from "@/lib/company-
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
 import { createClient } from "@/lib/supabase/server";
-import { isPortalAdminRole, portalUserRoles, type PortalUserRole } from "@/lib/user-management";
+import {
+  buildPortalModuleAccessRows,
+  defaultEmployeePortalModuleKeys,
+  isPortalAdminRole,
+  portalUserRoles,
+  type PortalUserRole,
+} from "@/lib/user-management";
 
 type SupabaseAdminClient = NonNullable<ReturnType<typeof createAdminClient>>;
 
@@ -178,6 +184,20 @@ async function assignPortalUserAccess(
 
   if (roleError) {
     return roleError;
+  }
+
+  const defaultModuleRows = buildPortalModuleAccessRows(
+    values.userId,
+    values.assignedBy,
+    defaultEmployeePortalModuleKeys,
+  );
+
+  const { error: moduleAccessError } = await admin
+    .from("portal_user_module_access")
+    .upsert(defaultModuleRows, { onConflict: "user_id,module_key", ignoreDuplicates: true });
+
+  if (moduleAccessError) {
+    return moduleAccessError;
   }
 
   const onboardingError = await createEmployeeProfileAndAssignments(

@@ -68,6 +68,7 @@ export type PortalModule = (typeof portalModuleCatalog)[number];
 export type PortalModuleKey = PortalModule["key"];
 
 export const portalModuleKeys = portalModuleCatalog.map((module) => module.key);
+export const defaultEmployeePortalModuleKeys = ["dashboard", "hr_onboarding", "hr_documents", "time_cards"] as const satisfies readonly PortalModuleKey[];
 
 function normalizePortalPath(pathname: string) {
   const [pathWithoutHash] = pathname.split("#", 1);
