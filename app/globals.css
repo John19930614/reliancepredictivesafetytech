@@ -3973,34 +3973,40 @@ textarea {
 
 .employee-call-tray {
   display: grid;
-  gap: 10px;
+  grid-template-columns: minmax(156px, 220px) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px 12px;
   border-bottom: 1px solid #eceff3;
-  padding: 12px;
-  background: #0f141a;
-  color: #fff;
+  padding: 10px 12px;
+  background: #f8fafc;
+  color: #111827;
 }
 
 .employee-call-stage {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
   gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 1px;
 }
 
 .employee-call-tile {
   position: relative;
   display: grid;
-  min-height: 128px;
+  flex: 0 0 176px;
+  min-height: 98px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid #d9e0ea;
   border-radius: 8px;
-  background: #1b242d;
+  background: #111827;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
 }
 
 .employee-call-tile video,
 .employee-call-avatar {
   width: 100%;
   height: 100%;
-  min-height: 128px;
+  min-height: 98px;
   object-fit: cover;
 }
 
@@ -4043,54 +4049,65 @@ textarea {
   gap: 8px;
 }
 
+.employee-call-controls {
+  justify-content: flex-end;
+}
+
 .employee-call-controls > span {
-  margin-right: auto;
-  color: rgba(255, 255, 255, 0.74);
+  margin-right: 2px;
+  color: #4f5b67;
   font-size: 0.82rem;
   font-weight: 800;
 }
 
 .employee-call-controls button {
   display: inline-flex;
+  min-width: 34px;
   min-height: 34px;
   align-items: center;
   justify-content: center;
   gap: 7px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid #d9e0ea;
   border-radius: 6px;
   padding: 0 10px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  background: #fff;
+  color: #1f2937;
   cursor: pointer;
   font-size: 0.82rem;
   font-weight: 850;
 }
 
 .employee-call-controls button.active {
-  border-color: rgba(240, 200, 106, 0.42);
-  background: rgba(240, 200, 106, 0.16);
-  color: var(--gold-bright);
+  border-color: rgba(201, 147, 43, 0.42);
+  background: #fff8e8;
+  color: #8a5d05;
 }
 
 .employee-call-controls .employee-call-end {
-  border-color: rgba(193, 47, 47, 0.58);
+  border-color: #c12f2f;
   background: #c12f2f;
+  color: #fff;
 }
 
 .employee-call-status {
+  grid-column: 1 / -1;
   border: 1px solid rgba(240, 200, 106, 0.22);
   border-radius: 6px;
   padding: 9px 10px;
-  background: rgba(240, 200, 106, 0.12);
-  color: #ffe7ad;
+  background: #fff8e8;
+  color: #6b4c00;
   font-size: 0.82rem;
+}
+
+.employee-call-participants {
+  grid-column: 1 / -1;
 }
 
 .employee-call-participants span {
   border-radius: 999px;
   padding: 5px 8px;
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.76);
+  background: #eef2f6;
+  color: #344054;
   font-size: 0.74rem;
   font-weight: 800;
 }
@@ -4646,17 +4663,26 @@ textarea {
     width: 100%;
   }
 
-  .employee-call-stage {
+  .employee-call-tray {
     grid-template-columns: 1fr;
   }
 
+  .employee-call-stage {
+    width: 100%;
+  }
+
   .employee-call-tile {
-    min-height: 112px;
+    flex-basis: 154px;
+    min-height: 88px;
   }
 
   .employee-call-tile video,
   .employee-call-avatar {
-    min-height: 112px;
+    min-height: 88px;
+  }
+
+  .employee-call-controls {
+    justify-content: flex-start;
   }
 
   .employee-call-controls > span {
