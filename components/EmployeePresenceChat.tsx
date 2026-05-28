@@ -113,6 +113,38 @@ function stopStream(stream: MediaStream | null) {
   stream?.getTracks().forEach((track) => track.stop());
 }
 
+function playIncomingCallTone() {
+  const AudioContextConstructor =
+    window.AudioContext ||
+    (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+
+  if (!AudioContextConstructor) {
+    return;
+  }
+
+  const audioContext = new AudioContextConstructor();
+  const startTime = audioContext.currentTime;
+  const tones = [0, 0.18, 0.48, 0.66];
+
+  tones.forEach((offset) => {
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(880, startTime + offset);
+    gain.gain.setValueAtTime(0.0001, startTime + offset);
+    gain.gain.exponentialRampToValueAtTime(0.16, startTime + offset + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + offset + 0.14);
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+    oscillator.start(startTime + offset);
+    oscillator.stop(startTime + offset + 0.16);
+  });
+
+  window.setTimeout(() => {
+    void audioContext.close().catch(() => undefined);
+  }, 1000);
+}
+
 function StreamTile({
   label,
   muted,
@@ -251,6 +283,7 @@ export function EmployeePresenceChat({
   const localStreamRef = useRef<MediaStream | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
+  const lastIncomingCallToneRef = useRef<string | null>(null);
 
   const profileByUserId = useMemo(
     () => new Map(initialProfiles.map((profile) => [profile.user_id, profile])),
@@ -841,6 +874,20 @@ export function EmployeePresenceChat({
       void supabase.removeChannel(channel);
     };
   }, [cleanupCall, currentUser.id, incomingCall?.id, supabase]);
+
+  useEffect(() => {
+    if (!incomingCall || incomingCall.id === lastIncomingCallToneRef.current) {
+      return;
+    }
+
+    lastIncomingCallToneRef.current = incomingCall.id;
+
+    try {
+      playIncomingCallTone();
+    } catch {
+      // Browsers can block sound until the user has interacted with the page.
+    }
+  }, [incomingCall]);
 
   useEffect(() => {
     if (!supabase) {

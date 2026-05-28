@@ -4023,7 +4023,11 @@ textarea {
 }
 
 .employee-call-tray-screen-share .employee-call-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(132px, 174px);
+  grid-auto-flow: row;
   align-items: stretch;
+  overflow: visible;
 }
 
 .employee-call-tile-featured {
@@ -4031,8 +4035,24 @@ textarea {
   min-height: clamp(240px, 42vh, 460px);
 }
 
+.employee-call-tray-screen-share .employee-call-tile {
+  grid-column: 2;
+  width: 100%;
+  min-height: 112px;
+}
+
+.employee-call-tray-screen-share .employee-call-tile-featured {
+  grid-column: 1;
+  grid-row: 1 / span 8;
+  min-height: clamp(280px, 54vh, 560px);
+}
+
 .employee-chat-drawer-windowed .employee-call-tile-featured {
   min-height: clamp(320px, 54vh, 620px);
+}
+
+.employee-chat-drawer-windowed .employee-call-tray-screen-share .employee-call-tile-featured {
+  min-height: clamp(360px, 64vh, 720px);
 }
 
 .employee-call-tile video,
@@ -4928,9 +4948,20 @@ textarea {
     width: 100%;
   }
 
+  .employee-call-tray-screen-share .employee-call-stage {
+    grid-template-columns: 1fr;
+    overflow-x: auto;
+  }
+
   .employee-call-tile {
     flex-basis: 154px;
     min-height: 88px;
+  }
+
+  .employee-call-tray-screen-share .employee-call-tile,
+  .employee-call-tray-screen-share .employee-call-tile-featured {
+    grid-column: 1;
+    grid-row: auto;
   }
 
   .employee-call-tile-featured {
