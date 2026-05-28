@@ -20,6 +20,7 @@ export type SalesMeetingInviteRecipient = {
 export type SalesMeetingInviteInput = {
   title: string;
   recipients: SalesMeetingInviteRecipient[];
+  scheduledAt?: string | null;
   clientId?: string | null;
   demoRequestId?: string | null;
 };
@@ -35,6 +36,11 @@ export type SalesMeetingInviteResult = {
     emailSent: boolean;
     error: string | null;
   }>;
+};
+
+export type SalesMeetingHostSummary = {
+  meeting: SalesMeeting;
+  hostUrl: string;
 };
 
 export type SalesMeetingJoinResult = {
@@ -73,12 +79,28 @@ function createInviteToken() {
   return crypto.randomBytes(32).toString("base64url");
 }
 
-function formatExpiry(value: string) {
+function formatSchedule(value: string) {
   return new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
     timeZone: "America/Chicago",
   }).format(new Date(value));
+}
+
+function normalizeScheduledAt(value: string | null | undefined) {
+  const cleanValue = cleanText(value);
+
+  if (!cleanValue) {
+    return new Date().toISOString();
+  }
+
+  const date = new Date(cleanValue);
+
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toISOString();
+  }
+
+  return date.toISOString();
 }
 
 async function getAuthorizedEmployee() {
@@ -249,7 +271,8 @@ export async function createSalesMeetingInvite(input: SalesMeetingInviteInput): 
     throw new Error("Add at least one outside recipient email.");
   }
 
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const scheduledAt = normalizeScheduledAt(input.scheduledAt);
+  const expiresAt = new Date("9999-12-31T23:59:59.000Z").toISOString();
   const { data: meeting, error: meetingError } = await admin
     .from("sales_video_meetings")
     .insert({
@@ -258,6 +281,7 @@ export async function createSalesMeetingInvite(input: SalesMeetingInviteInput): 
       client_id: cleanText(input.clientId) || null,
       demo_request_id: cleanText(input.demoRequestId) || null,
       status: "scheduled",
+      scheduled_at: scheduledAt,
       expires_at: expiresAt,
     })
     .select("*")
@@ -326,7 +350,7 @@ export async function createSalesMeetingInvite(input: SalesMeetingInviteInput): 
           meetingTitle: title,
           presenterName: inviterName,
           joinUrl,
-          expiresAt: formatExpiry(expiresAt),
+          scheduledFor: formatSchedule(scheduledAt),
         }),
       });
 
@@ -356,7 +380,7 @@ export async function createSalesMeetingInvite(input: SalesMeetingInviteInput): 
         activity_type: "Sales Meeting",
         title: `Video meeting invite: ${title}`,
         notes: `Invited ${uniqueRecipients.map((recipient) => recipient.email).join(", ")}`,
-        activity_date: new Date().toISOString().slice(0, 10),
+        activity_date: scheduledAt.slice(0, 10),
         owner: user.email ?? null,
         outcome: resend ? "Email sent" : "Invite links generated",
       })
@@ -379,6 +403,29 @@ export async function createSalesMeetingInvite(input: SalesMeetingInviteInput): 
   };
 }
 
+export async function listMySalesVideoMeetings(): Promise<SalesMeetingHostSummary[]> {
+  const { user } = await getAuthorizedEmployee();
+  const admin = getAdminClient();
+  const { data, error } = await admin
+    .from("sales_video_meetings")
+    .select("*")
+    .eq("created_by", user.id)
+    .in("status", ["scheduled", "active"])
+    .order("scheduled_at", { ascending: true, nullsFirst: false })
+    .limit(12);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const siteUrl = getSiteUrl();
+
+  return ((data ?? []) as SalesMeeting[]).map((meeting) => ({
+    meeting,
+    hostUrl: `${siteUrl}/employee/sales-meetings/${meeting.id}`,
+  }));
+}
+
 export async function joinSalesMeetingAsEmployee(meetingId: string): Promise<SalesMeetingJoinResult> {
   const { user } = await getAuthorizedEmployee();
   const admin = getAdminClient();
@@ -388,7 +435,7 @@ export async function joinSalesMeetingAsEmployee(meetingId: string): Promise<Sal
     throw new Error(error.message);
   }
 
-  if (!meeting || meeting.status === "ended" || meeting.status === "cancelled" || new Date(meeting.expires_at).getTime() <= Date.now()) {
+  if (!meeting || meeting.status === "ended" || meeting.status === "cancelled") {
     throw new Error("That sales meeting is not available.");
   }
 
@@ -436,7 +483,7 @@ export async function joinSalesMeetingByToken(token: string, displayName: string
     throw new Error(inviteError.message);
   }
 
-  if (!invite || invite.revoked_at || invite.status === "revoked" || new Date(invite.expires_at).getTime() <= Date.now()) {
+  if (!invite || invite.revoked_at || invite.status === "revoked") {
     throw new Error("This meeting invite is expired or no longer available.");
   }
 
@@ -450,7 +497,7 @@ export async function joinSalesMeetingByToken(token: string, displayName: string
     throw new Error(meetingError.message);
   }
 
-  if (!meeting || meeting.status === "ended" || meeting.status === "cancelled" || new Date(meeting.expires_at).getTime() <= Date.now()) {
+  if (!meeting || meeting.status === "ended" || meeting.status === "cancelled") {
     throw new Error("This sales meeting is no longer available.");
   }
 

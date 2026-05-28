@@ -4293,6 +4293,56 @@ textarea {
   gap: 9px;
 }
 
+.sales-meeting-host-list {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid #e5eaf0;
+  padding-top: 12px;
+}
+
+.sales-meeting-host-list > strong {
+  color: #172033;
+  font-size: 0.9rem;
+}
+
+.sales-meeting-host-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  padding: 9px;
+  background: #f8fafc;
+}
+
+.sales-meeting-host-row div {
+  min-width: 0;
+}
+
+.sales-meeting-host-row span,
+.sales-meeting-host-row small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sales-meeting-host-row span {
+  color: #172033;
+  font-size: 0.84rem;
+  font-weight: 850;
+}
+
+.sales-meeting-host-row small {
+  margin-top: 3px;
+  color: #667085;
+  font-size: 0.74rem;
+  font-weight: 750;
+}
+
 .sales-meeting-link-row {
   justify-content: space-between;
   gap: 9px;

@@ -14,7 +14,7 @@ type SalesMeetingInviteEmailProps = {
   meetingTitle: string;
   presenterName: string;
   joinUrl: string;
-  expiresAt: string;
+  scheduledFor: string;
 };
 
 const main = {
@@ -47,7 +47,7 @@ export function SalesMeetingInviteEmail({
   meetingTitle,
   presenterName,
   joinUrl,
-  expiresAt,
+  scheduledFor,
 }: SalesMeetingInviteEmailProps) {
   return (
     <Html>
@@ -67,7 +67,7 @@ export function SalesMeetingInviteEmail({
           </Link>
           <Hr />
           <Text style={{ color: "#657286", fontSize: "12px" }}>
-            This guest link expires {expiresAt}. Camera, microphone, and screen sharing stay in your browser and are not recorded by Reliance.
+            This guest link is for the scheduled meeting time: {scheduledFor}. Camera, microphone, and screen sharing stay in your browser and are not recorded by Reliance.
           </Text>
         </Container>
       </Body>

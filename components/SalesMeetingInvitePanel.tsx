@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { Copy, Mail, Presentation, Send, Video } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { CalendarClock, Copy, Mail, Presentation, Send, Video } from "lucide-react";
 import {
   createSalesMeetingInvite,
+  listMySalesVideoMeetings,
+  type SalesMeetingHostSummary,
   type SalesMeetingInviteResult,
 } from "@/app/employee/sales-meetings/actions";
 
@@ -34,6 +36,24 @@ function parseRecipients(value: string) {
     });
 }
 
+function getDefaultScheduledAt() {
+  const date = new Date(Date.now() + 60 * 60 * 1000);
+  date.setMinutes(0, 0, 0);
+  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
+  return offsetDate.toISOString().slice(0, 16);
+}
+
+function formatMeetingTime(value: string | null) {
+  if (!value) {
+    return "Ready now";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
 export function SalesMeetingInvitePanel({
   defaultTitle = "SafetyDocs360 sales presentation",
   defaultRecipients = "",
@@ -43,9 +63,27 @@ export function SalesMeetingInvitePanel({
 }: SalesMeetingInvitePanelProps) {
   const [title, setTitle] = useState(defaultTitle);
   const [recipients, setRecipients] = useState(defaultRecipients);
+  const [scheduledAt, setScheduledAt] = useState(getDefaultScheduledAt);
   const [status, setStatus] = useState("");
   const [result, setResult] = useState<SalesMeetingInviteResult | null>(null);
+  const [hostMeetings, setHostMeetings] = useState<SalesMeetingHostSummary[]>([]);
   const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    listMySalesVideoMeetings()
+      .then((meetings) => {
+        if (!cancelled) {
+          setHostMeetings(meetings);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -57,10 +95,15 @@ export function SalesMeetingInvitePanel({
       const inviteResult = await createSalesMeetingInvite({
         title,
         recipients: parseRecipients(recipients),
+        scheduledAt,
         clientId,
         demoRequestId,
       });
       setResult(inviteResult);
+      setHostMeetings((currentMeetings) => [
+        { meeting: inviteResult.meeting, hostUrl: inviteResult.hostUrl },
+        ...currentMeetings.filter((item) => item.meeting.id !== inviteResult.meeting.id),
+      ]);
       setStatus(inviteResult.emailConfigured ? "Invite emails sent. Links are ready below." : "Email is not configured, so the links are ready to send manually.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Could not create sales meeting invite.");
@@ -106,12 +149,41 @@ export function SalesMeetingInvitePanel({
             required
           />
         </div>
+        <div className="field">
+          <label htmlFor={compact ? "compact-meeting-time" : "meeting-time"}>Scheduled time</label>
+          <input
+            id={compact ? "compact-meeting-time" : "meeting-time"}
+            type="datetime-local"
+            value={scheduledAt}
+            onChange={(event) => setScheduledAt(event.target.value)}
+          />
+        </div>
         <button className="button button-primary" type="submit" disabled={sending}>
           <Send size={17} />
-          {sending ? "Sending..." : "Create and send"}
+          {sending ? "Sending..." : "Schedule and send"}
         </button>
       </form>
       {status ? <div className="sales-meeting-status">{status}</div> : null}
+      {hostMeetings.length > 0 ? (
+        <div className="sales-meeting-host-list">
+          <strong>My scheduled meetings</strong>
+          {hostMeetings.map((item) => (
+            <div className="sales-meeting-host-row" key={item.meeting.id}>
+              <div>
+                <span>{item.meeting.title}</span>
+                <small>
+                  <CalendarClock size={13} />
+                  {formatMeetingTime(item.meeting.scheduled_at)}
+                </small>
+              </div>
+              <a className="button button-light" href={item.hostUrl} target="_blank" rel="noreferrer">
+                <Presentation size={16} />
+                Join
+              </a>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {result ? (
         <div className="sales-meeting-links">
           <a className="button button-light" href={result.hostUrl} target="_blank" rel="noreferrer">
