@@ -102,8 +102,10 @@ function mergeParticipant(participants: EmployeeChatCallParticipant[], participa
   return [...nextParticipants, participant].sort((first, second) => first.created_at.localeCompare(second.created_at));
 }
 
-function formatMessageTime(value: string) {
+function formatChatTimestamp(value: string) {
   return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
@@ -1360,6 +1362,7 @@ export function EmployeePresenceChat({
               <div>
                 <strong>Incoming meeting</strong>
                 <span>{incomingCallerName} is calling this chat.</span>
+                <span>Started {formatChatTimestamp(incomingCall.created_at)}</span>
               </div>
               <div>
                 <button className="button button-primary" type="button" onClick={() => void handleJoinCall()} disabled={callConnecting}>
@@ -1396,7 +1399,7 @@ export function EmployeePresenceChat({
                 ))}
               </div>
               <div className="employee-call-controls">
-                <span>{callConnecting ? "Connecting..." : `${callParticipantCount} in call`}</span>
+                <span>{callConnecting ? "Connecting..." : `${callParticipantCount} in call - started ${formatChatTimestamp(activeCall.created_at)}`}</span>
                 <button className={muted ? "active" : undefined} type="button" onClick={toggleMute} aria-label={muted ? "Unmute microphone" : "Mute microphone"}>
                   {muted ? <MicOff size={17} /> : <Mic size={17} />}
                 </button>
@@ -1507,7 +1510,7 @@ export function EmployeePresenceChat({
                         <article className={mine ? "employee-chat-message mine" : "employee-chat-message"} key={message.id}>
                           <div>
                             <strong>{mine ? "You" : getProfileName(sender)}</strong>
-                            <span>{formatMessageTime(message.created_at)}</span>
+                            <span>{formatChatTimestamp(message.created_at)}</span>
                           </div>
                           <p>{message.body}</p>
                         </article>
