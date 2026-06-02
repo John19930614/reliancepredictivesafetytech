@@ -229,7 +229,7 @@ export function EmployeeMailCenter({
         <section className="portal-card employee-mail-setup">
           <MailPlus color="#c9932b" size={30} />
           <h3>Mailbox alias needed</h3>
-          <p>An admin must assign your `mail.reliancepredictivesafety.com` address before you can send or receive employee mail.</p>
+          <p>An admin must assign your mail.reliancepredictivesafety.com address before you can send or receive employee mail.</p>
         </section>
       ) : (
         <section className="employee-mail-app">

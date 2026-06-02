@@ -182,6 +182,7 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
   const meetingRef = useRef<SalesMeeting | null>(null);
   const participantRef = useRef<SalesMeetingParticipant | null>(null);
   const peerConnectionsRef = useRef<Record<string, RTCPeerConnection>>({});
+  const iceServersRef = useRef<RTCIceServer[]>([{ urls: "stun:stun.l.google.com:19302" }]);
   const localStreamRef = useRef<MediaStream | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -277,7 +278,7 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
       }
 
       const connection = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        iceServers: iceServersRef.current,
       });
 
       localStreamRef.current?.getTracks().forEach((track) => {
@@ -374,6 +375,19 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
     async (result: SalesMeetingJoinResult) => {
       if (!supabase) {
         throw new Error("Supabase is not configured.");
+      }
+
+      // Fetch ICE config (includes TURN if configured server-side)
+      try {
+        const iceResponse = await fetch("/api/ice-config");
+        if (iceResponse.ok) {
+          const iceData = (await iceResponse.json()) as { iceServers?: RTCIceServer[] };
+          if (Array.isArray(iceData.iceServers) && iceData.iceServers.length > 0) {
+            iceServersRef.current = iceData.iceServers;
+          }
+        }
+      } catch {
+        // Non-fatal — falls back to STUN only
       }
 
       await cleanupMeeting();
