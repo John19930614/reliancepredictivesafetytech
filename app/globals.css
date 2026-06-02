@@ -3897,6 +3897,264 @@ textarea {
   box-shadow: 0 28px 90px rgba(15, 23, 42, 0.28);
 }
 
+.employee-mail-shell {
+  display: grid;
+  gap: 20px;
+}
+
+.employee-mail-app {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.72fr) minmax(260px, 1.15fr) minmax(320px, 1.75fr);
+  min-height: 680px;
+  border: 1px solid rgba(44, 55, 74, 0.14);
+  background: #ffffff;
+  box-shadow: 0 18px 46px rgba(28, 38, 57, 0.08);
+}
+
+.employee-mail-folders,
+.employee-mail-list-panel,
+.employee-mail-detail {
+  min-width: 0;
+}
+
+.employee-mail-folders {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border-right: 1px solid rgba(44, 55, 74, 0.12);
+  background: #f7f9fb;
+}
+
+.employee-mail-address {
+  overflow-wrap: anywhere;
+  color: #667085;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  padding: 8px 2px 12px;
+}
+
+.employee-mail-folders > button:not(.button) {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #334155;
+  cursor: pointer;
+  font: inherit;
+  min-height: 38px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.employee-mail-folders > button:not(.button).active,
+.employee-mail-folders > button:not(.button):hover {
+  background: #e8edf4;
+  color: #172033;
+}
+
+.employee-mail-folders strong {
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.employee-mail-list-panel {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  border-right: 1px solid rgba(44, 55, 74, 0.12);
+}
+
+.employee-mail-search {
+  border-bottom: 1px solid rgba(44, 55, 74, 0.12);
+  margin: 0;
+  padding: 12px;
+}
+
+.employee-mail-list {
+  overflow: auto;
+}
+
+.employee-mail-row {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 104px;
+  border: 0;
+  border-bottom: 1px solid rgba(44, 55, 74, 0.1);
+  background: #ffffff;
+  color: #344054;
+  cursor: pointer;
+  font: inherit;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.employee-mail-row:hover,
+.employee-mail-row.active {
+  background: #f3f7fb;
+}
+
+.employee-mail-row.unread strong,
+.employee-mail-row.unread span {
+  color: #111827;
+  font-weight: 800;
+}
+
+.employee-mail-row span,
+.employee-mail-row strong,
+.employee-mail-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employee-mail-row strong {
+  color: #1f2937;
+  font-size: 0.96rem;
+}
+
+.employee-mail-row small {
+  color: #667085;
+}
+
+.employee-mail-row em {
+  color: #98a2b3;
+  font-size: 0.78rem;
+  font-style: normal;
+}
+
+.employee-mail-detail {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  min-height: 0;
+}
+
+.employee-mail-detail-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px 14px;
+  border-bottom: 1px solid rgba(44, 55, 74, 0.1);
+}
+
+.employee-mail-detail-head h2 {
+  color: #172033;
+  font-size: 1.32rem;
+  line-height: 1.2;
+  margin: 4px 0 8px;
+}
+
+.employee-mail-detail-head p {
+  color: #667085;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.employee-mail-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 20px;
+  border-bottom: 1px solid rgba(44, 55, 74, 0.1);
+}
+
+.employee-mail-body {
+  color: #344054;
+  line-height: 1.58;
+  overflow: auto;
+  padding: 20px 22px 32px;
+}
+
+.employee-mail-body p {
+  margin: 0 0 12px;
+  overflow-wrap: anywhere;
+}
+
+.employee-mail-compose {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 25;
+  display: grid;
+  gap: 12px;
+  width: min(620px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border: 1px solid rgba(44, 55, 74, 0.16);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(20, 27, 39, 0.22);
+  padding: 16px;
+}
+
+.employee-mail-compose-head,
+.employee-mail-compose-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.employee-mail-compose h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.employee-mail-compose textarea {
+  min-height: 220px;
+}
+
+.employee-mail-setup {
+  max-width: 720px;
+}
+
+.employee-mail-admin-row {
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.8fr) minmax(180px, 0.8fr) auto;
+}
+
+@media (max-width: 1100px) {
+  .employee-mail-app {
+    grid-template-columns: 180px minmax(260px, 1fr);
+  }
+
+  .employee-mail-detail {
+    grid-column: 1 / -1;
+    border-top: 1px solid rgba(44, 55, 74, 0.12);
+  }
+}
+
+@media (max-width: 760px) {
+  .employee-mail-app {
+    grid-template-columns: 1fr;
+  }
+
+  .employee-mail-folders {
+    border-right: 0;
+    border-bottom: 1px solid rgba(44, 55, 74, 0.12);
+  }
+
+  .employee-mail-list-panel {
+    border-right: 0;
+  }
+
+  .employee-mail-detail-head {
+    flex-direction: column;
+  }
+
+  .employee-mail-compose {
+    right: 12px;
+    bottom: 12px;
+    width: calc(100vw - 24px);
+  }
+
+  .employee-mail-admin-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .employee-chat-drawer-windowed {
   top: 24px;
   bottom: auto;

@@ -51,6 +51,7 @@ export const portalModuleCatalog = [
   { key: "request_inbox", label: "Request Inbox", group: "Commercial", pathPrefixes: ["/employee/inbox"] },
   { key: "sales_pipeline", label: "Sales Pipeline", group: "Commercial", pathPrefixes: ["/employee/sales", "/employee/sales-meetings"] },
   { key: "active_companies", label: "Active Companies", group: "Commercial", pathPrefixes: ["/employee/active-companies", "/employee/clients"] },
+  { key: "employee_mail", label: "Employee Mail", group: "Commercial", pathPrefixes: ["/employee/mail"] },
   { key: "company_tree", label: "Company Tree", group: "People", pathPrefixes: ["/employee/company-tree"] },
   { key: "hr_onboarding", label: "HR Onboarding", group: "People", pathPrefixes: ["/employee/hr-onboarding"] },
   { key: "training", label: "Training", group: "People", pathPrefixes: ["/employee/training"] },
@@ -68,7 +69,7 @@ export type PortalModule = (typeof portalModuleCatalog)[number];
 export type PortalModuleKey = PortalModule["key"];
 
 export const portalModuleKeys = portalModuleCatalog.map((module) => module.key);
-export const defaultEmployeePortalModuleKeys = ["dashboard", "hr_onboarding", "hr_documents", "time_cards"] as const satisfies readonly PortalModuleKey[];
+export const defaultEmployeePortalModuleKeys = ["dashboard", "employee_mail", "hr_onboarding", "hr_documents", "time_cards"] as const satisfies readonly PortalModuleKey[];
 
 function normalizePortalPath(pathname: string) {
   const [pathWithoutHash] = pathname.split("#", 1);

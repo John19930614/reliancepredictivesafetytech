@@ -1697,6 +1697,144 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["employee_chat_call_participants"]["Insert"]>;
         Relationships: [];
       };
+      employee_mailboxes: {
+        Row: {
+          id: string;
+          user_id: string;
+          address: string;
+          display_name: string | null;
+          status: string;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          address: string;
+          display_name?: string | null;
+          status?: string;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_mailboxes"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_mail_messages: {
+        Row: {
+          id: string;
+          mailbox_id: string;
+          provider_message_id: string | null;
+          internet_message_id: string | null;
+          thread_key: string;
+          subject: string;
+          plain_body: string;
+          html_body: string | null;
+          from_address: string;
+          from_name: string | null;
+          direction: string;
+          status: string;
+          folder: string;
+          read_at: string | null;
+          archived_at: string | null;
+          deleted_at: string | null;
+          sent_at: string | null;
+          received_at: string | null;
+          last_provider_event_at: string | null;
+          error_message: string | null;
+          attachment_metadata: Json;
+          metadata: Json;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          mailbox_id: string;
+          provider_message_id?: string | null;
+          internet_message_id?: string | null;
+          thread_key: string;
+          subject?: string;
+          plain_body?: string;
+          html_body?: string | null;
+          from_address: string;
+          from_name?: string | null;
+          direction: string;
+          status: string;
+          folder: string;
+          read_at?: string | null;
+          archived_at?: string | null;
+          deleted_at?: string | null;
+          sent_at?: string | null;
+          received_at?: string | null;
+          last_provider_event_at?: string | null;
+          error_message?: string | null;
+          attachment_metadata?: Json;
+          metadata?: Json;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_mail_messages"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_mail_recipients: {
+        Row: {
+          id: string;
+          message_id: string;
+          mailbox_id: string | null;
+          recipient_type: string;
+          address: string;
+          name: string | null;
+          delivery_status: string;
+          provider_message_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          message_id: string;
+          mailbox_id?: string | null;
+          recipient_type: string;
+          address: string;
+          name?: string | null;
+          delivery_status?: string;
+          provider_message_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_mail_recipients"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_mail_delivery_events: {
+        Row: {
+          id: string;
+          message_id: string | null;
+          recipient_id: string | null;
+          mailbox_id: string | null;
+          provider: string;
+          event_type: string;
+          provider_event_id: string | null;
+          provider_message_id: string | null;
+          payload: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          message_id?: string | null;
+          recipient_id?: string | null;
+          mailbox_id?: string | null;
+          provider?: string;
+          event_type: string;
+          provider_event_id?: string | null;
+          provider_message_id?: string | null;
+          payload?: Json;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_mail_delivery_events"]["Insert"]>;
+        Relationships: [];
+      };
       employee_profiles: {
         Row: {
           user_id: string;

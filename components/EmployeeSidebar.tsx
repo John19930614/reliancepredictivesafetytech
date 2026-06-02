@@ -21,6 +21,7 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
+  Mail,
   Network,
   Presentation,
   ReceiptText,
@@ -56,6 +57,7 @@ const navGroups = [
       { href: "/employee/inbox", label: "Request Inbox", icon: Inbox },
       { href: "/employee/sales", label: "Sales Pipeline", icon: BriefcaseBusiness },
       { href: "/employee/active-companies", label: "Active Companies", icon: Gauge },
+      { href: "/employee/mail", label: "Employee Mail", icon: Mail },
     ],
   },
   {
