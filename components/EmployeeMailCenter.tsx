@@ -202,11 +202,21 @@ export function EmployeeMailCenter({
     runAction(
       async () => {
         if (mode === "draft") {
-          await saveEmployeeMailDraft(compose);
+          const result = await saveEmployeeMailDraft(compose);
+
+          if (!result.ok) {
+            throw new Error(result.error);
+          }
+
           return;
         }
 
-        await sendEmployeeMail(compose);
+        const result = await sendEmployeeMail(compose);
+
+        if (!result.ok) {
+          throw new Error(result.error);
+        }
+
         setCompose(null);
       },
       mode === "draft" ? "Draft saved." : "Message sent.",

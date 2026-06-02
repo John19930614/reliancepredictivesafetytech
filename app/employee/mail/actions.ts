@@ -30,6 +30,16 @@ export type EmployeeMailSendInput = {
   body: string;
 };
 
+export type EmployeeMailActionResult<T> =
+  | {
+      ok: true;
+      data: T;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
 export type EmployeeMailMoveTarget = "inbox" | "archive" | "trash";
 
 async function getAuthenticatedMailbox() {
@@ -131,7 +141,7 @@ async function replaceRecipients(messageId: string, recipients: EmployeeMailReci
   }
 }
 
-export async function saveEmployeeMailDraft(input: EmployeeMailSendInput): Promise<EmployeeMailMessage> {
+async function saveEmployeeMailDraftUnsafe(input: EmployeeMailSendInput): Promise<EmployeeMailMessage> {
   const { mailbox, user } = await getAuthenticatedMailbox();
   const admin = getAdminClient();
   const recipients = parseMailRecipients(input);
@@ -189,7 +199,21 @@ export async function saveEmployeeMailDraft(input: EmployeeMailSendInput): Promi
   return result.data as EmployeeMailMessage;
 }
 
-export async function sendEmployeeMail(input: EmployeeMailSendInput): Promise<EmployeeMailMessage> {
+export async function saveEmployeeMailDraft(input: EmployeeMailSendInput): Promise<EmployeeMailActionResult<EmployeeMailMessage>> {
+  try {
+    return {
+      ok: true,
+      data: await saveEmployeeMailDraftUnsafe(input),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not save draft.",
+    };
+  }
+}
+
+async function sendEmployeeMailUnsafe(input: EmployeeMailSendInput): Promise<EmployeeMailMessage> {
   const { mailbox, user } = await getAuthenticatedMailbox();
   const admin = getAdminClient();
   const recipients = parseMailRecipients(input);
@@ -372,6 +396,20 @@ export async function sendEmployeeMail(input: EmployeeMailSendInput): Promise<Em
 
   revalidatePath("/employee/mail");
   return sentMessage;
+}
+
+export async function sendEmployeeMail(input: EmployeeMailSendInput): Promise<EmployeeMailActionResult<EmployeeMailMessage>> {
+  try {
+    return {
+      ok: true,
+      data: await sendEmployeeMailUnsafe(input),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not send message.",
+    };
+  }
 }
 
 export async function moveEmployeeMailMessage(messageId: string, target: EmployeeMailMoveTarget) {
