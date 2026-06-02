@@ -21,6 +21,25 @@ type MailAdminEmployee = {
   mailbox: EmployeeMailbox | null;
 };
 
+type UserRoleRow = {
+  user_id: string;
+  role: string;
+  account_status: string;
+};
+
+type EmployeeProfileRow = {
+  user_id: string;
+  display_name: string | null;
+  legal_name: string | null;
+  email: string | null;
+};
+
+function getDisplayName(metadata: Record<string, unknown> | null | undefined) {
+  const displayName = metadata?.display_name;
+
+  return typeof displayName === "string" && displayName.trim() ? displayName : null;
+}
+
 export default async function EmployeeMailPage({ searchParams }: EmployeeMailPageProps) {
   const params = await searchParams;
   const supabase = await createClient();
@@ -64,21 +83,36 @@ export default async function EmployeeMailPage({ searchParams }: EmployeeMailPag
       : { data: [] };
 
   const admin = canManageMailboxes ? createAdminClient() : null;
-  const [{ data: employeeProfiles }, { data: mailboxDirectory }] = admin
+  const [{ data: authData }, { data: roleRows }, { data: employeeProfiles }, { data: mailboxDirectory }] = admin
     ? await Promise.all([
+        admin.auth.admin.listUsers({ page: 1, perPage: 200 }),
+        admin.from("user_roles").select("user_id, role, account_status").eq("account_status", "active"),
         admin
           .from("employee_profiles")
           .select("user_id, display_name, legal_name, email")
           .order("display_name"),
         admin.from("employee_mailboxes").select("*").order("address"),
       ])
-    : [{ data: [] }, { data: [] }];
+    : [{ data: null }, { data: [] }, { data: [] }, { data: [] }];
 
+  const activeRolesByUserId = new Map((roleRows ?? []).map((role) => [role.user_id, role as UserRoleRow]));
+  const profilesByUserId = new Map((employeeProfiles ?? []).map((profile) => [profile.user_id, profile as EmployeeProfileRow]));
   const mailboxesByUserId = new Map(((mailboxDirectory ?? []) as EmployeeMailbox[]).map((item) => [item.user_id, item]));
-  const employees = ((employeeProfiles ?? []) as Array<Omit<MailAdminEmployee, "mailbox">>).map((employee) => ({
-    ...employee,
-    mailbox: mailboxesByUserId.get(employee.user_id) ?? null,
-  }));
+  const employees = (authData?.users ?? [])
+    .filter((authUser) => activeRolesByUserId.has(authUser.id))
+    .map((authUser) => {
+      const profile = profilesByUserId.get(authUser.id);
+      const metadataDisplayName = getDisplayName(authUser.user_metadata as Record<string, unknown> | null);
+
+      return {
+        user_id: authUser.id,
+        display_name: profile?.display_name ?? metadataDisplayName,
+        legal_name: profile?.legal_name ?? null,
+        email: profile?.email ?? authUser.email ?? null,
+        mailbox: mailboxesByUserId.get(authUser.id) ?? null,
+      } satisfies MailAdminEmployee;
+    })
+    .sort((a, b) => (a.display_name || a.legal_name || a.email || a.user_id).localeCompare(b.display_name || b.legal_name || b.email || b.user_id));
 
   return (
     <>
