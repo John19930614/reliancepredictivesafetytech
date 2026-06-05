@@ -12,10 +12,12 @@ import {
   Mail,
   Phone,
   Plus,
+  Video,
   Target,
   TrendingUp,
   UserRound,
 } from "lucide-react";
+import { SalesMeetingInvitePanel } from "@/components/SalesMeetingInvitePanel";
 import {
   defaultClientOnboardingItems,
   lifecycleStages,
@@ -63,6 +65,13 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
   const [clients, setClients] = useState(initialClients);
   const [requests, setRequests] = useState(demoRequests);
   const [message, setMessage] = useState("");
+  const [inviteDraft, setInviteDraft] = useState({
+    key: "blank",
+    title: "SafetyDocs360 sales presentation",
+    recipients: "",
+    clientId: null as string | null,
+    demoRequestId: null as string | null,
+  });
   const [draggingClientId, setDraggingClientId] = useState<string | null>(null);
   const [dropStage, setDropStage] = useState<string | null>(null);
 
@@ -219,6 +228,23 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
     return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   }
 
+  function stageMeetingInvite(values: {
+    key: string;
+    title: string;
+    recipients: string;
+    clientId?: string | null;
+    demoRequestId?: string | null;
+  }) {
+    setInviteDraft({
+      key: values.key,
+      title: values.title,
+      recipients: values.recipients,
+      clientId: values.clientId ?? null,
+      demoRequestId: values.demoRequestId ?? null,
+    });
+    setMessage("Sales meeting invite loaded. Review the recipients and send when ready.");
+  }
+
   return (
     <div className="sales-pipeline-workspace">
       <aside className="sales-intake-panel">
@@ -265,6 +291,14 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
             Add to Lead
           </button>
         </form>
+        <SalesMeetingInvitePanel
+          key={inviteDraft.key}
+          compact
+          clientId={inviteDraft.clientId}
+          demoRequestId={inviteDraft.demoRequestId}
+          defaultRecipients={inviteDraft.recipients}
+          defaultTitle={inviteDraft.title}
+        />
       </aside>
 
       <section className="sales-board-area">
@@ -303,6 +337,21 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
                   </div>
                   <button className="button button-light" onClick={() => convertDemoRequest(request)} type="button">
                     Convert to lead
+                  </button>
+                  <button
+                    className="button button-secondary"
+                    onClick={() =>
+                      stageMeetingInvite({
+                        key: `request-${request.id}`,
+                        title: `SafetyDocs360 demo for ${request.company || request.name}`,
+                        recipients: request.email,
+                        demoRequestId: request.id,
+                      })
+                    }
+                    type="button"
+                  >
+                    <Video size={16} />
+                    Invite
                   </button>
                 </article>
               ))}
@@ -395,6 +444,21 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
                       <Link className="button button-light" href={`/employee/clients/${client.id}`}>
                         Open record <ArrowRight size={16} />
                       </Link>
+                      <button
+                        className="button button-secondary"
+                        onClick={() =>
+                          stageMeetingInvite({
+                            key: `client-${client.id}`,
+                            title: `SafetyDocs360 demo for ${client.name}`,
+                            recipients: client.email ?? "",
+                            clientId: client.id,
+                          })
+                        }
+                        type="button"
+                      >
+                        <Video size={16} />
+                        Invite
+                      </button>
                     </article>
                   ))
                 ) : (

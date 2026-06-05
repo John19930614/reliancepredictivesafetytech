@@ -705,6 +705,64 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["employee_time_card_payroll"]["Insert"]>;
         Relationships: [];
       };
+      employee_payroll_runs: {
+        Row: {
+          id: string;
+          period_start: string;
+          period_end: string;
+          status: string;
+          notes: string | null;
+          created_by: string | null;
+          paid_at: string | null;
+          paid_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          period_start: string;
+          period_end: string;
+          status?: string;
+          notes?: string | null;
+          created_by?: string | null;
+          paid_at?: string | null;
+          paid_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_payroll_runs"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_payroll_run_items: {
+        Row: {
+          id: string;
+          payroll_run_id: string;
+          time_card_id: string;
+          employee_user_id: string | null;
+          total_hours: number;
+          hourly_rate: number;
+          gross_pay: number;
+          item_status: string;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          payroll_run_id: string;
+          time_card_id: string;
+          employee_user_id?: string | null;
+          total_hours?: number;
+          hourly_rate?: number;
+          gross_pay?: number;
+          item_status?: string;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_payroll_run_items"]["Insert"]>;
+        Relationships: [];
+      };
       company_finance_authorized_users: {
         Row: {
           user_id: string;
@@ -1041,6 +1099,148 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["company_sales_activities"]["Insert"]>;
         Relationships: [];
       };
+      sales_video_meetings: {
+        Row: {
+          id: string;
+          title: string;
+          created_by: string | null;
+          client_id: string | null;
+          demo_request_id: string | null;
+          status: string;
+          scheduled_at: string | null;
+          started_at: string | null;
+          ended_at: string | null;
+          expires_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          title: string;
+          created_by?: string | null;
+          client_id?: string | null;
+          demo_request_id?: string | null;
+          status?: string;
+          scheduled_at?: string | null;
+          started_at?: string | null;
+          ended_at?: string | null;
+          expires_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["sales_video_meetings"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "sales_video_meetings_client_id_fkey";
+            columns: ["client_id"];
+            isOneToOne: false;
+            referencedRelation: "company_clients";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "sales_video_meetings_demo_request_id_fkey";
+            columns: ["demo_request_id"];
+            isOneToOne: false;
+            referencedRelation: "demo_requests";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      sales_video_meeting_invites: {
+        Row: {
+          id: string;
+          meeting_id: string;
+          recipient_email: string;
+          recipient_name: string | null;
+          token_hash: string;
+          status: string;
+          sent_at: string | null;
+          accepted_at: string | null;
+          revoked_at: string | null;
+          expires_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          meeting_id: string;
+          recipient_email: string;
+          recipient_name?: string | null;
+          token_hash: string;
+          status?: string;
+          sent_at?: string | null;
+          accepted_at?: string | null;
+          revoked_at?: string | null;
+          expires_at: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["sales_video_meeting_invites"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "sales_video_meeting_invites_meeting_id_fkey";
+            columns: ["meeting_id"];
+            isOneToOne: false;
+            referencedRelation: "sales_video_meetings";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      sales_video_meeting_participants: {
+        Row: {
+          id: string;
+          meeting_id: string;
+          invite_id: string | null;
+          user_id: string | null;
+          guest_user_id: string | null;
+          participant_type: string;
+          display_name: string;
+          email: string | null;
+          status: string;
+          audio_enabled: boolean;
+          video_enabled: boolean;
+          screen_sharing: boolean;
+          joined_at: string | null;
+          left_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          meeting_id: string;
+          invite_id?: string | null;
+          user_id?: string | null;
+          guest_user_id?: string | null;
+          participant_type: string;
+          display_name: string;
+          email?: string | null;
+          status?: string;
+          audio_enabled?: boolean;
+          video_enabled?: boolean;
+          screen_sharing?: boolean;
+          joined_at?: string | null;
+          left_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["sales_video_meeting_participants"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "sales_video_meeting_participants_invite_id_fkey";
+            columns: ["invite_id"];
+            isOneToOne: false;
+            referencedRelation: "sales_video_meeting_invites";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "sales_video_meeting_participants_meeting_id_fkey";
+            columns: ["meeting_id"];
+            isOneToOne: false;
+            referencedRelation: "sales_video_meetings";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       company_document_requirements: {
         Row: {
           id: string;
@@ -1325,9 +1525,6 @@ export type Database = {
           department: string;
           parent_position_id: string | null;
           status: string;
-          employee_name: string | null;
-          employee_email: string | null;
-          employee_phone: string | null;
           portal_user_id: string | null;
           job_description: string | null;
           salary_min: number | null;
@@ -1347,9 +1544,6 @@ export type Database = {
           department?: string;
           parent_position_id?: string | null;
           status?: string;
-          employee_name?: string | null;
-          employee_email?: string | null;
-          employee_phone?: string | null;
           portal_user_id?: string | null;
           job_description?: string | null;
           salary_min?: number | null;
@@ -1449,6 +1643,198 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["employee_chat_messages"]["Insert"]>;
         Relationships: [];
       };
+      employee_chat_calls: {
+        Row: {
+          id: string;
+          thread_id: string;
+          created_by: string | null;
+          status: string;
+          started_at: string | null;
+          ended_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          thread_id: string;
+          created_by?: string | null;
+          status?: string;
+          started_at?: string | null;
+          ended_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_chat_calls"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_chat_call_participants: {
+        Row: {
+          id: string;
+          call_id: string;
+          user_id: string;
+          status: string;
+          audio_enabled: boolean;
+          video_enabled: boolean;
+          screen_sharing: boolean;
+          joined_at: string | null;
+          left_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          call_id: string;
+          user_id: string;
+          status?: string;
+          audio_enabled?: boolean;
+          video_enabled?: boolean;
+          screen_sharing?: boolean;
+          joined_at?: string | null;
+          left_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_chat_call_participants"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_mailboxes: {
+        Row: {
+          id: string;
+          user_id: string;
+          address: string;
+          display_name: string | null;
+          status: string;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          address: string;
+          display_name?: string | null;
+          status?: string;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_mailboxes"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_mail_messages: {
+        Row: {
+          id: string;
+          mailbox_id: string;
+          provider_message_id: string | null;
+          internet_message_id: string | null;
+          thread_key: string;
+          subject: string;
+          plain_body: string;
+          html_body: string | null;
+          from_address: string;
+          from_name: string | null;
+          direction: string;
+          status: string;
+          folder: string;
+          read_at: string | null;
+          archived_at: string | null;
+          deleted_at: string | null;
+          sent_at: string | null;
+          received_at: string | null;
+          last_provider_event_at: string | null;
+          error_message: string | null;
+          attachment_metadata: Json;
+          metadata: Json;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          mailbox_id: string;
+          provider_message_id?: string | null;
+          internet_message_id?: string | null;
+          thread_key: string;
+          subject?: string;
+          plain_body?: string;
+          html_body?: string | null;
+          from_address: string;
+          from_name?: string | null;
+          direction: string;
+          status: string;
+          folder: string;
+          read_at?: string | null;
+          archived_at?: string | null;
+          deleted_at?: string | null;
+          sent_at?: string | null;
+          received_at?: string | null;
+          last_provider_event_at?: string | null;
+          error_message?: string | null;
+          attachment_metadata?: Json;
+          metadata?: Json;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_mail_messages"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_mail_recipients: {
+        Row: {
+          id: string;
+          message_id: string;
+          mailbox_id: string | null;
+          recipient_type: string;
+          address: string;
+          name: string | null;
+          delivery_status: string;
+          provider_message_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          message_id: string;
+          mailbox_id?: string | null;
+          recipient_type: string;
+          address: string;
+          name?: string | null;
+          delivery_status?: string;
+          provider_message_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_mail_recipients"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_mail_delivery_events: {
+        Row: {
+          id: string;
+          message_id: string | null;
+          recipient_id: string | null;
+          mailbox_id: string | null;
+          provider: string;
+          event_type: string;
+          provider_event_id: string | null;
+          provider_message_id: string | null;
+          payload: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          message_id?: string | null;
+          recipient_id?: string | null;
+          mailbox_id?: string | null;
+          provider?: string;
+          event_type: string;
+          provider_event_id?: string | null;
+          provider_message_id?: string | null;
+          payload?: Json;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_mail_delivery_events"]["Insert"]>;
+        Relationships: [];
+      };
       employee_profiles: {
         Row: {
           user_id: string;
@@ -1486,6 +1872,82 @@ export type Database = {
         };
         Update: Partial<Database["public"]["Tables"]["employee_profiles"]["Insert"]>;
         Relationships: [];
+      };
+      employee_expense_reports: {
+        Row: {
+          id: string;
+          employee_user_id: string;
+          title: string;
+          category: string;
+          amount: number;
+          expense_date: string;
+          merchant: string | null;
+          payment_method: string | null;
+          business_purpose: string;
+          notes: string | null;
+          status: string;
+          finance_notes: string | null;
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+          reimbursed_by: string | null;
+          reimbursed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          employee_user_id: string;
+          title: string;
+          category: string;
+          amount: number;
+          expense_date?: string;
+          merchant?: string | null;
+          payment_method?: string | null;
+          business_purpose: string;
+          notes?: string | null;
+          status?: string;
+          finance_notes?: string | null;
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+          reimbursed_by?: string | null;
+          reimbursed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_expense_reports"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_expense_receipts: {
+        Row: {
+          id: string;
+          expense_report_id: string;
+          file_path: string;
+          file_name: string;
+          file_type: string | null;
+          file_size: number | null;
+          uploaded_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          expense_report_id: string;
+          file_path: string;
+          file_name: string;
+          file_type?: string | null;
+          file_size?: number | null;
+          uploaded_by?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_expense_receipts"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "employee_expense_receipts_expense_report_id_fkey";
+            columns: ["expense_report_id"];
+            isOneToOne: false;
+            referencedRelation: "employee_expense_reports";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       hr_compliance_requirements: {
         Row: {
@@ -2037,8 +2499,49 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["user_roles"]["Insert"]>;
         Relationships: [];
       };
+      portal_user_module_access: {
+        Row: {
+          user_id: string;
+          module_key: string;
+          granted_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          module_key: string;
+          granted_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["portal_user_module_access"]["Insert"]>;
+        Relationships: [];
+      };
     };
-    Views: Record<string, never>;
+    Views: {
+      company_position_employee_directory: {
+        Row: {
+          position_id: string;
+          user_id: string;
+          display_name: string | null;
+          legal_name: string | null;
+          email: string | null;
+          phone: string | null;
+          profile_status: string | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "company_positions_portal_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+    };
     Functions: {
       is_company_portal_admin: {
         Args: Record<PropertyKey, never>;
@@ -2053,6 +2556,10 @@ export type Database = {
         Returns: boolean;
       };
       is_company_portal_owner: {
+        Args: Record<PropertyKey, never>;
+        Returns: boolean;
+      };
+      is_company_portal_super_admin: {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
       };

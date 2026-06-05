@@ -16,6 +16,7 @@ import {
   Inbox,
   ListChecks,
   Network,
+  ReceiptText,
   Scale,
   ShieldCheck,
   UploadCloud,
@@ -34,7 +35,7 @@ import {
 } from "@/lib/company-data";
 import { getCommandSnapshot, type CommandPriorityItem } from "@/lib/ai/command-context";
 import { createClient } from "@/lib/supabase/server";
-import { canAccessEmployeePath, isPortalOwnerRole } from "@/lib/user-management";
+import { canAccessEmployeePath, hasFullPortalVisibility, isPortalOwnerRole } from "@/lib/user-management";
 
 const moduleGroups = [
   {
@@ -44,7 +45,9 @@ const moduleGroups = [
       { title: "AI Command Center", href: "/employee/ai", icon: Bot },
       { title: "Work Management", href: "/employee/work", icon: ListChecks },
       { title: "Parking Lots", href: "/employee/parking-lots", icon: CarFront },
+      { title: "Employee Expenses", href: "/employee/expenses", icon: ReceiptText },
       { title: "Finance Center", href: "/employee/finance", icon: DollarSign },
+      { title: "Payroll Tracker", href: "/employee/payroll", icon: ReceiptText },
       { title: "Operations Database", href: "/employee/operations", icon: Database },
       { title: "Startup Checklist", href: "/employee/checklist", icon: ListChecks },
       { title: "Launch Gate", href: "/employee/launch-gate", icon: BookOpenCheck },
@@ -157,16 +160,29 @@ export default async function EmployeeDashboardPage() {
           .eq("user_id", user.id)
           .maybeSingle()
       : { data: null };
-  const { data: financeAuthorization } =
+  const [{ data: financeAuthorization }, { data: moduleAccess }] =
     supabase && user
-      ? await supabase.from("company_finance_authorized_users").select("user_id").eq("user_id", user.id).maybeSingle()
-      : { data: null };
+      ? await Promise.all([
+          supabase.from("company_finance_authorized_users").select("user_id").eq("user_id", user.id).maybeSingle(),
+          hasFullPortalVisibility(currentRole?.role, currentRole?.account_status)
+            ? Promise.resolve({ data: [] })
+            : supabase.from("portal_user_module_access").select("module_key").eq("user_id", user.id),
+        ])
+      : [{ data: null }, { data: [] }];
+  const moduleKeys = (moduleAccess ?? []).map((access) => access.module_key);
+  const canViewFinanceModule = canAccessEmployeePath(currentRole?.role, currentRole?.account_status, "/employee/finance", moduleKeys);
   const canAccessFinance = Boolean(
-    currentRole?.account_status === "active" && (isPortalOwnerRole(currentRole.role) || financeAuthorization),
+    currentRole?.account_status === "active" && canViewFinanceModule && (isPortalOwnerRole(currentRole.role) || financeAuthorization),
   );
-  const canManageFinanceRecords = Boolean(financeAuthorization);
+  const canAccessPayroll = Boolean(currentRole?.account_status === "active" && isPortalOwnerRole(currentRole.role));
+  const canManageFinanceRecords = Boolean(financeAuthorization && canViewFinanceModule);
   const canOpenPath = (href: string) =>
-    !supabase || (href === "/employee/finance" ? canAccessFinance : canAccessEmployeePath(currentRole?.role, currentRole?.account_status, href));
+    !supabase ||
+    (href === "/employee/finance"
+      ? canAccessFinance && canAccessEmployeePath(currentRole?.role, currentRole?.account_status, href, moduleKeys)
+      : href === "/employee/payroll"
+        ? canAccessPayroll && canAccessEmployeePath(currentRole?.role, currentRole?.account_status, href, moduleKeys)
+      : canAccessEmployeePath(currentRole?.role, currentRole?.account_status, href, moduleKeys));
   const [
     { count: checklistCount },
     { count: blockedChecklistCount },

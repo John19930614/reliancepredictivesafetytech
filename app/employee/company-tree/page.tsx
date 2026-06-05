@@ -1,24 +1,38 @@
 import { AlertCircle, Network } from "lucide-react";
-import { CompanyTreeManager, type CurrentEmployeeOption } from "@/components/CompanyTreeManager";
+import { CompanyTreeManager, type CompanyTreePosition, type CurrentEmployeeOption } from "@/components/CompanyTreeManager";
 import { companyPositionSeed, type CompanyPosition } from "@/lib/company-data";
 import { createClient } from "@/lib/supabase/server";
 import { isPortalAdminRole, isPortalOwnerRole } from "@/lib/user-management";
 
 const ownerPositionSelect = "*";
 const standardPositionSelect =
-  "id,title,department,parent_position_id,status,employee_name,employee_email,employee_phone,portal_user_id,job_description,employment_type,location,hiring_priority,sort_order,notes,created_at,updated_at";
+  "id, title, department, parent_position_id, status, portal_user_id, job_description, employment_type, location, hiring_priority, sort_order, notes, created_at, updated_at";
 
-function normalizePosition(position: Partial<CompanyPosition>): CompanyPosition {
+type CompanyPositionEmployeeDirectoryRow = {
+  position_id: string;
+  user_id: string;
+  display_name: string | null;
+  legal_name: string | null;
+  email: string | null;
+  phone: string | null;
+  profile_status: string | null;
+};
+
+function getDirectoryEmployeeName(employee: CompanyPositionEmployeeDirectoryRow | undefined) {
+  return employee?.display_name || employee?.legal_name || employee?.email || null;
+}
+
+function normalizePosition(position: Partial<CompanyPosition>, employee?: CompanyPositionEmployeeDirectoryRow): CompanyTreePosition {
   return {
     id: String(position.id),
     title: String(position.title),
     department: String(position.department),
     parent_position_id: position.parent_position_id ?? null,
     status: String(position.status),
-    employee_name: position.employee_name ?? null,
-    employee_email: position.employee_email ?? null,
-    employee_phone: position.employee_phone ?? null,
     portal_user_id: position.portal_user_id ?? null,
+    assigned_employee_name: getDirectoryEmployeeName(employee),
+    assigned_employee_email: employee?.email ?? null,
+    assigned_employee_phone: employee?.phone ?? null,
     job_description: position.job_description ?? null,
     salary_min: position.salary_min ?? null,
     salary_max: position.salary_max ?? null,
@@ -71,6 +85,12 @@ export default async function CompanyTreePage() {
           .order("sort_order")
           .order("title")
       : { data: null, error: null };
+  const { data: positionEmployeeDirectory, error: positionEmployeeDirectoryError } =
+    supabase && user
+      ? await supabase
+          .from("company_position_employee_directory")
+          .select("position_id,user_id,display_name,legal_name,email,phone,profile_status")
+      : { data: [], error: null };
   const { data: employeeProfiles } =
     supabase && user && canManagePositions
       ? await supabase
@@ -79,18 +99,41 @@ export default async function CompanyTreePage() {
           .eq("profile_status", "active")
           .order("display_name")
       : { data: [] };
+  const positionEmployeeDirectoryByPositionId = new Map(
+    (positionEmployeeDirectory ?? []).map((employee) => [
+      String(employee.position_id),
+      {
+        position_id: String(employee.position_id),
+        user_id: String(employee.user_id),
+        display_name: employee.display_name ?? null,
+        legal_name: employee.legal_name ?? null,
+        email: employee.email ?? null,
+        phone: employee.phone ?? null,
+        profile_status: employee.profile_status ?? null,
+      } satisfies CompanyPositionEmployeeDirectoryRow,
+    ]),
+  );
+  const positionRows = positions as Partial<CompanyPosition>[] | null;
   const initialPositions =
-    positions && positions.length > 0
-      ? positions.map((position) => normalizePosition(position as Partial<CompanyPosition>))
+    positionRows && positionRows.length > 0
+      ? positionRows.map((position) =>
+          normalizePosition(
+            position,
+            positionEmployeeDirectoryByPositionId.get(String(position.id)),
+          ),
+        )
       : companyPositionSeed.map((position) => ({
           ...position,
+          assigned_employee_name: null,
+          assigned_employee_email: null,
+          assigned_employee_phone: null,
           salary_min: canViewCompensation ? position.salary_min : null,
           salary_max: canViewCompensation ? position.salary_max : null,
           salary_period: canViewCompensation ? position.salary_period : null,
         }));
   const incompleteCount = initialPositions.filter((position) => {
     if (position.status === "Filled") {
-      return !position.employee_email || !position.employee_phone;
+      return !position.portal_user_id || !position.assigned_employee_email || !position.assigned_employee_phone;
     }
 
     if (position.status === "Open") {
@@ -143,6 +186,10 @@ export default async function CompanyTreePage() {
       ) : positionsError ? (
         <div className="success-box portal-alert portal-alert-error">
           <AlertCircle size={16} /> {positionsError.message}. Showing the starter company tree until the company positions migration is applied.
+        </div>
+      ) : positionEmployeeDirectoryError ? (
+        <div className="success-box portal-alert portal-alert-error">
+          <AlertCircle size={16} /> {positionEmployeeDirectoryError.message}. Employee assignment details are unavailable until the directory view is applied.
         </div>
       ) : null}
 

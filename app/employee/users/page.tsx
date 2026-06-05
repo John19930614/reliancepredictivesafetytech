@@ -342,46 +342,50 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
               {typedCandidateIntakes.length === 0 ? (
                 <div className="empty-state">No candidate intakes yet.</div>
               ) : (
-                typedCandidateIntakes.map((candidate) => (
-                  <article className="user-row" id={`candidate-${candidate.id}`} key={candidate.id}>
-                    <div>
-                      <h3>{candidate.candidate_name}</h3>
-                      <p>{candidate.email}</p>
-                      <div className="user-meta">
-                        <span className="badge">{candidate.status.replace("_", " ")}</span>
-                        <span className="badge">{candidate.human_decision.replace("_", " ")}</span>
-                        <span>{candidate.target_role}</span>
-                        <span>{candidate.jurisdiction_state || "State not set"}</span>
-                        <span>{candidate.source || "No source"}</span>
-                      </div>
-                      {candidate.notes ? <p className="muted-copy">{candidate.notes}</p> : null}
-                    </div>
-                    <div className="user-row-actions">
-                      <form action={approveCandidateForInvite} className="user-row-form">
-                        <input name="candidate_id" type="hidden" value={candidate.id} />
-                        <div className="field">
-                          <label htmlFor={`decision-notes-${candidate.id}`}>Decision notes</label>
-                          <input id={`decision-notes-${candidate.id}`} name="human_decision_notes" placeholder="Human approval notes" />
+                typedCandidateIntakes.map((candidate) => {
+                  const isApproved = candidate.status === "approved_for_invite" && candidate.human_decision === "approved_to_invite";
+                  const isInvited = candidate.status === "invited";
+                  const isClosed = isInvited || candidate.status === "rejected" || candidate.status === "archived";
+                  const approveLabel = isInvited ? "Invited" : isApproved ? "Approved" : "Approve";
+                  const inviteLabel = isInvited ? "Invited" : "Invite";
+
+                  return (
+                    <article className="user-row" id={`candidate-${candidate.id}`} key={candidate.id}>
+                      <div>
+                        <h3>{candidate.candidate_name}</h3>
+                        <p>{candidate.email}</p>
+                        <div className="user-meta">
+                          <span className="badge">{candidate.status.replace("_", " ")}</span>
+                          <span className="badge">{candidate.human_decision.replace("_", " ")}</span>
+                          <span>{candidate.target_role}</span>
+                          <span>{candidate.jurisdiction_state || "State not set"}</span>
+                          <span>{candidate.source || "No source"}</span>
                         </div>
-                        <button className="button button-light" disabled={candidate.status === "invited"} type="submit">
-                          <CheckCircle2 size={16} />
-                          Approve
-                        </button>
-                      </form>
-                      <form action={convertCandidateToInvite}>
-                        <input name="candidate_id" type="hidden" value={candidate.id} />
-                        <button
-                          className="button button-primary"
-                          disabled={candidate.status !== "approved_for_invite" || candidate.human_decision !== "approved_to_invite"}
-                          type="submit"
-                        >
-                          <Send size={16} />
-                          Invite
-                        </button>
-                      </form>
-                    </div>
-                  </article>
-                ))
+                        {candidate.notes ? <p className="muted-copy">{candidate.notes}</p> : null}
+                      </div>
+                      <div className="user-row-actions">
+                        <form action={approveCandidateForInvite} className="user-row-form">
+                          <input name="candidate_id" type="hidden" value={candidate.id} />
+                          <div className="field">
+                            <label htmlFor={`decision-notes-${candidate.id}`}>Decision notes</label>
+                            <input id={`decision-notes-${candidate.id}`} name="human_decision_notes" placeholder="Human approval notes" />
+                          </div>
+                          <button className="button button-light" disabled={isClosed || isApproved} type="submit">
+                            <CheckCircle2 size={16} />
+                            {approveLabel}
+                          </button>
+                        </form>
+                        <form action={convertCandidateToInvite}>
+                          <input name="candidate_id" type="hidden" value={candidate.id} />
+                          <button className="button button-primary" disabled={!isApproved || isInvited} type="submit">
+                            <Send size={16} />
+                            {inviteLabel}
+                          </button>
+                        </form>
+                      </div>
+                    </article>
+                  );
+                })
               )}
             </div>
           </section>
