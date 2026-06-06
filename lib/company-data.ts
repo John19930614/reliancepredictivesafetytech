@@ -712,8 +712,39 @@ export type TrainingModule = {
   status: string;
   owner: string | null;
   estimated_duration_minutes: number | null;
+  external_lms_course_id: string | null;
   created_by: string | null;
   updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TrainingCompletion = {
+  id: string;
+  module_id: string | null;
+  client_id: string | null;
+  external_lms_user_id: string;
+  external_lms_course_id: string;
+  learner_name: string;
+  learner_email: string | null;
+  score: number | null;
+  passed: boolean | null;
+  completed_at: string;
+  time_spent_seconds: number | null;
+  created_at: string;
+};
+
+export type TrainingCertification = {
+  id: string;
+  completion_id: string | null;
+  client_id: string | null;
+  learner_name: string;
+  learner_email: string | null;
+  certification_name: string;
+  issued_at: string;
+  expires_at: string | null;
+  cert_document_url: string | null;
+  status: string;
   created_at: string;
   updated_at: string;
 };
@@ -754,6 +785,47 @@ export type ClientTrainingEventModule = {
   module_id: string;
   sort_order: number;
   presenter_notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export const performanceReviewTypes = ["Annual", "Semi-Annual", "Quarterly", "90-Day"] as const;
+export const performanceReviewCycleStatuses = ["Draft", "Open", "Closed"] as const;
+export const performanceReviewStatuses = ["not_started", "in_progress", "submitted"] as const;
+
+export type PerformanceReviewCycle = {
+  id: string;
+  title: string;
+  review_type: string;
+  period_label: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  self_assessment_due: string | null;
+  manager_review_due: string | null;
+  status: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PerformanceReview = {
+  id: string;
+  cycle_id: string;
+  employee_user_id: string;
+  reviewer_user_id: string | null;
+  self_assessment_status: string;
+  manager_review_status: string;
+  overall_self_rating: number | null;
+  overall_manager_rating: number | null;
+  self_highlights: string | null;
+  self_improvements: string | null;
+  self_goals: string | null;
+  manager_highlights: string | null;
+  manager_improvements: string | null;
+  manager_goals: string | null;
+  manager_notes: string | null;
+  self_submitted_at: string | null;
+  manager_submitted_at: string | null;
   created_at: string;
   updated_at: string;
 };

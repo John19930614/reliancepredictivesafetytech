@@ -6,6 +6,7 @@ import { getResendClient, NOTIFICATION_FROM } from "@/lib/email/resend";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateWorkflowNotificationsForUser } from "@/lib/notifications/rules";
 import { runWebsiteOperationsScan } from "@/lib/website-operations";
+import { fireExpiringCertNotifications } from "@/lib/notifications/training-certs";
 
 type DigestResult = {
   userId: string;
@@ -48,6 +49,8 @@ export async function runDailyAiDigest() {
     baseUrl: appUrl,
     notifyAdmins: true,
   });
+
+  await fireExpiringCertNotifications(admin);
 
   const { data: roles, error: roleError } = await admin
     .from("user_roles")

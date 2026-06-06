@@ -3,6 +3,8 @@ import type {
   ClientTrainingEvent,
   ClientTrainingEventModule,
   CompanyClient,
+  TrainingCertification,
+  TrainingCompletion,
   TrainingModule,
   TrainingModuleFile,
 } from "@/lib/company-data";
@@ -17,6 +19,8 @@ export default async function TrainingPage() {
     { data: files },
     { data: events },
     { data: eventModules },
+    { data: completions },
+    { data: certifications },
   ] = supabase
     ? await Promise.all([
         supabase.from("company_clients").select("*").neq("status", "Archived").order("name"),
@@ -24,8 +28,18 @@ export default async function TrainingPage() {
         supabase.from("training_module_files").select("*").order("sort_order").order("created_at", { ascending: false }),
         supabase.from("client_training_events").select("*").order("scheduled_start_at", { ascending: true }),
         supabase.from("client_training_event_modules").select("*").order("sort_order"),
+        supabase.from("training_completions").select("*").order("completed_at", { ascending: false }),
+        supabase.from("training_certifications").select("*").order("expires_at", { ascending: true }),
       ])
-    : [{ data: null }, { data: null }, { data: null }, { data: null }, { data: null }];
+    : [
+        { data: null },
+        { data: null },
+        { data: null },
+        { data: null },
+        { data: null },
+        { data: null },
+        { data: null },
+      ];
 
   return (
     <>
@@ -39,6 +53,8 @@ export default async function TrainingPage() {
 
       <TrainingManager
         clients={(clients ?? []) as CompanyClient[]}
+        initialCertifications={(certifications ?? []) as TrainingCertification[]}
+        initialCompletions={(completions ?? []) as TrainingCompletion[]}
         initialEventModules={(eventModules ?? []) as ClientTrainingEventModule[]}
         initialEvents={(events ?? []) as ClientTrainingEvent[]}
         initialFiles={(files ?? []) as TrainingModuleFile[]}

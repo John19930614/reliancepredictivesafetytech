@@ -1275,6 +1275,7 @@ export type Database = {
           status: string;
           owner: string | null;
           estimated_duration_minutes: number | null;
+          external_lms_course_id: string | null;
           created_by: string | null;
           updated_by: string | null;
           created_at: string;
@@ -1289,6 +1290,7 @@ export type Database = {
           status?: string;
           owner?: string | null;
           estimated_duration_minutes?: number | null;
+          external_lms_course_id?: string | null;
           created_by?: string | null;
           updated_by?: string | null;
           created_at?: string;
@@ -1296,6 +1298,188 @@ export type Database = {
         };
         Update: Partial<Database["public"]["Tables"]["training_modules"]["Insert"]>;
         Relationships: [];
+      };
+      performance_review_cycles: {
+        Row: {
+          id: string;
+          title: string;
+          review_type: string;
+          period_label: string | null;
+          period_start: string | null;
+          period_end: string | null;
+          self_assessment_due: string | null;
+          manager_review_due: string | null;
+          status: string;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          title: string;
+          review_type?: string;
+          period_label?: string | null;
+          period_start?: string | null;
+          period_end?: string | null;
+          self_assessment_due?: string | null;
+          manager_review_due?: string | null;
+          status?: string;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["performance_review_cycles"]["Insert"]>;
+        Relationships: [];
+      };
+      performance_reviews: {
+        Row: {
+          id: string;
+          cycle_id: string;
+          employee_user_id: string;
+          reviewer_user_id: string | null;
+          self_assessment_status: string;
+          manager_review_status: string;
+          overall_self_rating: number | null;
+          overall_manager_rating: number | null;
+          self_highlights: string | null;
+          self_improvements: string | null;
+          self_goals: string | null;
+          manager_highlights: string | null;
+          manager_improvements: string | null;
+          manager_goals: string | null;
+          manager_notes: string | null;
+          self_submitted_at: string | null;
+          manager_submitted_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          cycle_id: string;
+          employee_user_id: string;
+          reviewer_user_id?: string | null;
+          self_assessment_status?: string;
+          manager_review_status?: string;
+          overall_self_rating?: number | null;
+          overall_manager_rating?: number | null;
+          self_highlights?: string | null;
+          self_improvements?: string | null;
+          self_goals?: string | null;
+          manager_highlights?: string | null;
+          manager_improvements?: string | null;
+          manager_goals?: string | null;
+          manager_notes?: string | null;
+          self_submitted_at?: string | null;
+          manager_submitted_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["performance_reviews"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "performance_reviews_cycle_id_fkey";
+            columns: ["cycle_id"];
+            isOneToOne: false;
+            referencedRelation: "performance_review_cycles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      training_completions: {
+        Row: {
+          id: string;
+          module_id: string | null;
+          client_id: string | null;
+          external_lms_user_id: string;
+          external_lms_course_id: string;
+          learner_name: string;
+          learner_email: string | null;
+          score: number | null;
+          passed: boolean | null;
+          completed_at: string;
+          time_spent_seconds: number | null;
+          raw_payload: Record<string, unknown> | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          module_id?: string | null;
+          client_id?: string | null;
+          external_lms_user_id: string;
+          external_lms_course_id: string;
+          learner_name: string;
+          learner_email?: string | null;
+          score?: number | null;
+          passed?: boolean | null;
+          completed_at: string;
+          time_spent_seconds?: number | null;
+          raw_payload?: Record<string, unknown> | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["training_completions"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "training_completions_module_id_fkey";
+            columns: ["module_id"];
+            isOneToOne: false;
+            referencedRelation: "training_modules";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "training_completions_client_id_fkey";
+            columns: ["client_id"];
+            isOneToOne: false;
+            referencedRelation: "company_clients";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      training_certifications: {
+        Row: {
+          id: string;
+          completion_id: string | null;
+          client_id: string | null;
+          learner_name: string;
+          learner_email: string | null;
+          certification_name: string;
+          issued_at: string;
+          expires_at: string | null;
+          cert_document_url: string | null;
+          status: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          completion_id?: string | null;
+          client_id?: string | null;
+          learner_name: string;
+          learner_email?: string | null;
+          certification_name: string;
+          issued_at: string;
+          expires_at?: string | null;
+          cert_document_url?: string | null;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["training_certifications"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "training_certifications_completion_id_fkey";
+            columns: ["completion_id"];
+            isOneToOne: false;
+            referencedRelation: "training_completions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "training_certifications_client_id_fkey";
+            columns: ["client_id"];
+            isOneToOne: false;
+            referencedRelation: "company_clients";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       training_module_files: {
         Row: {
