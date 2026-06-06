@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CalendarPlus, Download, FileUp, PlayCircle, Plus, Save, UploadCloud } from "lucide-react";
+import { Award, CalendarPlus, Download, ExternalLink, FileUp, PlayCircle, Plus, Save, UploadCloud } from "lucide-react";
 import {
   clientTrainingDeliveryModes,
   clientTrainingEventStatuses,
@@ -10,6 +10,8 @@ import {
   type ClientTrainingEvent,
   type ClientTrainingEventModule,
   type CompanyClient,
+  type TrainingCertification,
+  type TrainingCompletion,
   type TrainingModule,
   type TrainingModuleFile,
 } from "@/lib/company-data";
@@ -21,7 +23,11 @@ type TrainingManagerProps = {
   initialFiles: TrainingModuleFile[];
   initialEvents: ClientTrainingEvent[];
   initialEventModules: ClientTrainingEventModule[];
+  initialCompletions: TrainingCompletion[];
+  initialCertifications: TrainingCertification[];
 };
+
+type TrainingTab = "modules" | "completions" | "certifications";
 
 const trainingFileAccept = [
   ".pdf",
@@ -86,17 +92,22 @@ export function TrainingManager({
   initialFiles,
   initialEvents,
   initialEventModules,
+  initialCompletions,
+  initialCertifications,
 }: TrainingManagerProps) {
   const [modules, setModules] = useState(initialModules);
   const [files, setFiles] = useState(initialFiles);
   const [events, setEvents] = useState(initialEvents);
   const [eventModules, setEventModules] = useState(initialEventModules);
+  const [completions] = useState(initialCompletions);
+  const [certifications] = useState(initialCertifications);
   const [message, setMessage] = useState("");
   const [pendingModuleId, setPendingModuleId] = useState<string | null>(null);
   const [pendingEventId, setPendingEventId] = useState<string | null>(null);
   const [selectedStatus, setSelectedStatus] = useState("All");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [selectedEventId, setSelectedEventId] = useState(initialEvents[0]?.id ?? "");
+  const [activeTab, setActiveTab] = useState<TrainingTab>("modules");
 
   const clientsById = useMemo(() => new Map(clients.map((client) => [client.id, client])), [clients]);
   const modulesById = useMemo(() => new Map(modules.map((module) => [module.id, module])), [modules]);
@@ -214,6 +225,7 @@ export function TrainingManager({
       status: cleanText(formData.get("status")) || module.status,
       owner: cleanOptionalText(formData.get("owner")),
       estimated_duration_minutes: cleanNumber(formData.get("estimated_duration_minutes")),
+      external_lms_course_id: cleanOptionalText(formData.get("external_lms_course_id")),
       updated_by: session.user.id,
     };
 
@@ -414,9 +426,165 @@ export function TrainingManager({
     setMessage("Module added to the training event.");
   }
 
+  function certStatusClass(status: string) {
+    if (status === "Expired") return "badge badge-red";
+    if (status === "Expiring") return "badge badge-yellow";
+    return "badge badge-green";
+  }
+
   return (
     <div className="training-workspace">
       {message ? <div className="success-box">{message}</div> : null}
+
+      <div className="training-tabs">
+        <button
+          className={`training-tab${activeTab === "modules" ? " training-tab-active" : ""}`}
+          type="button"
+          onClick={() => setActiveTab("modules")}
+        >
+          Modules &amp; Events
+        </button>
+        <button
+          className={`training-tab${activeTab === "completions" ? " training-tab-active" : ""}`}
+          type="button"
+          onClick={() => setActiveTab("completions")}
+        >
+          Completions
+          {completions.length > 0 ? <span className="training-tab-count">{completions.length}</span> : null}
+        </button>
+        <button
+          className={`training-tab${activeTab === "certifications" ? " training-tab-active" : ""}`}
+          type="button"
+          onClick={() => setActiveTab("certifications")}
+        >
+          Certifications
+          {certifications.length > 0 ? <span className="training-tab-count">{certifications.length}</span> : null}
+        </button>
+      </div>
+
+      {activeTab === "completions" ? (
+        <section className="table-card">
+          <div className="panel-heading">
+            <div>
+              <div className="eyebrow">Vector Solutions</div>
+              <h2>Learner completions</h2>
+            </div>
+          </div>
+          {completions.length === 0 ? (
+            <div className="empty-state">
+              No completions received yet. Configure the Vector Solutions webhook to start syncing completion data.
+            </div>
+          ) : (
+            <div className="data-table-wrapper">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Learner</th>
+                    <th>Course</th>
+                    <th>Score</th>
+                    <th>Result</th>
+                    <th>Completed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {completions.map((completion) => {
+                    const module = completion.module_id ? modulesById.get(completion.module_id) : null;
+                    return (
+                      <tr key={completion.id}>
+                        <td>
+                          <div>{completion.learner_name}</div>
+                          {completion.learner_email ? <div className="table-subtext">{completion.learner_email}</div> : null}
+                        </td>
+                        <td>
+                          <div>{module?.title ?? completion.external_lms_course_id}</div>
+                          {!module ? <div className="table-subtext">Not mapped to a module</div> : null}
+                        </td>
+                        <td>{completion.score != null ? `${completion.score}%` : "—"}</td>
+                        <td>
+                          {completion.passed == null ? (
+                            <span className="badge">—</span>
+                          ) : completion.passed ? (
+                            <span className="badge badge-green">Pass</span>
+                          ) : (
+                            <span className="badge badge-red">Fail</span>
+                          )}
+                        </td>
+                        <td>{new Date(completion.completed_at).toLocaleDateString()}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {activeTab === "certifications" ? (
+        <section className="table-card">
+          <div className="panel-heading">
+            <div>
+              <div className="eyebrow">Vector Solutions</div>
+              <h2>Learner certifications</h2>
+            </div>
+            <Award size={22} />
+          </div>
+          {certifications.length === 0 ? (
+            <div className="empty-state">
+              No certifications received yet. Certifications are issued automatically when Vector Solutions sends a completion webhook that includes a certificate.
+            </div>
+          ) : (
+            <div className="data-table-wrapper">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Learner</th>
+                    <th>Certification</th>
+                    <th>Issued</th>
+                    <th>Expires</th>
+                    <th>Status</th>
+                    <th>Doc</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {certifications.map((cert) => (
+                    <tr key={cert.id}>
+                      <td>
+                        <div>{cert.learner_name}</div>
+                        {cert.learner_email ? <div className="table-subtext">{cert.learner_email}</div> : null}
+                      </td>
+                      <td>{cert.certification_name}</td>
+                      <td>{new Date(cert.issued_at).toLocaleDateString()}</td>
+                      <td>{cert.expires_at ? new Date(cert.expires_at).toLocaleDateString() : "No expiry"}</td>
+                      <td>
+                        <span className={certStatusClass(cert.status)}>{cert.status}</span>
+                      </td>
+                      <td>
+                        {cert.cert_document_url ? (
+                          <a
+                            className="button button-light button-sm"
+                            href={cert.cert_document_url}
+                            rel="noopener noreferrer"
+                            target="_blank"
+                          >
+                            <ExternalLink size={14} />
+                            View
+                          </a>
+                        ) : (
+                          <span className="table-subtext">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {activeTab !== "modules" ? null : (
+        <>
 
       <div className="training-dashboard-grid">
         <form className="form-panel training-create-panel" onSubmit={createModule}>
@@ -693,6 +861,15 @@ export function TrainingManager({
                           <label htmlFor={`module-description-${module.id}`}>Description</label>
                           <textarea id={`module-description-${module.id}`} name="description" defaultValue={module.description ?? ""} />
                         </div>
+                        <div className="field-full">
+                          <label htmlFor={`module-lms-id-${module.id}`}>Vector Course ID</label>
+                          <input
+                            id={`module-lms-id-${module.id}`}
+                            name="external_lms_course_id"
+                            placeholder="vs_course_123"
+                            defaultValue={module.external_lms_course_id ?? ""}
+                          />
+                        </div>
                       </div>
                       <button className="button button-secondary button-neutral" type="submit">
                         <Save size={16} />
@@ -794,6 +971,9 @@ export function TrainingManager({
           </div>
         </section>
       </div>
+
+        </>
+      )}
     </div>
   );
 }
