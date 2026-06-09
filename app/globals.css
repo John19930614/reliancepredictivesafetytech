@@ -4582,6 +4582,82 @@ textarea {
   font-weight: 800;
 }
 
+.sales-meeting-notes {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  border: 1px solid #d9e0ea;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #f8fafc;
+}
+
+.sales-meeting-notes-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sales-meeting-notes-head strong {
+  display: block;
+  color: #1f2937;
+  font-size: 0.86rem;
+  font-weight: 850;
+}
+
+.sales-meeting-notes-head span {
+  color: #4f5b67;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.sales-meeting-notes-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(201, 147, 43, 0.42);
+  border-radius: 6px;
+  padding: 7px 12px;
+  background: #fff8e8;
+  color: #8a5d05;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.sales-meeting-notes-download:disabled {
+  border-color: #d9e0ea;
+  background: #fff;
+  color: #9aa3af;
+  cursor: not-allowed;
+}
+
+.sales-meeting-notes-feed {
+  display: grid;
+  gap: 5px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.sales-meeting-notes-feed p {
+  margin: 0;
+  color: #344054;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.sales-meeting-notes-feed p strong {
+  color: #1f2937;
+  font-weight: 800;
+}
+
+.sales-meeting-notes-empty {
+  color: #6b7280;
+  font-style: italic;
+}
+
 .sales-meeting-panel {
   display: grid;
   gap: 14px;
