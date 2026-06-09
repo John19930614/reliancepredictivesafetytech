@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import { LogIn, Mic, MicOff, PhoneOff, ScreenShare, ScreenShareOff, Video, VideoOff } from "lucide-react";
+import { FileDown, LogIn, Mic, MicOff, NotebookPen, PhoneOff, ScreenShare, ScreenShareOff, Video, VideoOff } from "lucide-react";
 import {
   endSalesMeeting,
   joinSalesMeetingAsEmployee,
@@ -36,7 +36,49 @@ type SignalPayload = {
   audio_enabled?: boolean;
   video_enabled?: boolean;
   screen_sharing?: boolean;
+  transcript_id?: string;
+  transcript_text?: string;
+  speaker?: string;
 };
+
+type TranscriptLine = {
+  id: string;
+  fromId: string;
+  speaker: string;
+  text: string;
+  at: number;
+};
+
+type SpeechRecognitionResultEvent = {
+  resultIndex: number;
+  results: ArrayLike<{ isFinal: boolean; readonly [index: number]: { transcript: string } }>;
+};
+
+type SpeechRecognitionInstance = {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((event: SpeechRecognitionResultEvent) => void) | null;
+  onend: (() => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
+
+function getSpeechRecognitionCtor(): SpeechRecognitionCtor | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const globalWindow = window as unknown as {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  };
+
+  return globalWindow.SpeechRecognition ?? globalWindow.webkitSpeechRecognition ?? null;
+}
 
 type RemoteStreamState = {
   stream: MediaStream;
@@ -178,6 +220,11 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
   const [cameraOff, setCameraOff] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
   const [hideLocalScreenPreview, setHideLocalScreenPreview] = useState(false);
+  const [noteTaking, setNoteTaking] = useState(true);
+  const [transcriptLines, setTranscriptLines] = useState<TranscriptLine[]>([]);
+  const [speechSupported, setSpeechSupported] = useState(true);
+  const [generatingNotes, setGeneratingNotes] = useState(false);
+  const transcriptLinesRef = useRef<TranscriptLine[]>([]);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const meetingRef = useRef<SalesMeeting | null>(null);
   const participantRef = useRef<SalesMeetingParticipant | null>(null);
@@ -211,6 +258,89 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
         from: participantRef.current.id,
       } satisfies SignalPayload,
     });
+  }, []);
+
+  const appendTranscriptLine = useCallback((line: TranscriptLine) => {
+    setTranscriptLines((current) => {
+      if (current.some((existing) => existing.id === line.id)) {
+        return current;
+      }
+
+      return [...current, line].slice(-800);
+    });
+  }, []);
+
+  const recordLocalSpeech = useCallback(
+    (text: string) => {
+      const currentParticipant = participantRef.current;
+      const cleanedText = text.trim();
+
+      if (!currentParticipant || !cleanedText) {
+        return;
+      }
+
+      const line: TranscriptLine = {
+        id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${currentParticipant.id}-${Date.now()}`,
+        fromId: currentParticipant.id,
+        speaker: currentParticipant.display_name || "You",
+        text: cleanedText,
+        at: Date.now(),
+      };
+
+      appendTranscriptLine(line);
+      void sendSignal("transcript", { transcript_id: line.id, transcript_text: line.text, speaker: line.speaker });
+    },
+    [appendTranscriptLine, sendSignal],
+  );
+
+  const handleGenerateNotes = useCallback(async () => {
+    const lines = transcriptLinesRef.current;
+
+    if (lines.length === 0) {
+      setStatusMessage("No notes captured yet. Turn on note-taking and speak before generating.");
+      return false;
+    }
+
+    setGeneratingNotes(true);
+
+    try {
+      const transcript = lines.map((line) => `${line.speaker}: ${line.text}`).join("\n");
+      const participantNames = Array.from(new Set(lines.map((line) => line.speaker)));
+      const title = meetingRef.current?.title || "Sales Meeting Notes";
+
+      const response = await fetch("/api/sales-meetings/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          meetingId: meetingRef.current?.id,
+          title,
+          transcript,
+          participants: participantNames,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(errorBody?.error ?? "Could not generate meeting notes.");
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = `${title.replace(/[^\w.-]+/g, "_").replace(/^_|_$/g, "") || "meeting-notes"}.docx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
+      setStatusMessage("Meeting notes downloaded as a Word document.");
+      return true;
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not generate meeting notes.");
+      return false;
+    } finally {
+      setGeneratingNotes(false);
+    }
   }, []);
 
   const updateMediaState = useCallback(
@@ -391,6 +521,7 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
       }
 
       await cleanupMeeting();
+      setTranscriptLines([]);
       setMeeting(result.meeting);
       setParticipant(result.participant);
       setParticipants(result.participants);
@@ -462,6 +593,19 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
             };
           });
         })
+        .on("broadcast", { event: "transcript" }, ({ payload }: { payload: SignalPayload }) => {
+          if (payload.meeting_id !== result.meeting.id || payload.from === result.participant.id || !payload.transcript_text) {
+            return;
+          }
+
+          appendTranscriptLine({
+            id: payload.transcript_id || `${payload.from}-${Date.now()}`,
+            fromId: payload.from,
+            speaker: payload.speaker || "Guest",
+            text: payload.transcript_text,
+            at: Date.now(),
+          });
+        })
         .on("broadcast", { event: "leave" }, ({ payload }: { payload: SignalPayload }) => {
           if (payload.meeting_id !== result.meeting.id || payload.from === result.participant.id) {
             return;
@@ -510,6 +654,7 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
     },
     [
       acquireMeetingMedia,
+      appendTranscriptLine,
       cameraOff,
       cleanupMeeting,
       createOfferForParticipant,
@@ -605,6 +750,73 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
     },
     [cleanupMeeting],
   );
+
+  useEffect(() => {
+    transcriptLinesRef.current = transcriptLines;
+  }, [transcriptLines]);
+
+  useEffect(() => {
+    if (!participant || !noteTaking || muted) {
+      return;
+    }
+
+    const RecognitionCtor = getSpeechRecognitionCtor();
+
+    if (!RecognitionCtor) {
+      setSpeechSupported(false);
+      return;
+    }
+
+    setSpeechSupported(true);
+
+    const recognition = new RecognitionCtor();
+    recognition.lang = "en-US";
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    let active = true;
+
+    recognition.onresult = (event) => {
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+
+        if (result.isFinal) {
+          recordLocalSpeech(result[0]?.transcript ?? "");
+        }
+      }
+    };
+
+    recognition.onend = () => {
+      if (active) {
+        try {
+          recognition.start();
+        } catch {
+          // Recognition is already (re)starting; ignore.
+        }
+      }
+    };
+
+    recognition.onerror = () => {
+      // Transient errors (no-speech, aborted) resolve on the next onend restart.
+    };
+
+    try {
+      recognition.start();
+    } catch {
+      // A prior instance is still releasing the mic; the onend handler will retry.
+    }
+
+    return () => {
+      active = false;
+      recognition.onend = null;
+      recognition.onresult = null;
+      recognition.onerror = null;
+      try {
+        recognition.stop();
+      } catch {
+        // Already stopped.
+      }
+    };
+  }, [participant, noteTaking, muted, recordLocalSpeech]);
 
   async function handleGuestJoin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -752,6 +964,10 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
     }
 
     try {
+      if (noteTaking && transcriptLinesRef.current.length > 0) {
+        await handleGenerateNotes();
+      }
+
       await sendSignal("end", {});
       await endSalesMeeting(meeting.id);
     } catch (error) {
@@ -826,6 +1042,15 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
               <button className={screenSharing ? "active" : undefined} type="button" onClick={() => void toggleScreenShare()} aria-label={screenSharing ? "Stop sharing screen" : "Share screen"}>
                 {screenSharing ? <ScreenShareOff size={17} /> : <ScreenShare size={17} />}
               </button>
+              <button
+                className={noteTaking ? "active" : undefined}
+                type="button"
+                onClick={() => setNoteTaking((value) => !value)}
+                aria-label={noteTaking ? "Stop AI note-taking" : "Start AI note-taking"}
+              >
+                <NotebookPen size={17} />
+                {noteTaking ? "Notes on" : "Notes"}
+              </button>
               {mode === "employee" ? (
                 <button className="employee-call-end" type="button" onClick={() => void handleEnd()} aria-label="End meeting for everyone">
                   <PhoneOff size={17} />
@@ -842,6 +1067,47 @@ export function SalesMeetingRoom(props: SalesMeetingRoomProps) {
                   {item.display_name} - {item.status}
                 </span>
               ))}
+            </div>
+            <div className="sales-meeting-notes">
+              <div className="sales-meeting-notes-head">
+                <div>
+                  <strong>AI meeting notes</strong>
+                  <span>
+                    {noteTaking
+                      ? speechSupported
+                        ? "Listening to your microphone"
+                        : "Live notes need Chrome or Edge on this device"
+                      : "Note-taking paused"}
+                    {" · "}
+                    {transcriptLines.length} {transcriptLines.length === 1 ? "line" : "lines"} captured
+                  </span>
+                </div>
+                {mode === "employee" ? (
+                  <button
+                    type="button"
+                    className="sales-meeting-notes-download"
+                    onClick={() => void handleGenerateNotes()}
+                    disabled={generatingNotes || transcriptLines.length === 0}
+                  >
+                    <FileDown size={16} />
+                    {generatingNotes ? "Generating..." : "Download Word notes"}
+                  </button>
+                ) : null}
+              </div>
+              <div className="sales-meeting-notes-feed">
+                {transcriptLines.length === 0 ? (
+                  <p className="sales-meeting-notes-empty">
+                    Spoken words appear here as the call goes. A Word document with an AI summary, decisions, and action items is ready to
+                    download at the end.
+                  </p>
+                ) : (
+                  transcriptLines.slice(-8).map((line) => (
+                    <p key={line.id}>
+                      <strong>{line.fromId === participant?.id ? "You" : line.speaker}:</strong> {line.text}
+                    </p>
+                  ))
+                )}
+              </div>
             </div>
           </section>
         </>
