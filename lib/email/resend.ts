@@ -3,7 +3,7 @@ import "server-only";
 import { Resend } from "resend";
 
 export const NOTIFICATION_FROM =
-  process.env.RESEND_FROM_EMAIL || "Reliance Notifications <notifications@reliancepredictivesafety.com>";
+  process.env.RESEND_FROM_EMAIL || "Reliance Notifications <notifications@safety360docs.com>";
 
 export function getResendClient() {
   if (!process.env.RESEND_API_KEY) {
