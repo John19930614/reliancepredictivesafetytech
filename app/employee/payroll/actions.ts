@@ -267,6 +267,11 @@ export async function updatePayrollRunItem(input: {
   itemId: string;
   itemStatus?: string;
   notes?: string;
+  federalTax?: number;
+  stateTax?: number;
+  socialSecurity?: number;
+  medicare?: number;
+  otherDeductions?: number;
 }): Promise<ActionResult<EmployeePayrollRunItem>> {
   const owner = await requireOwner();
   if (!owner.user) return { data: null, error: owner.error };
@@ -287,6 +292,12 @@ export async function updatePayrollRunItem(input: {
   if (input.notes !== undefined) {
     patch.notes = cleanOptional(input.notes);
   }
+
+  if (input.federalTax !== undefined) patch.federal_tax = Math.max(0, Number(input.federalTax));
+  if (input.stateTax !== undefined) patch.state_tax = Math.max(0, Number(input.stateTax));
+  if (input.socialSecurity !== undefined) patch.social_security = Math.max(0, Number(input.socialSecurity));
+  if (input.medicare !== undefined) patch.medicare = Math.max(0, Number(input.medicare));
+  if (input.otherDeductions !== undefined) patch.other_deductions = Math.max(0, Number(input.otherDeductions));
 
   if (Object.keys(patch).length === 0) {
     return { data: null, error: "No payroll item changes were provided." };

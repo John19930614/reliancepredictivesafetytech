@@ -940,6 +940,12 @@ export type EmployeePayrollRunItem = {
   total_hours: number;
   hourly_rate: number;
   gross_pay: number;
+  federal_tax: number;
+  state_tax: number;
+  social_security: number;
+  medicare: number;
+  other_deductions: number;
+  net_pay: number;
   item_status: (typeof payrollRunItemStatuses)[number];
   notes: string | null;
   created_at: string;

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { CheckCircle2, Clock3, DollarSign, PauseCircle, Plus, ReceiptText } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronUp, Clock3, DollarSign, PauseCircle, Plus, ReceiptText } from "lucide-react";
 import {
   createPayrollRun,
   markPayrollRunPaid,
@@ -31,10 +31,6 @@ type PayrollTrackerManagerProps = {
 
 type MessageTone = "success" | "error";
 type ActiveView = "runs" | "approved" | "employees";
-
-function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
-}
 
 function currentMonthStart() {
   const now = new Date();
@@ -82,6 +78,7 @@ export function PayrollTrackerManager({
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<MessageTone>("success");
   const [pendingAction, setPendingAction] = useState("");
+  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
 
   const profileByUserId = useMemo(() => new Map(profiles.map((profile) => [profile.user_id, profile])), [profiles]);
   const payrollByCardId = useMemo(() => new Map(payrollRows.map((row) => [row.time_card_id, row])), [payrollRows]);
@@ -116,30 +113,31 @@ export function PayrollTrackerManager({
     const readyRuns = runRows.filter((run) => ["draft", "ready"].includes(run.status)).length;
     const heldItems = itemRows.filter((item) => item.item_status === "held").length;
     const approvedHours = availableCards.reduce((total, card) => total + Number(payrollByCardId.get(card.id)?.total_hours ?? 0), 0);
-    const grossOpen = itemRows
-      .filter((item) => item.item_status !== "paid")
-      .reduce((total, item) => total + Number(item.gross_pay), 0);
-    const paidThisMonth = runRows
-      .filter((run) => run.status === "paid" && run.paid_at && run.paid_at.slice(0, 10) >= monthStart)
-      .reduce((total, run) => total + (itemsByRunId[run.id] ?? []).reduce((sum, item) => sum + Number(item.gross_pay), 0), 0);
+    const unpaidItems = itemRows.filter((item) => item.item_status !== "paid");
+    const grossOpen = unpaidItems.reduce((total, item) => total + Number(item.gross_pay), 0);
+    const netOpen = unpaidItems.reduce((total, item) => total + Number(item.net_pay), 0);
+    const paidRuns = runRows.filter((run) => run.status === "paid" && run.paid_at && run.paid_at.slice(0, 10) >= monthStart);
+    const paidThisMonth = paidRuns.reduce((total, run) => total + (itemsByRunId[run.id] ?? []).reduce((sum, item) => sum + Number(item.gross_pay), 0), 0);
+    const netPaidThisMonth = paidRuns.reduce((total, run) => total + (itemsByRunId[run.id] ?? []).reduce((sum, item) => sum + Number(item.net_pay), 0), 0);
 
     return [
       { label: "Ready to run", value: String(readyRuns), detail: `${availableCards.length} approved card(s) unassigned`, icon: ReceiptText },
       { label: "Held cards", value: String(heldItems), detail: "Manual payroll holds", icon: PauseCircle },
       { label: "Approved hours", value: approvedHours.toFixed(2), detail: "Available for new runs", icon: Clock3 },
-      { label: "Gross payroll", value: money(grossOpen), detail: "Unpaid or held run items", icon: DollarSign },
-      { label: "Paid this month", value: money(paidThisMonth), detail: `Since ${dateLabel(monthStart)}`, icon: CheckCircle2 },
+      { label: "Gross payroll", value: money(grossOpen), detail: `Net: ${money(netOpen)}`, icon: DollarSign },
+      { label: "Paid this month", value: money(paidThisMonth), detail: `Net: ${money(netPaidThisMonth)}`, icon: CheckCircle2 },
     ];
   }, [availableCards, itemRows, itemsByRunId, payrollByCardId, runRows]);
 
   const employeeTotals = useMemo(() => {
-    const totals = new Map<string, { employeeUserId: string | null; hours: number; gross: number; paid: number; held: number; runs: number }>();
+    const totals = new Map<string, { employeeUserId: string | null; hours: number; gross: number; net: number; paid: number; held: number; runs: number }>();
 
     itemRows.forEach((item) => {
       const key = item.employee_user_id ?? "unassigned";
-      const current = totals.get(key) ?? { employeeUserId: item.employee_user_id, hours: 0, gross: 0, paid: 0, held: 0, runs: 0 };
+      const current = totals.get(key) ?? { employeeUserId: item.employee_user_id, hours: 0, gross: 0, net: 0, paid: 0, held: 0, runs: 0 };
       current.hours += Number(item.total_hours);
       current.gross += Number(item.gross_pay);
+      current.net += Number(item.net_pay);
       current.runs += 1;
       if (item.item_status === "paid") current.paid += Number(item.gross_pay);
       if (item.item_status === "held") current.held += Number(item.gross_pay);
@@ -229,8 +227,32 @@ export function PayrollTrackerManager({
     setStatusMessage("Payroll item saved.");
   }
 
+  async function saveItemTaxes(item: EmployeePayrollRunItem, event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    setPendingAction(`taxes-${item.id}`);
+    const result = await updatePayrollRunItem({
+      itemId: item.id,
+      federalTax: Number(fd.get("federal_tax") ?? 0),
+      stateTax: Number(fd.get("state_tax") ?? 0),
+      socialSecurity: Number(fd.get("social_security") ?? 0),
+      medicare: Number(fd.get("medicare") ?? 0),
+      otherDeductions: Number(fd.get("other_deductions") ?? 0),
+    });
+    setPendingAction("");
+
+    if (result.error || !result.data) return setStatusMessage(result.error ?? "Tax information could not be saved.", "error");
+
+    setItemRows((current) => current.map((row) => (row.id === item.id ? result.data! : row)));
+    setStatusMessage("Tax information saved.");
+  }
+
   function runTotal(runId: string) {
     return (itemsByRunId[runId] ?? []).reduce((total, item) => total + Number(item.gross_pay), 0);
+  }
+
+  function runNet(runId: string) {
+    return (itemsByRunId[runId] ?? []).reduce((total, item) => total + Number(item.net_pay), 0);
   }
 
   function runHours(runId: string) {
@@ -333,11 +355,14 @@ export function PayrollTrackerManager({
                           {dateLabel(run.period_start)} to {dateLabel(run.period_end)}
                         </strong>
                         <small>
-                          {(itemsByRunId[run.id] ?? []).length} employee card(s) - {runHours(run.id).toFixed(2)} hours
+                          {(itemsByRunId[run.id] ?? []).length} employee card(s) &mdash; {runHours(run.id).toFixed(2)} hours
                         </small>
                       </span>
                       <span className={`record-badge payroll-status payroll-status-${run.status}`}>{displayStatus(run.status)}</span>
-                      <span>{money(runTotal(run.id))}</span>
+                      <span>
+                        <strong>{money(runTotal(run.id))}</strong>
+                        <small>Net: {money(runNet(run.id))}</small>
+                      </span>
                     </button>
                     <div className="payroll-row-actions">
                       <select value={run.status} disabled={pendingAction === `run-${run.id}` || run.status === "paid"} onChange={(event) => saveRunStatus(run, event.target.value)}>
@@ -373,7 +398,7 @@ export function PayrollTrackerManager({
             <div>
               <h2>Selected run detail</h2>
               <p>
-                {dateLabel(selectedRun.period_start)} to {dateLabel(selectedRun.period_end)} - {money(runTotal(selectedRun.id))}
+                {dateLabel(selectedRun.period_start)} to {dateLabel(selectedRun.period_end)} &mdash; Gross: {money(runTotal(selectedRun.id))} / Net: {money(runNet(selectedRun.id))}
               </p>
             </div>
             <span className={`record-badge payroll-status payroll-status-${selectedRun.status}`}>{displayStatus(selectedRun.status)}</span>
@@ -391,27 +416,90 @@ export function PayrollTrackerManager({
               <div className="empty-state">This payroll run does not have any time cards.</div>
             ) : (
               selectedItems.map((item) => (
-                <div className="payroll-item-row" key={item.id}>
-                  <span>
-                    <strong>{employeeName(item.employee_user_id)}</strong>
-                    <small>{item.time_card_id.slice(0, 8)}</small>
-                  </span>
-                  <span>{Number(item.total_hours).toFixed(2)} hours</span>
-                  <span>{money(Number(item.hourly_rate))}/hr</span>
-                  <strong>{money(Number(item.gross_pay))}</strong>
-                  <select value={item.item_status} disabled={pendingAction === `item-${item.id}`} onChange={(event) => saveItemPatch(item, { itemStatus: event.target.value })}>
-                    {payrollRunItemStatuses.map((status) => (
-                      <option key={status} value={status}>
-                        {displayStatus(status)}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    aria-label={`Notes for ${employeeName(item.employee_user_id)}`}
-                    defaultValue={item.notes ?? ""}
-                    onBlur={(event) => saveItemPatch(item, { notes: event.target.value })}
-                    placeholder="Item notes"
-                  />
+                <div key={item.id}>
+                  <div className="payroll-item-row">
+                    <span>
+                      <strong>{employeeName(item.employee_user_id)}</strong>
+                      <small>{item.time_card_id.slice(0, 8)}</small>
+                    </span>
+                    <span>{Number(item.total_hours).toFixed(2)} hrs @ {money(Number(item.hourly_rate))}</span>
+                    <span>
+                      <small>Gross</small>
+                      <strong>{money(Number(item.gross_pay))}</strong>
+                    </span>
+                    <span>
+                      <small>Net</small>
+                      <strong>{money(Number(item.net_pay))}</strong>
+                    </span>
+                    <select value={item.item_status} disabled={pendingAction === `item-${item.id}`} onChange={(event) => saveItemPatch(item, { itemStatus: event.target.value })}>
+                      {payrollRunItemStatuses.map((status) => (
+                        <option key={status} value={status}>
+                          {displayStatus(status)}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      aria-label={`Notes for ${employeeName(item.employee_user_id)}`}
+                      defaultValue={item.notes ?? ""}
+                      onBlur={(event) => saveItemPatch(item, { notes: event.target.value })}
+                      placeholder="Item notes"
+                    />
+                    <button
+                      className="button button-secondary"
+                      onClick={() => setExpandedItemId(expandedItemId === item.id ? null : item.id)}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+                      type="button"
+                    >
+                      {expandedItemId === item.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      Taxes
+                    </button>
+                  </div>
+                  {expandedItemId === item.id && (
+                    <form className="payroll-tax-panel" onSubmit={(e) => saveItemTaxes(item, e)}>
+                      <div className="payroll-tax-grid">
+                        <div className="field">
+                          <label>Federal income tax</label>
+                          <input defaultValue={Number(item.federal_tax).toFixed(2)} min="0" name="federal_tax" step="0.01" type="number" />
+                        </div>
+                        <div className="field">
+                          <label>State income tax</label>
+                          <input defaultValue={Number(item.state_tax).toFixed(2)} min="0" name="state_tax" step="0.01" type="number" />
+                        </div>
+                        <div className="field">
+                          <label>Social Security (6.2%)</label>
+                          <input defaultValue={Number(item.social_security).toFixed(2)} min="0" name="social_security" step="0.01" type="number" />
+                        </div>
+                        <div className="field">
+                          <label>Medicare (1.45%)</label>
+                          <input defaultValue={Number(item.medicare).toFixed(2)} min="0" name="medicare" step="0.01" type="number" />
+                        </div>
+                        <div className="field">
+                          <label>Other deductions</label>
+                          <input defaultValue={Number(item.other_deductions).toFixed(2)} min="0" name="other_deductions" step="0.01" type="number" />
+                        </div>
+                      </div>
+                      <div className="payroll-tax-footer">
+                        <span>
+                          Total withheld:{" "}
+                          <strong>
+                            {money(
+                              Number(item.federal_tax) +
+                              Number(item.state_tax) +
+                              Number(item.social_security) +
+                              Number(item.medicare) +
+                              Number(item.other_deductions),
+                            )}
+                          </strong>
+                        </span>
+                        <span>
+                          Net pay: <strong>{money(Number(item.net_pay))}</strong>
+                        </span>
+                        <button className="button button-primary" disabled={pendingAction === `taxes-${item.id}`} type="submit">
+                          {pendingAction === `taxes-${item.id}` ? "Saving..." : "Save taxes"}
+                        </button>
+                      </div>
+                    </form>
+                  )}
                 </div>
               ))
             )}
@@ -458,7 +546,7 @@ export function PayrollTrackerManager({
           <div className="portal-topline">
             <div>
               <h2>Employee payroll totals</h2>
-              <p>Gross payroll totals from created payroll runs.</p>
+              <p>Gross and net payroll totals from created payroll runs.</p>
             </div>
             <span className="badge">{employeeTotals.length} employee(s)</span>
           </div>
@@ -470,12 +558,18 @@ export function PayrollTrackerManager({
                 <div className="payroll-approved-row" key={total.employeeUserId ?? "unassigned"}>
                   <span>
                     <strong>{employeeName(total.employeeUserId)}</strong>
-                    <small>{total.runs} payroll card(s)</small>
+                    <small>{total.runs} payroll card(s) &mdash; {total.hours.toFixed(2)} hours</small>
                   </span>
-                  <span>{total.hours.toFixed(2)} hours</span>
                   <span>{money(total.paid)} paid</span>
                   <span>{money(total.held)} held</span>
-                  <strong>{money(total.gross)}</strong>
+                  <span>
+                    <small>Gross</small>
+                    <strong>{money(total.gross)}</strong>
+                  </span>
+                  <span>
+                    <small>Net</small>
+                    <strong>{money(total.net)}</strong>
+                  </span>
                 </div>
               ))
             )}
