@@ -1766,3 +1766,29 @@ export const launchGateItems = [
   "Website or landing page includes contact path plus legal/privacy links.",
   "Cost tracker shows one-time costs, monthly burn, and budget cap.",
 ];
+
+export type CalendarEvent = {
+  id: string;
+  created_by: string;
+  title: string;
+  description: string | null;
+  event_type: string;
+  start_at: string;
+  end_at: string;
+  all_day: boolean;
+  visibility: string;
+  status: string;
+  location: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CalendarEventAttendee = {
+  id: string;
+  event_id: string;
+  user_id: string;
+  status: string;
+  created_at: string;
+};

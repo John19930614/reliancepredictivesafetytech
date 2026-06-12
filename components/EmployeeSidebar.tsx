@@ -7,6 +7,7 @@ import {
   BookOpenCheck,
   Bot,
   BriefcaseBusiness,
+  CalendarDays,
   CarFront,
   Clock3,
   ClipboardList,
@@ -72,6 +73,7 @@ const navGroups = [
       { href: "/employee/performance", label: "Performance Reviews", icon: ClipboardList },
       { href: "/employee/hr-documents", label: "HR Documents", icon: FileText },
       { href: "/employee/time-cards", label: "Time Cards", icon: Clock3 },
+      { href: "/employee/calendar", label: "Calendar", icon: CalendarDays },
     ],
   },
   {
