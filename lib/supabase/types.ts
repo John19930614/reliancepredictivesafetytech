@@ -1299,6 +1299,70 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["training_modules"]["Insert"]>;
         Relationships: [];
       };
+      employee_calendar_events: {
+        Row: {
+          id: string;
+          created_by: string;
+          title: string;
+          description: string | null;
+          event_type: string;
+          start_at: string;
+          end_at: string;
+          all_day: boolean;
+          visibility: string;
+          status: string;
+          location: string | null;
+          approved_by: string | null;
+          approved_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          created_by: string;
+          title: string;
+          description?: string | null;
+          event_type?: string;
+          start_at: string;
+          end_at: string;
+          all_day?: boolean;
+          visibility?: string;
+          status?: string;
+          location?: string | null;
+          approved_by?: string | null;
+          approved_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_calendar_events"]["Insert"]>;
+        Relationships: [];
+      };
+      employee_calendar_event_attendees: {
+        Row: {
+          id: string;
+          event_id: string;
+          user_id: string;
+          status: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          event_id: string;
+          user_id: string;
+          status?: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["employee_calendar_event_attendees"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "employee_calendar_event_attendees_event_id_fkey";
+            columns: ["event_id"];
+            isOneToOne: false;
+            referencedRelation: "employee_calendar_events";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       performance_review_cycles: {
         Row: {
           id: string;
