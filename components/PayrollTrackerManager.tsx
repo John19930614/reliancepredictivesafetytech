@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { CheckCircle2, Clock3, DollarSign, PauseCircle, Plus, ReceiptText } from "lucide-react";
 import {
@@ -239,6 +240,12 @@ export function PayrollTrackerManager({
   return (
     <div className="finance-center payroll-center">
       {message ? <div className={`success-box portal-alert ${messageTone === "error" ? "portal-alert-error" : ""}`}>{message}</div> : null}
+
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        <Link className="btn-secondary" href="/employee/time-cards" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Clock3 size={15} /> View Time Cards
+        </Link>
+      </div>
 
       <section className="kpi-strip finance-kpi-strip" aria-label="Payroll KPIs">
         {kpis.map((kpi) => {

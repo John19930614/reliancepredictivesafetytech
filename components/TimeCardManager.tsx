@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Clock3, DollarSign, Plus, Send, ShieldCheck, Trash2, UserCheck, XCircle } from "lucide-react";
 import {
@@ -723,6 +724,13 @@ export function TimeCardManager({
   return (
     <div className="time-card-stack">
       {message ? <div className="success-box portal-alert">{message}</div> : null}
+      {canViewPayroll && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+          <Link className="btn-primary" href="/employee/payroll" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <DollarSign size={15} /> Go to Payroll
+          </Link>
+        </div>
+      )}
       {renderOwnTimeCardPanel()}
     </div>
   );
