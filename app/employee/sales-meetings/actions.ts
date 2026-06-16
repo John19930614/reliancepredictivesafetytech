@@ -3,6 +3,7 @@
 import crypto from "crypto";
 import { revalidatePath } from "next/cache";
 import { SalesMeetingInviteEmail } from "@/emails/sales-meeting-invite";
+import { COMPANY_NAME } from "@/lib/company-data";
 import { getResendClient, NOTIFICATION_FROM } from "@/lib/email/resend";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -302,7 +303,7 @@ export async function createSalesMeetingInvite(input: SalesMeetingInviteInput): 
 
   const siteUrl = getSiteUrl();
   const resend = getResendClient();
-  const inviterName = user.email ?? "Reliance";
+  const inviterName = user.email ?? COMPANY_NAME;
   const inviteResults: SalesMeetingInviteResult["invites"] = [];
 
   for (const recipient of uniqueRecipients) {

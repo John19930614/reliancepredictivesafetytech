@@ -144,6 +144,7 @@ async function writeCallLogMessage(
   body: string,
 ) {
   if (!supabase) {
+    console.error("writeCallLogMessage: Supabase is not configured, call log message not recorded.");
     return;
   }
 

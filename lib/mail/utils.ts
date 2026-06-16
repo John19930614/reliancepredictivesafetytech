@@ -1,14 +1,15 @@
 import crypto from "crypto";
+import { COMPANY_NAME } from "@/lib/company-data";
 import type { Json } from "@/lib/supabase/types";
 
-export const DEFAULT_EMPLOYEE_MAIL_DOMAIN = "mail.reliancepredictivesafety.com";
+const DEFAULT_EMPLOYEE_MAIL_DOMAIN = "mail.reliancepredictivesafety.com";
 
-export type ParsedMailAddress = {
+type ParsedMailAddress = {
   address: string;
   name: string | null;
 };
 
-export type ParsedMailRecipients = {
+type ParsedMailRecipients = {
   to: ParsedMailAddress[];
   cc: ParsedMailAddress[];
   bcc: ParsedMailAddress[];
@@ -16,12 +17,12 @@ export type ParsedMailRecipients = {
 
 const EMAIL_WITH_NAME_PATTERN = /^\s*"?([^"<]*)"?\s*<([^>]+)>\s*$/;
 
-export function getEmployeeMailDomain() {
+function getEmployeeMailDomain() {
   return (process.env.EMPLOYEE_MAIL_DOMAIN || DEFAULT_EMPLOYEE_MAIL_DOMAIN).trim().toLowerCase();
 }
 
-export function getEmployeeMailFromName() {
-  return (process.env.EMPLOYEE_MAIL_FROM_NAME || "Reliance").trim() || "Reliance";
+function getEmployeeMailFromName() {
+  return (process.env.EMPLOYEE_MAIL_FROM_NAME || COMPANY_NAME).trim() || COMPANY_NAME;
 }
 
 export function cleanMailText(value: string | null | undefined) {
@@ -91,7 +92,7 @@ export function flattenRecipients(recipients: ParsedMailRecipients) {
   ];
 }
 
-export function isEmployeeMailAddress(address: string, domain = getEmployeeMailDomain()) {
+function isEmployeeMailAddress(address: string, domain = getEmployeeMailDomain()) {
   return normalizeMailAddress(address).endsWith(`@${domain}`);
 }
 

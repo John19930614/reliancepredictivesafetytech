@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { Bot } from "lucide-react";
 import { AICommandCenter } from "@/components/AICommandCenter";
 import { getCommandSnapshot } from "@/lib/ai/command-context";
@@ -31,7 +32,7 @@ export default async function AICommandPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return null;
+    redirect("/employee-login");
   }
 
   const [{ data: role }, snapshot, { data: notifications }, { data: proposals }] = await Promise.all([

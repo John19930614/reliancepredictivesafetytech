@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { DollarSign } from "lucide-react";
 import { FinanceCenterManager } from "@/components/FinanceCenterManager";
 import type {
@@ -40,7 +41,7 @@ export default async function FinanceCenterPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return null;
+    redirect("/employee-login");
   }
 
   const [{ data: role }, { data: financeAuthorization, error: financeAuthorizationError }] = await Promise.all([

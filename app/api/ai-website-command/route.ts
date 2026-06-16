@@ -14,7 +14,17 @@ const websiteProposalTables = [
   "company_operations_records",
 ] as const;
 
-const websiteAiModel = process.env.AI_COMMAND_MODEL || "openai/gpt-5";
+const websiteAiModel = process.env.AI_COMMAND_MODEL || "openai/gpt-4o";
+
+class HttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "HttpError";
+  }
+}
 
 function hasAiGatewayAuth() {
   return Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || process.env.VERCEL === "1");
@@ -24,7 +34,7 @@ async function getAuthenticatedAdminClient() {
   const supabase = await createClient();
 
   if (!supabase) {
-    throw new Error("Supabase is not configured.");
+    throw new HttpError("Supabase is not configured.", 503);
   }
 
   const {
@@ -32,7 +42,7 @@ async function getAuthenticatedAdminClient() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    throw new Error("You must be signed in to use the Website Operations AI.");
+    throw new HttpError("You must be signed in to use the Website Operations AI.", 401);
   }
 
   const { data: role } = await supabase
@@ -43,7 +53,7 @@ async function getAuthenticatedAdminClient() {
     .maybeSingle();
 
   if (!isPortalAdminRole(role?.role)) {
-    throw new Error("Admin access is required for Website Operations AI.");
+    throw new HttpError("Admin access is required for Website Operations AI.", 403);
   }
 
   return { supabase, user };
@@ -60,7 +70,12 @@ export async function POST(req: Request) {
       );
     }
 
-    const { messages }: { messages: UIMessage[] } = await req.json();
+    let messages: UIMessage[];
+    try {
+      ({ messages } = (await req.json()) as { messages: UIMessage[] });
+    } catch {
+      return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
+    }
     const snapshot = await getWebsiteOperationsSnapshot(supabase);
 
     const result = streamText({
@@ -260,6 +275,21 @@ export async function POST(req: Request) {
 
     return result.toUIMessageStreamResponse();
   } catch (error) {
+    if (error instanceof HttpError) {
+      return Response.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes("rate limit") || msg.includes("too many requests")) {
+        return Response.json({ error: "AI service is rate-limited. Please try again in a moment." }, { status: 429 });
+      }
+      if (msg.includes("no such model") || msg.includes("model not found") || msg.includes("does not exist")) {
+        return Response.json({ error: "Configured AI model is unavailable." }, { status: 503 });
+      }
+      if (msg.includes("api key") || msg.includes("authentication failed") || msg.includes("invalid key")) {
+        return Response.json({ error: "AI Gateway authentication failed. Check AI_GATEWAY_API_KEY." }, { status: 503 });
+      }
+    }
     const message = error instanceof Error ? error.message : "Website Operations AI failed.";
     return Response.json({ error: message }, { status: 500 });
   }

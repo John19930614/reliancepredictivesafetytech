@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import type { HrFormAnswers, HrFormDefinition, HrFormField, HrFormAnswerValue, HrDocumentTemplate } from "@/lib/company-data";
+import { COMPANY_NAME } from "@/lib/company-data";
 
 type GenerateSignedOnboardingPdfParams = {
   template: Pick<HrDocumentTemplate, "title" | "category" | "version" | "body_text">;
@@ -129,7 +130,7 @@ export async function generateSignedOnboardingPdf({
     height: 88,
     color: rgb(0.08, 0.12, 0.16),
   });
-  page.drawText("Reliance Predictive Safety Technologies LLC", {
+  page.drawText(COMPANY_NAME, {
     x: margin,
     y: height - 42,
     size: 14,

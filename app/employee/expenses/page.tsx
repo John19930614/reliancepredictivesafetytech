@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { ReceiptText } from "lucide-react";
 import { EmployeeExpensesManager } from "@/components/EmployeeExpensesManager";
 import type { EmployeeExpenseReceipt, EmployeeExpenseReport, EmployeeProfile } from "@/lib/company-data";
@@ -32,7 +33,7 @@ export default async function EmployeeExpensesPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return null;
+    redirect("/employee-login");
   }
 
   const [{ data: role }, { data: financeAuthorization, error: financeAuthorizationError }] = await Promise.all([

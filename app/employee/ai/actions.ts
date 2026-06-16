@@ -142,6 +142,23 @@ export async function approveWorkflowProposal(formData: FormData) {
   const appliedAt = new Date().toISOString();
   let nextStatus = "approved";
 
+  // If the AI proposed a non-empty patch for a specific record but every field
+  // was stripped by the column allowlist, the update would silently do nothing.
+  // Surface this as an error so the admin knows manual intervention is needed.
+  const originalPatch = proposal.proposed_patch;
+  if (
+    proposal.target_record_id &&
+    originalPatch &&
+    typeof originalPatch === "object" &&
+    !Array.isArray(originalPatch) &&
+    Object.keys(originalPatch as object).length > 0 &&
+    Object.keys(patch).length === 0
+  ) {
+    throw new Error(
+      "This proposal's patch fields are not permitted for automated application. Review the proposed changes and apply them manually.",
+    );
+  }
+
   if (proposal.target_record_id && Object.keys(patch).length > 0) {
     if (proposal.target_table === "website_content_items" && patch.status === "approved") {
       Object.assign(patch, {

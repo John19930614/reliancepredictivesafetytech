@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { Globe2 } from "lucide-react";
 import { WebsiteOperationsCenter } from "@/components/WebsiteOperationsCenter";
 import type { WorkflowActionProposal } from "@/lib/company-data";
@@ -29,7 +30,7 @@ export default async function WebsiteOperationsPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return null;
+    redirect("/employee-login");
   }
 
   const { data: role } = await supabase

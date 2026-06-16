@@ -3,6 +3,7 @@ import "server-only";
 import { DailyDigestEmail } from "@/emails/daily-digest";
 import { getCommandSnapshot } from "@/lib/ai/command-context";
 import { getResendClient, NOTIFICATION_FROM } from "@/lib/email/resend";
+import { COMPANY_NAME } from "@/lib/company-data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateWorkflowNotificationsForUser } from "@/lib/notifications/rules";
 import { runWebsiteOperationsScan } from "@/lib/website-operations";
@@ -44,6 +45,10 @@ export async function runDailyAiDigest() {
   const digestDate = centralDate();
   const resend = getResendClient();
   const appUrl = getAppUrl();
+
+  if (!resend) {
+    console.warn("runDailyAiDigest: RESEND_API_KEY is not configured — digest emails will be skipped for all users.");
+  }
 
   await runWebsiteOperationsScan(admin, {
     baseUrl: appUrl,
@@ -144,7 +149,7 @@ export async function runDailyAiDigest() {
         {
           from: NOTIFICATION_FROM,
           to: email,
-          subject: "Reliance daily workflow digest",
+          subject: `${COMPANY_NAME} daily workflow digest`,
           react: DailyDigestEmail({
             appUrl,
             recipientName: profile?.display_name || profile?.legal_name || "there",

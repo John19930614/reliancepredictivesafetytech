@@ -62,23 +62,25 @@ async function getCurrentUser() {
 
 async function getCurrentRole(userId: string) {
   const supabase = await createClient();
-  if (!supabase) return null;
+  if (!supabase) return { role: null, error: "Supabase is not configured." };
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("user_roles")
     .select("role, account_status")
     .eq("user_id", userId)
     .eq("account_status", "active")
     .maybeSingle();
 
-  return data;
+  if (error) return { role: null, error: error.message };
+  return { role: data, error: null };
 }
 
 async function requireOwner() {
   const { user, error } = await getCurrentUser();
   if (!user) return { user: null, error };
 
-  const role = await getCurrentRole(user.id);
+  const { role, error: roleError } = await getCurrentRole(user.id);
+  if (roleError) return { user: null, error: roleError };
   if (!isPortalOwnerRole(role?.role)) {
     return { user: null, error: "Owner access is required for finance authorization." };
   }

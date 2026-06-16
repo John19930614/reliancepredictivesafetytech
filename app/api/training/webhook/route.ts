@@ -59,6 +59,10 @@ export async function POST(request: Request) {
   const signature = request.headers.get("x-vector-signature");
 
   if (!(await verifyVectorSignature(rawBody, signature))) {
+    console.error("training webhook: signature verification failed", {
+      signaturePresent: Boolean(signature),
+      secretConfigured: Boolean(process.env.VECTOR_WEBHOOK_SECRET),
+    });
     return Response.json({ error: "Invalid signature" }, { status: 401 });
   }
 
@@ -85,52 +89,76 @@ export async function POST(request: Request) {
     .eq("external_lms_course_id", payload.courseId)
     .maybeSingle();
 
-  // Insert the completion record
-  const { data: completion, error: completionError } = await admin
+  // Idempotency check — detect duplicate webhook delivery before inserting.
+  // Returns the existing completion ID so the rest of the handler can still
+  // attempt the cert upsert (handles the case where the first delivery
+  // completed the record but crashed before creating the cert).
+  const { data: existingCompletion } = await admin
     .from("training_completions")
-    .insert({
-      module_id: module?.id ?? null,
-      client_id: null, // can be enriched later via user roster sync
-      external_lms_user_id: payload.userId,
-      external_lms_course_id: payload.courseId,
-      learner_name: payload.userName,
-      learner_email: payload.userEmail ?? null,
-      score: payload.score ?? null,
-      passed: payload.passed ?? null,
-      completed_at: payload.completedAt,
-      time_spent_seconds: payload.timeSpentSeconds ?? null,
-      raw_payload: JSON.parse(rawBody),
-    })
     .select("id")
-    .single();
+    .eq("external_lms_user_id", payload.userId)
+    .eq("external_lms_course_id", payload.courseId)
+    .eq("completed_at", payload.completedAt)
+    .maybeSingle();
 
-  if (completionError || !completion) {
-    console.error("training webhook: completion insert failed", completionError?.message);
-    return Response.json({ error: "Failed to record completion" }, { status: 500 });
+  let completionId: string;
+
+  if (existingCompletion) {
+    completionId = existingCompletion.id;
+  } else {
+    const { data: completion, error: completionError } = await admin
+      .from("training_completions")
+      .insert({
+        module_id: module?.id ?? null,
+        client_id: null, // can be enriched later via user roster sync
+        external_lms_user_id: payload.userId,
+        external_lms_course_id: payload.courseId,
+        learner_name: payload.userName,
+        learner_email: payload.userEmail ?? null,
+        score: payload.score ?? null,
+        passed: payload.passed ?? null,
+        completed_at: payload.completedAt,
+        time_spent_seconds: payload.timeSpentSeconds ?? null,
+        raw_payload: JSON.parse(rawBody),
+      })
+      .select("id")
+      .single();
+
+    if (completionError || !completion) {
+      console.error("training webhook: completion insert failed", completionError?.message);
+      return Response.json({ error: "Failed to record completion" }, { status: 500 });
+    }
+    completionId = completion.id;
   }
 
-  // If a certification is included, upsert the certification record
+  // If a certification is included, upsert it against the unique (completion_id)
+  // constraint. ignoreDuplicates means a retry won't overwrite an existing cert,
+  // but will still create it if the first attempt crashed after the completion
+  // insert but before the cert insert.
   if (payload.certification) {
     const cert = payload.certification;
 
     const { data: certRecord, error: certError } = await admin
       .from("training_certifications")
-      .insert({
-        completion_id: completion.id,
-        client_id: null,
-        learner_name: payload.userName,
-        learner_email: payload.userEmail ?? null,
-        certification_name: cert.name,
-        issued_at: cert.issuedAt,
-        expires_at: cert.expiresAt ?? null,
-        cert_document_url: cert.documentUrl ?? null,
-        status: "Active",
-      })
+      .upsert(
+        {
+          completion_id: completionId,
+          client_id: null,
+          learner_name: payload.userName,
+          learner_email: payload.userEmail ?? null,
+          certification_name: cert.name,
+          issued_at: cert.issuedAt,
+          expires_at: cert.expiresAt ?? null,
+          cert_document_url: cert.documentUrl ?? null,
+          status: "Active",
+        },
+        { onConflict: "completion_id", ignoreDuplicates: true },
+      )
       .select("id, expires_at")
-      .single();
+      .maybeSingle();
 
     if (certError) {
-      console.error("training webhook: certification insert failed", certError.message);
+      console.error("training webhook: certification upsert failed", certError.message);
     }
 
     // Fire an immediate notification if the cert expires within 30 days
@@ -165,5 +193,5 @@ export async function POST(request: Request) {
     }
   }
 
-  return Response.json({ ok: true, completionId: completion.id });
+  return Response.json({ ok: true, completionId });
 }

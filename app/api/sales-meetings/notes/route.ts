@@ -9,6 +9,7 @@ import {
   TextRun,
 } from "docx";
 import { createClient } from "@/lib/supabase/server";
+import { COMPANY_NAME } from "@/lib/company-data";
 
 const notesModel = process.env.AI_COMMAND_MODEL || "openai/gpt-4o";
 
@@ -135,7 +136,7 @@ function buildDocument(input: {
     );
 
   return new Document({
-    creator: "Reliance Predictive Safety Technologies",
+    creator: COMPANY_NAME,
     title,
     description: "AI-generated meeting notes",
     sections: [

@@ -29,9 +29,6 @@ import {
   startupChecklistSeed,
   type CompanyClient,
   type CompanyDocument,
-  type CompanyLegalIssue,
-  type CompanyOperationsRecord,
-  type DemoRequest,
 } from "@/lib/company-data";
 import { getCommandSnapshot, type CommandPriorityItem } from "@/lib/ai/command-context";
 import { createClient } from "@/lib/supabase/server";
@@ -183,89 +180,66 @@ export default async function EmployeeDashboardPage() {
       : href === "/employee/payroll"
         ? canAccessPayroll && canAccessEmployeePath(currentRole?.role, currentRole?.account_status, href, moduleKeys)
       : canAccessEmployeePath(currentRole?.role, currentRole?.account_status, href, moduleKeys));
+  // 8 queries instead of 19 — one per table, counts derived in JS
   const [
-    { count: checklistCount },
-    { count: blockedChecklistCount },
-    { count: documentCount },
-    { count: approvedDocumentCount },
-    { count: requestCount },
-    { count: newRequestCount },
-    { data: newRequests },
-    { count: clientCount },
-    { count: activeCompanyCount },
-    { data: pipelineClients },
-    { count: operationsRecordCount },
-    { count: openOperationsRecordCount },
-    { data: priorityOperationsRecords },
-    { count: openLegalIssueCount },
-    { data: openLegalIssues },
-    { count: companyPositionCount },
-    { count: openPositionCount },
-    { count: submittedTimeCardCount },
+    { data: checklistStatuses },
     { data: documentStatuses },
+    { data: requestStatuses },
+    { data: clientStages },
+    { count: priorityOpsCount },
+    { count: openLegalIssueCount },
+    { data: positionStatuses },
+    { count: submittedTimeCardCount },
   ] = supabase
     ? await Promise.all([
-        supabase.from("company_checklist_items").select("*", { count: "exact", head: true }),
-        supabase.from("company_checklist_items").select("*", { count: "exact", head: true }).eq("status", "Blocked"),
-        supabase.from("company_documents").select("*", { count: "exact", head: true }),
-        supabase.from("company_documents").select("*", { count: "exact", head: true }).in("status", ["Approved", "Signed / Executed"]),
-        supabase.from("demo_requests").select("*", { count: "exact", head: true }),
-        supabase.from("demo_requests").select("*", { count: "exact", head: true }).eq("status", "new"),
-        supabase.from("demo_requests").select("*").eq("status", "new").order("created_at", { ascending: false }).limit(4),
-        supabase.from("company_clients").select("*", { count: "exact", head: true }),
-        supabase.from("company_clients").select("*", { count: "exact", head: true }).in("lifecycle_stage", ["Active Company", "Renewal / Expansion"]),
+        supabase.from("company_checklist_items").select("status"),
+        supabase.from("company_documents").select("status"),
+        supabase.from("demo_requests").select("status"),
         supabase.from("company_clients").select("lifecycle_stage"),
-        supabase.from("company_operations_records").select("*", { count: "exact", head: true }),
-        supabase.from("company_operations_records").select("*", { count: "exact", head: true }).neq("status", "Archived"),
         supabase
           .from("company_operations_records")
-          .select("*")
+          .select("*", { count: "exact", head: true })
           .in("priority", ["High", "Critical"])
-          .neq("status", "Archived")
-          .order("updated_at", { ascending: false })
-          .limit(4),
-        supabase.from("company_legal_issues").select("*", { count: "exact", head: true }).in("status", ["Open", "In Review", "Waiting"]),
+          .neq("status", "Archived"),
         supabase
           .from("company_legal_issues")
-          .select("*")
-          .in("status", ["Open", "In Review", "Waiting"])
-          .order("updated_at", { ascending: false })
-          .limit(4),
-        supabase.from("company_positions").select("*", { count: "exact", head: true }),
-        supabase.from("company_positions").select("*", { count: "exact", head: true }).in("status", ["Open", "Needed"]),
+          .select("*", { count: "exact", head: true })
+          .in("status", ["Open", "In Review", "Waiting"]),
+        supabase.from("company_positions").select("status"),
         supabase.from("employee_time_cards").select("*", { count: "exact", head: true }).eq("status", "submitted"),
-        supabase.from("company_documents").select("status"),
       ])
     : [
-        { count: startupChecklistSeed.length },
-        { count: startupChecklistSeed.filter((item) => item.status === "Blocked").length },
+        { data: startupChecklistSeed.map((i) => ({ status: i.status })) },
+        { data: [] as { status: string }[] },
+        { data: [] as { status: string }[] },
+        { data: [] as { lifecycle_stage: string }[] },
         { count: 0 },
         { count: 0 },
+        { data: companyPositionSeed.map((p) => ({ status: p.status })) },
         { count: 0 },
-        { count: 0 },
-        { data: [] },
-        { count: 0 },
-        { count: 0 },
-        { data: [] },
-        { count: 0 },
-        { count: 0 },
-        { data: [] },
-        { count: 0 },
-        { data: [] },
-        { count: companyPositionSeed.length },
-        { count: companyPositionSeed.filter((position) => ["Open", "Needed"].includes(position.status)).length },
-        { count: 0 },
-        { data: [] },
       ];
 
-  const requestRows = (newRequests ?? []) as DemoRequest[];
-  const operationRows = (priorityOperationsRecords ?? []) as CompanyOperationsRecord[];
-  const legalRows = (openLegalIssues ?? []) as CompanyLegalIssue[];
-  const pipelineRows = buildPipelineCounts((pipelineClients ?? []) as Pick<CompanyClient, "lifecycle_stage">[]);
+  const checklistCount = checklistStatuses?.length ?? startupChecklistSeed.length;
+  const blockedChecklistCount =
+    checklistStatuses?.filter((i) => i.status === "Blocked").length ??
+    startupChecklistSeed.filter((i) => i.status === "Blocked").length;
+  const documentCount = documentStatuses?.length ?? 0;
+  const approvedDocumentCount =
+    documentStatuses?.filter((d) => d.status && ["Approved", "Signed / Executed"].includes(d.status)).length ?? 0;
   const documentStatusRows = (documentStatuses ?? []) as Pick<CompanyDocument, "status">[];
+  const requestCount = requestStatuses?.length ?? 0;
+  const newRequestCount = requestStatuses?.filter((r) => r.status === "new").length ?? 0;
+  const clientCount = clientStages?.length ?? 0;
+  const activeCompanyCount =
+    clientStages?.filter((c) => ["Active Company", "Renewal / Expansion"].includes(c.lifecycle_stage as string)).length ?? 0;
+  const pipelineRows = buildPipelineCounts((clientStages ?? []) as Pick<CompanyClient, "lifecycle_stage">[]);
+  const companyPositionCount = positionStatuses?.length ?? companyPositionSeed.length;
+  const openPositionCount =
+    positionStatuses?.filter((p) => ["Open", "Needed"].includes(p.status)).length ??
+    companyPositionSeed.filter((position) => ["Open", "Needed"].includes(position.status)).length;
   const requiredDocumentTotal = requiredDocuments.reduce((total, group) => total + group.items.length, 0);
-  const approvedReadiness = percent(approvedDocumentCount ?? 0, documentCount ?? 0);
-  const activeRiskCount = (openLegalIssueCount ?? 0) + (operationRows.length ?? 0) + (blockedChecklistCount ?? 0);
+  const approvedReadiness = percent(approvedDocumentCount, documentCount);
+  const activeRiskCount = (openLegalIssueCount ?? 0) + (priorityOpsCount ?? 0) + (blockedChecklistCount ?? 0);
   const commandSnapshot = supabase && user ? await getCommandSnapshot(supabase, user.id) : null;
   const financePriorityItems: CommandPriorityItem[] = [];
   let financeOpenAmount = 0;

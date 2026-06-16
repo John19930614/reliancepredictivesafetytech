@@ -27,7 +27,7 @@ async function getTwilioIceServers(): Promise<RTCIceServer[]> {
     });
 
     if (!response.ok) {
-      console.error("Twilio NTS token request failed.", response.status, await response.text().catch(() => ""));
+      console.error("ice-config: Twilio NTS token request failed", { status: response.status });
       return [];
     }
 
@@ -45,7 +45,7 @@ async function getTwilioIceServers(): Promise<RTCIceServer[]> {
       })
       .filter((server): server is RTCIceServer => server !== null);
   } catch (error) {
-    console.error("Could not fetch Twilio NTS ICE servers.", error);
+    console.error("ice-config: could not fetch Twilio NTS ICE servers", error instanceof Error ? error.message : error);
     return [];
   }
 }

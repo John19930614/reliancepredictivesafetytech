@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { Clock3 } from "lucide-react";
 import { TimeCardManager } from "@/components/TimeCardManager";
 import type {
@@ -68,7 +69,7 @@ export default async function TimeCardsPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return null;
+    redirect("/employee-login");
   }
 
   const { data: currentRole } = await supabase

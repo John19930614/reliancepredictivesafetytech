@@ -46,7 +46,7 @@ export default async function HomePage() {
               <h1>{COMPANY_NAME}</h1>
               <h2>{TAGLINE}</h2>
               <p>{getWebsiteContentValue(content, "home.hero.summary")}</p>
-              <div className="prevention-strip" aria-label="Reliance prevention workflow">
+              <div className="prevention-strip" aria-label={`${COMPANY_NAME} prevention workflow`}>
                 <span>Collect AI-assisted field data</span>
                 <span>Formulate safety trends</span>
                 <span>Predict risk patterns</span>
@@ -125,7 +125,7 @@ export default async function HomePage() {
               <h2>{getWebsiteContentValue(content, "home.contact.heading")}</h2>
               <p>{getWebsiteContentValue(content, "home.contact.summary")}</p>
               <p>
-                Contact email placeholder:
+                Contact us:
                 <br />
                 <strong>{CONTACT_EMAIL}</strong>
               </p>

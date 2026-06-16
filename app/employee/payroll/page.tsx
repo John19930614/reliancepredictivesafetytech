@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { ReceiptText } from "lucide-react";
 import { PayrollTrackerManager } from "@/components/PayrollTrackerManager";
 import type {
@@ -36,7 +37,7 @@ export default async function PayrollTrackerPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return null;
+    redirect("/employee-login");
   }
 
   const { data: role } = await supabase
