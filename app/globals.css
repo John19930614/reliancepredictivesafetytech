@@ -1196,6 +1196,16 @@ textarea {
   background: #111;
 }
 
+.demo-scheduler-tab {
+  display: flex;
+  justify-content: center;
+}
+
+.demo-scheduler-tab .sales-meeting-panel {
+  width: 100%;
+  max-width: 640px;
+}
+
 .demo-link-grid {
   display: grid;
   gap: 10px;
