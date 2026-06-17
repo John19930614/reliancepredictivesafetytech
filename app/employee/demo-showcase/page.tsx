@@ -130,11 +130,12 @@ const biotechLinks = [
   },
 ];
 
-type DemoTab = "construction" | "biotech";
+type DemoTab = "construction" | "biotech" | "scheduler";
 
 export default function DemoShowcasePage() {
   const [activeTab, setActiveTab] = useState<DemoTab>("construction");
 
+  const isDeckTab = activeTab === "construction" || activeTab === "biotech";
   const isConstruction = activeTab === "construction";
 
   const links = isConstruction ? constructionLinks : biotechLinks;
@@ -143,27 +144,27 @@ export default function DemoShowcasePage() {
   const slidePath = isConstruction ? "/demo-deck-slides" : "/bio-demo-deck-slides";
   const totalPages = isConstruction ? 29 : 23;
   const platformLabel = isConstruction ? "SafetyDocs360 demo links" : "PredictSafeBIO demo links";
-  const eyebrowLabel = isConstruction ? "SafetyDocs360 Demo" : "PredictSafeBIO Demo";
-  const meetingTitle = isConstruction ? "SafetyDocs360 demo presentation" : "PredictSafeBIO demo presentation";
 
   return (
     <div className="demo-showcase">
       <div className="portal-topline command-hero">
         <div>
-          <div className="eyebrow">{eyebrowLabel}</div>
+          <div className="eyebrow">Demo Showcase</div>
           <h1>Presentation and platform links</h1>
           <p>Use this page during sales calls to keep the deck and live platform pages in one protected workspace.</p>
         </div>
-        <a className="button button-light" href={deckPdfPath} target="_blank" rel="noreferrer">
-          Open Deck <ExternalLink size={17} />
-        </a>
+        {isDeckTab && (
+          <a className="button button-light" href={deckPdfPath} target="_blank" rel="noreferrer">
+            Open Deck <ExternalLink size={17} />
+          </a>
+        )}
       </div>
 
-      <div className="demo-showcase-tabs" role="tablist" aria-label="Sales deck selection">
+      <div className="demo-showcase-tabs" role="tablist" aria-label="Demo section">
         <button
           role="tab"
-          aria-selected={isConstruction}
-          className={`demo-tab${isConstruction ? " demo-tab-active" : ""}`}
+          aria-selected={activeTab === "construction"}
+          className={`demo-tab${activeTab === "construction" ? " demo-tab-active" : ""}`}
           onClick={() => setActiveTab("construction")}
           type="button"
         >
@@ -171,62 +172,77 @@ export default function DemoShowcasePage() {
         </button>
         <button
           role="tab"
-          aria-selected={!isConstruction}
-          className={`demo-tab${!isConstruction ? " demo-tab-active" : ""}`}
+          aria-selected={activeTab === "biotech"}
+          className={`demo-tab${activeTab === "biotech" ? " demo-tab-active" : ""}`}
           onClick={() => setActiveTab("biotech")}
           type="button"
         >
           BioTech
         </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === "scheduler"}
+          className={`demo-tab${activeTab === "scheduler" ? " demo-tab-active" : ""}`}
+          onClick={() => setActiveTab("scheduler")}
+          type="button"
+        >
+          Scheduler
+        </button>
       </div>
 
-      <div className="demo-showcase-layout">
-        <section className="command-panel demo-presentation-panel" aria-labelledby="demo-presentation-title">
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">Presentation</span>
-              <h2 id="demo-presentation-title">{deckTitle}</h2>
+      {isDeckTab && (
+        <div className="demo-showcase-layout">
+          <section className="command-panel demo-presentation-panel" aria-labelledby="demo-presentation-title">
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">Presentation</span>
+                <h2 id="demo-presentation-title">{deckTitle}</h2>
+              </div>
+              <span className="badge">{deckPdfPath}</span>
             </div>
-            <span className="badge">{deckPdfPath}</span>
-          </div>
-          <DemoDeckViewer
-            key={activeTab}
-            slidePath={slidePath}
-            totalPages={totalPages}
-            altPrefix={deckTitle}
-          />
-        </section>
+            <DemoDeckViewer
+              key={activeTab}
+              slidePath={slidePath}
+              totalPages={totalPages}
+              altPrefix={deckTitle}
+            />
+          </section>
 
-        <SalesMeetingInvitePanel compact defaultTitle={meetingTitle} />
-
-        <section className="command-panel" aria-labelledby="platform-links-title">
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">Platform</span>
-              <h2 id="platform-links-title">{platformLabel}</h2>
+          <section className="command-panel" aria-labelledby="platform-links-title">
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">Platform</span>
+                <h2 id="platform-links-title">{platformLabel}</h2>
+              </div>
+              <span className="badge">{links.length} links</span>
             </div>
-            <span className="badge">{links.length} links</span>
-          </div>
 
-          <div className="demo-link-grid">
-            {links.map((link) => {
-              const Icon = link.icon;
-              return (
-                <a className="demo-link-card" href={link.href} target="_blank" rel="noreferrer" key={link.href}>
-                  <span className="demo-link-icon">
-                    <Icon size={19} />
-                  </span>
-                  <span className="demo-link-meta">
-                    <strong>{link.label}</strong>
-                    <span>{link.description}</span>
-                  </span>
-                  <ExternalLink size={16} />
-                </a>
-              );
-            })}
-          </div>
-        </section>
-      </div>
+            <div className="demo-link-grid">
+              {links.map((link) => {
+                const Icon = link.icon;
+                return (
+                  <a className="demo-link-card" href={link.href} target="_blank" rel="noreferrer" key={link.href}>
+                    <span className="demo-link-icon">
+                      <Icon size={19} />
+                    </span>
+                    <span className="demo-link-meta">
+                      <strong>{link.label}</strong>
+                      <span>{link.description}</span>
+                    </span>
+                    <ExternalLink size={16} />
+                  </a>
+                );
+              })}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {activeTab === "scheduler" && (
+        <div className="demo-scheduler-tab">
+          <SalesMeetingInvitePanel defaultTitle="SafetyDocs360 demo presentation" />
+        </div>
+      )}
     </div>
   );
 }
