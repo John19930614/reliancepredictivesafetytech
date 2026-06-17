@@ -3,19 +3,22 @@
 import { ChevronLeft, ChevronRight, Maximize2, Minimize2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const TOTAL_DECK_PAGES = 29;
-const SLIDE_PATH = "/demo-deck-slides";
-
-function getSlideSrc(page: number) {
-  return `${SLIDE_PATH}/slide-${String(page).padStart(2, "0")}.png`;
+interface DemoDeckViewerProps {
+  slidePath?: string;
+  totalPages?: number;
+  altPrefix?: string;
 }
 
-export function DemoDeckViewer() {
+function getSlideSrc(slidePath: string, page: number) {
+  return `${slidePath}/slide-${String(page).padStart(2, "0")}.png`;
+}
+
+export function DemoDeckViewer({ slidePath = "/demo-deck-slides", totalPages = 29, altPrefix = "Reliance demo presentation" }: DemoDeckViewerProps) {
   const [page, setPage] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const viewerRef = useRef<HTMLDivElement>(null);
 
-  const slideSrc = useMemo(() => getSlideSrc(page), [page]);
+  const slideSrc = useMemo(() => getSlideSrc(slidePath, page), [slidePath, page]);
 
   useEffect(() => {
     const syncFullscreenState = () => {
@@ -28,10 +31,10 @@ export function DemoDeckViewer() {
 
   useEffect(() => {
     [page - 1, page + 1]
-      .filter((slidePage) => slidePage >= 1 && slidePage <= TOTAL_DECK_PAGES)
+      .filter((slidePage) => slidePage >= 1 && slidePage <= totalPages)
       .forEach((slidePage) => {
         const image = new Image();
-        image.src = getSlideSrc(slidePage);
+        image.src = getSlideSrc(slidePath, slidePage);
       });
   }, [page]);
 
@@ -40,7 +43,7 @@ export function DemoDeckViewer() {
   };
 
   const goToNextPage = () => {
-    setPage((currentPage) => Math.min(TOTAL_DECK_PAGES, currentPage + 1));
+    setPage((currentPage) => Math.min(totalPages, currentPage + 1));
   };
 
   const toggleFullscreen = async () => {
@@ -60,9 +63,9 @@ export function DemoDeckViewer() {
             <ChevronLeft size={18} />
           </button>
           <span className="demo-deck-page-status" aria-live="polite">
-            Page {page} of {TOTAL_DECK_PAGES}
+            Page {page} of {totalPages}
           </span>
-          <button className="icon-button demo-deck-button" onClick={goToNextPage} type="button" aria-label="Next page" disabled={page === TOTAL_DECK_PAGES}>
+          <button className="icon-button demo-deck-button" onClick={goToNextPage} type="button" aria-label="Next page" disabled={page === totalPages}>
             <ChevronRight size={18} />
           </button>
         </div>
@@ -74,7 +77,7 @@ export function DemoDeckViewer() {
       </div>
 
       <div className="demo-slide-viewer">
-        <img src={slideSrc} alt={`Reliance demo presentation slide ${page}`} />
+        <img src={slideSrc} alt={`${altPrefix} slide ${page}`} />
       </div>
     </div>
   );
