@@ -3,12 +3,14 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   BookOpenCheck,
   Bot,
   BriefcaseBusiness,
   CalendarDays,
   CarFront,
+  ChevronDown,
   Clock3,
   ClipboardList,
   BarChart2,
@@ -94,6 +96,8 @@ const navGroups = [
   },
 ];
 
+const STORAGE_KEY = "portal-nav-collapsed";
+
 function isActivePath(pathname: string, href: string) {
   if (href === "/employee") {
     return pathname === href;
@@ -118,6 +122,34 @@ export function EmployeeSidebar({
   unreadNotificationCount = 0,
 }: EmployeeSidebarProps) {
   const pathname = usePathname();
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) setCollapsed(new Set(JSON.parse(saved)));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  function toggleGroup(label: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) {
+        next.delete(label);
+      } else {
+        next.add(label);
+      }
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify([...next]));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }
+
   const visibleGroups = navGroups
     .map((group) => ({
       ...group,
@@ -148,25 +180,40 @@ export function EmployeeSidebar({
       </div>
 
       <nav className="portal-nav" aria-label="Employee navigation">
-        {visibleGroups.map((group) => (
-          <section className="portal-nav-group" key={group.label} aria-label={group.label}>
-            <div className="portal-nav-heading">{group.label}</div>
-            {group.items.map((item) => {
-              const Icon = item.icon;
-              const active = isActivePath(pathname, item.href);
+        {visibleGroups.map((group) => {
+          const isCollapsed = collapsed.has(group.label);
+          const hasActive = group.items.some((item) => isActivePath(pathname, item.href));
 
-              return (
-                <Link className={active ? "active" : undefined} href={item.href} key={item.href} aria-current={active ? "page" : undefined}>
-                  <Icon size={17} />
-                  <span>{item.label}</span>
-                  {item.href === "/employee/ai" && unreadNotificationCount > 0 ? (
-                    <span className="nav-count-badge">{unreadNotificationCount}</span>
-                  ) : null}
-                </Link>
-              );
-            })}
-          </section>
-        ))}
+          return (
+            <section className="portal-nav-group" key={group.label} aria-label={group.label}>
+              <button
+                className={`portal-nav-heading portal-nav-heading-toggle${isCollapsed ? " portal-nav-heading-collapsed" : ""}`}
+                onClick={() => toggleGroup(group.label)}
+                type="button"
+                aria-expanded={!isCollapsed}
+              >
+                {group.label}
+                {isCollapsed && hasActive && <span className="portal-nav-active-dot" aria-hidden="true" />}
+                <ChevronDown size={13} className="portal-nav-chevron" aria-hidden="true" />
+              </button>
+
+              {!isCollapsed && group.items.map((item) => {
+                const Icon = item.icon;
+                const active = isActivePath(pathname, item.href);
+
+                return (
+                  <Link className={active ? "active" : undefined} href={item.href} key={item.href} aria-current={active ? "page" : undefined}>
+                    <Icon size={17} />
+                    <span>{item.label}</span>
+                    {item.href === "/employee/ai" && unreadNotificationCount > 0 ? (
+                      <span className="nav-count-badge">{unreadNotificationCount}</span>
+                    ) : null}
+                  </Link>
+                );
+              })}
+            </section>
+          );
+        })}
       </nav>
 
       <form className="portal-signout" action={logout}>

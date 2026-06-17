@@ -611,6 +611,40 @@ textarea {
   text-transform: uppercase;
 }
 
+.portal-nav-heading-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.portal-nav-heading-toggle:hover {
+  color: rgba(240, 200, 106, 0.95);
+}
+
+.portal-nav-chevron {
+  margin-left: auto;
+  transition: transform 0.2s ease;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.portal-nav-heading-collapsed .portal-nav-chevron {
+  transform: rotate(-90deg);
+}
+
+.portal-nav-active-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(240, 200, 106, 0.9);
+  flex-shrink: 0;
+}
+
 .portal-nav a,
 .portal-signout button {
   display: flex;
