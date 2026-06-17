@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   BookOpenCheck,
   Bot,
@@ -122,16 +122,15 @@ export function EmployeeSidebar({
   unreadNotificationCount = 0,
 }: EmployeeSidebarProps) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) setCollapsed(new Set(JSON.parse(saved)));
+      return saved ? new Set(JSON.parse(saved)) : new Set();
     } catch {
-      // ignore
+      return new Set();
     }
-  }, []);
+  });
 
   function toggleGroup(label: string) {
     setCollapsed((prev) => {

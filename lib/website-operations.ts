@@ -286,7 +286,7 @@ export async function runWebsiteOperationsScan(
   const createdChecks = data ?? [];
   const unhealthyChecks = createdChecks.filter((check) => check.status !== "ok");
   const brokenLinkCount = createdChecks.reduce((count, check) => count + (Array.isArray(check.broken_links) ? check.broken_links.length : 0), 0);
-  const contentGapCount = createdChecks.reduce((count, check) => count + check.content_gaps.length, 0);
+  const contentGapCount = createdChecks.reduce((count, check) => count + (check.content_gaps?.length ?? 0), 0);
 
   await supabase.from("website_operations_events").insert({
     actor_user_id: values.actorUserId ?? null,
@@ -360,7 +360,7 @@ export async function getWebsiteOperationsSnapshot(supabase: PortalClient): Prom
 
   const routeChecks = [...latestByRoute.values()];
   const brokenLinks = routeChecks.reduce((count, check) => count + (Array.isArray(check.broken_links) ? check.broken_links.length : 0), 0);
-  const contentGaps = routeChecks.reduce((count, check) => count + check.content_gaps.length, 0);
+  const contentGaps = routeChecks.reduce((count, check) => count + (check.content_gaps?.length ?? 0), 0);
   const unhealthyRoutes = routeChecks.filter((check) => check.status !== "ok").length;
   const pendingContentDrafts = (contentItems ?? []).filter((item) => item.status === "draft" || item.status === "pending_approval").length;
 

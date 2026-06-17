@@ -125,7 +125,7 @@ export async function POST(req: Request) {
                 ? {
                     title: data.route_path,
                     status: data.status,
-                    summary: `HTTP ${data.status_code ?? "n/a"} in ${data.response_ms ?? 0} ms. ${data.content_gaps.length} content gaps. Broken links: ${JSON.stringify(data.broken_links)}.`,
+                    summary: `HTTP ${data.status_code ?? "n/a"} in ${data.response_ms ?? 0} ms. ${(data.content_gaps?.length ?? 0)} content gaps. Broken links: ${JSON.stringify(data.broken_links)}.`,
                   }
                 : { error: "Website health check not found." };
             }

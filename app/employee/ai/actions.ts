@@ -77,20 +77,22 @@ export async function generateMyWorkflowNotifications() {
 }
 
 export async function markNotificationRead(notificationId: string) {
-  const { supabase } = await getCurrentUser();
+  const { supabase, user } = await getCurrentUser();
   await supabase
     .from("portal_notifications")
     .update({ status: "read", read_at: new Date().toISOString() })
-    .eq("id", notificationId);
+    .eq("id", notificationId)
+    .eq("recipient_user_id", user.id);
   revalidatePath("/employee/ai");
 }
 
 export async function archiveNotification(notificationId: string) {
-  const { supabase } = await getCurrentUser();
+  const { supabase, user } = await getCurrentUser();
   await supabase
     .from("portal_notifications")
     .update({ status: "archived", archived_at: new Date().toISOString() })
-    .eq("id", notificationId);
+    .eq("id", notificationId)
+    .eq("recipient_user_id", user.id);
   revalidatePath("/employee/ai");
 }
 

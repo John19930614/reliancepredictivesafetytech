@@ -232,7 +232,7 @@ async function summarizeRecord(sourceType: string, sourceId: string) {
           status: data.status,
           summary:
             `Website route ${data.route_path} returned HTTP ${data.status_code ?? "n/a"} in ${data.response_ms ?? 0} ms. ` +
-            `${data.content_gaps.length} content gaps. Broken links: ${JSON.stringify(data.broken_links)}.`,
+            `${(data.content_gaps?.length ?? 0)} content gaps. Broken links: ${JSON.stringify(data.broken_links)}.`,
           actionHref: getWorkflowActionHref({ sourceType, sourceId }),
         }
       : { error: "Website health check not found." };
