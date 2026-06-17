@@ -1,8 +1,28 @@
-import { BarChart3, BriefcaseBusiness, ExternalLink, FileCheck2, Gauge, HardHat, Presentation, UserRound } from "lucide-react";
+"use client";
+
+import { useState } from "react";
+import {
+  AlertCircle,
+  BarChart3,
+  BriefcaseBusiness,
+  Calendar,
+  ClipboardCheck,
+  ExternalLink,
+  FileCheck2,
+  FileText,
+  FlaskConical,
+  Gauge,
+  GraduationCap,
+  HardHat,
+  Presentation,
+  ShieldAlert,
+  Siren,
+  UserRound,
+} from "lucide-react";
 import { DemoDeckViewer } from "@/components/DemoDeckViewer";
 import { SalesMeetingInvitePanel } from "@/components/SalesMeetingInvitePanel";
 
-const safetyDocsLinks = [
+const constructionLinks = [
   {
     label: "Field Audits",
     href: "https://safety360docs.com/field-audits",
@@ -53,18 +73,111 @@ const safetyDocsLinks = [
   },
 ];
 
+const biotechLinks = [
+  {
+    label: "Predictive Engine",
+    href: "https://predictsafe-bio.vercel.app/predictive-engine",
+    description: "AI risk forecasting and composite safety score.",
+    icon: Gauge,
+  },
+  {
+    label: "Risk Command Center",
+    href: "https://predictsafe-bio.vercel.app/risk-command-center",
+    description: "Live compliance score and escalation overview.",
+    icon: ShieldAlert,
+  },
+  {
+    label: "Compliance Calendar",
+    href: "https://predictsafe-bio.vercel.app/compliance-calendar",
+    description: "Scheduled audits, inspections, and compliance deadlines.",
+    icon: Calendar,
+  },
+  {
+    label: "Assessments",
+    href: "https://predictsafe-bio.vercel.app/assessments",
+    description: "Risk assessments and control verification workflows.",
+    icon: ClipboardCheck,
+  },
+  {
+    label: "Incidents",
+    href: "https://predictsafe-bio.vercel.app/incidents",
+    description: "Incident reporting, CAPAs, and trend tracking.",
+    icon: AlertCircle,
+  },
+  {
+    label: "Documents",
+    href: "https://predictsafe-bio.vercel.app/documents",
+    description: "SOPs, policies, and audit-ready document control.",
+    icon: FileText,
+  },
+  {
+    label: "Training Matrix",
+    href: "https://predictsafe-bio.vercel.app/training-matrix",
+    description: "Staff training status, completions, and gaps.",
+    icon: GraduationCap,
+  },
+  {
+    label: "Chemical Inventory",
+    href: "https://predictsafe-bio.vercel.app/chemical-inventory",
+    description: "Chemical inventory, SDS currency, and hazard class tracking.",
+    icon: FlaskConical,
+  },
+  {
+    label: "Emergency Response",
+    href: "https://predictsafe-bio.vercel.app/emergency-response",
+    description: "Drills, equipment checks, and emergency readiness.",
+    icon: Siren,
+  },
+];
+
+type DemoTab = "construction" | "biotech";
+
 export default function DemoShowcasePage() {
+  const [activeTab, setActiveTab] = useState<DemoTab>("construction");
+
+  const isConstruction = activeTab === "construction";
+
+  const links = isConstruction ? constructionLinks : biotechLinks;
+  const deckTitle = isConstruction ? "Reliance demo deck" : "PredictSafeBIO demo deck";
+  const deckPdfPath = isConstruction ? "/demo-deck.pdf" : "/bio-demo-deck.pdf";
+  const slidePath = isConstruction ? "/demo-deck-slides" : "/bio-demo-deck-slides";
+  const totalPages = isConstruction ? 29 : 23;
+  const platformLabel = isConstruction ? "SafetyDocs360 demo links" : "PredictSafeBIO demo links";
+  const eyebrowLabel = isConstruction ? "SafetyDocs360 Demo" : "PredictSafeBIO Demo";
+  const meetingTitle = isConstruction ? "SafetyDocs360 demo presentation" : "PredictSafeBIO demo presentation";
+
   return (
     <div className="demo-showcase">
       <div className="portal-topline command-hero">
         <div>
-          <div className="eyebrow">SafetyDocs360 Demo</div>
+          <div className="eyebrow">{eyebrowLabel}</div>
           <h1>Presentation and platform links</h1>
-          <p>Use this page during sales calls to keep the deck and live SafetyDocs360 pages in one protected workspace.</p>
+          <p>Use this page during sales calls to keep the deck and live platform pages in one protected workspace.</p>
         </div>
-        <a className="button button-light" href="/demo-deck.pdf" target="_blank" rel="noreferrer">
+        <a className="button button-light" href={deckPdfPath} target="_blank" rel="noreferrer">
           Open Deck <ExternalLink size={17} />
         </a>
+      </div>
+
+      <div className="demo-showcase-tabs" role="tablist" aria-label="Sales deck selection">
+        <button
+          role="tab"
+          aria-selected={isConstruction}
+          className={`demo-tab${isConstruction ? " demo-tab-active" : ""}`}
+          onClick={() => setActiveTab("construction")}
+          type="button"
+        >
+          Construction
+        </button>
+        <button
+          role="tab"
+          aria-selected={!isConstruction}
+          className={`demo-tab${!isConstruction ? " demo-tab-active" : ""}`}
+          onClick={() => setActiveTab("biotech")}
+          type="button"
+        >
+          BioTech
+        </button>
       </div>
 
       <div className="demo-showcase-layout">
@@ -72,28 +185,32 @@ export default function DemoShowcasePage() {
           <div className="panel-heading">
             <div>
               <span className="eyebrow">Presentation</span>
-              <h2 id="demo-presentation-title">Reliance demo deck</h2>
+              <h2 id="demo-presentation-title">{deckTitle}</h2>
             </div>
-            <span className="badge">/demo-deck.pdf</span>
+            <span className="badge">{deckPdfPath}</span>
           </div>
-          <DemoDeckViewer />
+          <DemoDeckViewer
+            key={activeTab}
+            slidePath={slidePath}
+            totalPages={totalPages}
+            altPrefix={deckTitle}
+          />
         </section>
 
-        <SalesMeetingInvitePanel compact defaultTitle="SafetyDocs360 demo presentation" />
+        <SalesMeetingInvitePanel compact defaultTitle={meetingTitle} />
 
-        <section className="command-panel" aria-labelledby="safetydocs-links-title">
+        <section className="command-panel" aria-labelledby="platform-links-title">
           <div className="panel-heading">
             <div>
               <span className="eyebrow">Platform</span>
-              <h2 id="safetydocs-links-title">SafetyDocs360 demo links</h2>
+              <h2 id="platform-links-title">{platformLabel}</h2>
             </div>
-            <span className="badge">{safetyDocsLinks.length} links</span>
+            <span className="badge">{links.length} links</span>
           </div>
 
           <div className="demo-link-grid">
-            {safetyDocsLinks.map((link) => {
+            {links.map((link) => {
               const Icon = link.icon;
-
               return (
                 <a className="demo-link-card" href={link.href} target="_blank" rel="noreferrer" key={link.href}>
                   <span className="demo-link-icon">
