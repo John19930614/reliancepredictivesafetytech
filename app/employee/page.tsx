@@ -6,11 +6,13 @@ import {
   BookOpenCheck,
   Bot,
   BriefcaseBusiness,
+  CalendarDays,
   CarFront,
   CheckCircle2,
   Clock3,
   Database,
   DollarSign,
+  FileSignature,
   FileText,
   Gauge,
   Inbox,
@@ -240,7 +242,16 @@ export default async function EmployeeDashboardPage() {
   const requiredDocumentTotal = requiredDocuments.reduce((total, group) => total + group.items.length, 0);
   const approvedReadiness = percent(approvedDocumentCount, documentCount);
   const activeRiskCount = (openLegalIssueCount ?? 0) + (priorityOpsCount ?? 0) + (blockedChecklistCount ?? 0);
-  const commandSnapshot = supabase && user ? await getCommandSnapshot(supabase, user.id) : null;
+  const isOwnerRole = canAccessPayroll;
+  const [commandSnapshot, { count: pendingOnboardingCount }, { count: totalOnboardingCount }] = await Promise.all([
+    supabase && user ? getCommandSnapshot(supabase, user.id) : Promise.resolve(null),
+    supabase && user
+      ? supabase.from("employee_document_assignments").select("*", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "pending")
+      : Promise.resolve({ count: 0 as number | null }),
+    supabase && user
+      ? supabase.from("employee_document_assignments").select("*", { count: "exact", head: true }).eq("user_id", user.id)
+      : Promise.resolve({ count: 0 as number | null }),
+  ]);
   const financePriorityItems: CommandPriorityItem[] = [];
   let financeOpenAmount = 0;
   let financeReviewCount = 0;
@@ -359,6 +370,22 @@ export default async function EmployeeDashboardPage() {
     }))
     .filter((group) => group.modules.length > 0);
 
+  const pendingCount = pendingOnboardingCount ?? 0;
+  const totalCount = totalOnboardingCount ?? 0;
+  const getStartedSteps = [
+    {
+      href: "/employee/hr-onboarding",
+      icon: Users,
+      title: "HR Onboarding",
+      description: pendingCount > 0 ? `${pendingCount} item${pendingCount === 1 ? "" : "s"} pending` : "All items complete",
+      variant: pendingCount > 0 ? "urgent" : "done",
+    },
+    { href: "/employee/hr-documents", icon: FileText, title: "HR Documents", description: "Your employment documents", variant: "default" },
+    { href: "/employee/time-cards", icon: Clock3, title: "Time Cards", description: "Log and submit your hours", variant: "default" },
+    { href: "/employee/mail", icon: Inbox, title: "Employee Mail", description: "Messages from your team", variant: "default" },
+    { href: "/employee/calendar", icon: CalendarDays, title: "Calendar", description: "Your schedule and events", variant: "default" },
+  ].filter((step) => canOpenPath(step.href));
+
   return (
     <div className="command-center">
       <div className="portal-topline command-hero">
@@ -373,21 +400,70 @@ export default async function EmployeeDashboardPage() {
         </div>
       </div>
 
-      <section className="kpi-strip" aria-label="Command center KPIs">
-        {kpis.map((kpi) => {
-          const Icon = kpi.icon;
-          return (
-            <Link className="kpi-card" href={kpi.href} key={kpi.label}>
-              <span className="kpi-icon">
-                <Icon size={18} />
-              </span>
-              <span className="kpi-value">{kpi.value}</span>
-              <span className="kpi-label">{kpi.label}</span>
-              <span className="kpi-detail">{kpi.detail}</span>
-            </Link>
-          );
-        })}
-      </section>
+      {pendingCount > 0 && (
+        <div className="onboarding-banner" role="alert">
+          <div className="onboarding-banner-body">
+            <FileSignature size={20} />
+            <div>
+              <strong>Complete your HR onboarding</strong>
+              <p>
+                {pendingCount} of {totalCount} {totalCount === 1 ? "item" : "items"} still need your attention.
+              </p>
+            </div>
+          </div>
+          <Link className="button button-primary" href="/employee/hr-onboarding">
+            Go to Onboarding <ArrowRight size={16} />
+          </Link>
+        </div>
+      )}
+
+      {isOwnerRole ? (
+        <section className="kpi-strip" aria-label="Command center KPIs">
+          {kpis.map((kpi) => {
+            const Icon = kpi.icon;
+            return (
+              <Link className="kpi-card" href={kpi.href} key={kpi.label}>
+                <span className="kpi-icon">
+                  <Icon size={18} />
+                </span>
+                <span className="kpi-value">{kpi.value}</span>
+                <span className="kpi-label">{kpi.label}</span>
+                <span className="kpi-detail">{kpi.detail}</span>
+              </Link>
+            );
+          })}
+        </section>
+      ) : (
+        <section className="command-panel" aria-label="Getting started">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">Welcome</span>
+              <h2>Your first steps</h2>
+            </div>
+          </div>
+          <div className="get-started-steps">
+            {getStartedSteps.map((step) => {
+              const Icon = step.icon;
+              return (
+                <Link
+                  key={step.href}
+                  href={step.href}
+                  className={`get-started-step${step.variant === "urgent" ? " get-started-step-urgent" : step.variant === "done" ? " get-started-step-done" : ""}`}
+                >
+                  <span className="get-started-step-icon">
+                    <Icon size={18} />
+                  </span>
+                  <span className="get-started-step-text">
+                    <strong>{step.title}</strong>
+                    <span>{step.description}</span>
+                  </span>
+                  <ArrowRight size={15} className="get-started-step-arrow" />
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <div className="command-layout">
         <section className="command-panel attention-panel">

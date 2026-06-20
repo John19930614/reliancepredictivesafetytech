@@ -22,6 +22,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
   let currentRole: { role: string; account_status: string } | null = null;
   let canAccessFinance = false;
   let moduleKeys: string[] = [];
+  let pendingOnboardingCount = 0;
   let unreadNotificationCount = 0;
   let unreadChatNotificationCount = 0;
 
@@ -42,6 +43,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
       { count: chatNotificationCount, error: chatNotificationCountError },
       { data: financeAuthorization, error: financeAuthorizationError },
       { data: moduleAccess, error: moduleAccessError },
+      { count: pendingOnboardingRaw, error: pendingOnboardingError },
     ] = await Promise.all([
       supabase.from("employee_chat_profiles").select("*").order("display_name"),
       supabase.from("employee_chat_threads").select("*").eq("thread_type", "company").maybeSingle(),
@@ -60,6 +62,11 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
       hasFullPortalVisibility(role?.role, role?.account_status)
         ? Promise.resolve({ data: [], error: null })
         : supabase.from("portal_user_module_access").select("module_key").eq("user_id", user.id),
+      supabase
+        .from("employee_document_assignments")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("status", "pending"),
     ]);
 
     if (
@@ -68,7 +75,8 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
       (notificationCountError && !isMissingSchemaRelationError(notificationCountError)) ||
       (chatNotificationCountError && !isMissingSchemaRelationError(chatNotificationCountError)) ||
       (financeAuthorizationError && !isMissingSchemaRelationError(financeAuthorizationError)) ||
-      (moduleAccessError && !isMissingSchemaRelationError(moduleAccessError))
+      (moduleAccessError && !isMissingSchemaRelationError(moduleAccessError)) ||
+      (pendingOnboardingError && !isMissingSchemaRelationError(pendingOnboardingError))
     ) {
       console.error(
         "Could not load employee shell data.",
@@ -78,6 +86,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
 
     canAccessFinance = Boolean(isOwner || financeAuthorization);
     moduleKeys = (moduleAccess ?? []).map((access) => access.module_key);
+    pendingOnboardingCount = pendingOnboardingRaw ?? 0;
     unreadNotificationCount = notificationCount ?? 0;
     unreadChatNotificationCount = chatNotificationCount ?? 0;
 
@@ -120,6 +129,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
         canAccessFinance={canAccessFinance}
         currentRole={currentRole?.role}
         moduleKeys={moduleKeys}
+        pendingOnboardingCount={pendingOnboardingCount}
         unreadNotificationCount={unreadNotificationCount}
       />
       <main className="portal-main">{children}</main>

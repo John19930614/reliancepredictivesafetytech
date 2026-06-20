@@ -111,6 +111,7 @@ type EmployeeSidebarProps = {
   canAccessFinance?: boolean;
   currentRole?: string | null;
   moduleKeys?: readonly string[];
+  pendingOnboardingCount?: number;
   unreadNotificationCount?: number;
 };
 
@@ -119,6 +120,7 @@ export function EmployeeSidebar({
   canAccessFinance = false,
   currentRole = "employee",
   moduleKeys = [],
+  pendingOnboardingCount = 0,
   unreadNotificationCount = 0,
 }: EmployeeSidebarProps) {
   const pathname = usePathname();
@@ -206,6 +208,8 @@ export function EmployeeSidebar({
                     <span>{item.label}</span>
                     {item.href === "/employee/ai" && unreadNotificationCount > 0 ? (
                       <span className="nav-count-badge">{unreadNotificationCount}</span>
+                    ) : item.href === "/employee/hr-onboarding" && pendingOnboardingCount > 0 ? (
+                      <span className="nav-count-badge">{pendingOnboardingCount}</span>
                     ) : null}
                   </Link>
                 );
