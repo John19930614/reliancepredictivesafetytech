@@ -6306,3 +6306,133 @@ textarea {
     width: fit-content;
   }
 }
+
+/* ── Onboarding Banner ────────────────────────────────────────────────── */
+
+.onboarding-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  background: #fff4d8;
+  border: 1px solid rgba(201, 147, 43, 0.45);
+  border-left: 4px solid #c9932b;
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.onboarding-banner-body {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+}
+
+.onboarding-banner-body svg {
+  flex: 0 0 auto;
+  color: #a07020;
+}
+
+.onboarding-banner-body strong {
+  display: block;
+  font-size: 0.95rem;
+  color: #3b2b0c;
+  margin-bottom: 2px;
+}
+
+.onboarding-banner-body p {
+  margin: 0;
+  font-size: 0.84rem;
+  color: #8a6230;
+}
+
+/* ── Get Started Steps ────────────────────────────────────────────────── */
+
+.get-started-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.get-started-step {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 14px 16px;
+  border: 1px solid #e8ecf0;
+  border-radius: 8px;
+  background: #f9fafc;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease,
+    transform 150ms ease;
+}
+
+.get-started-step:hover {
+  border-color: rgba(201, 147, 43, 0.5);
+  background: #fff;
+  transform: translateY(-1px);
+}
+
+.get-started-step-icon {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #edf0f4;
+  color: #64707d;
+}
+
+.get-started-step-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.get-started-step-text strong {
+  display: block;
+  font-size: 0.9rem;
+  color: #111;
+  margin-bottom: 2px;
+}
+
+.get-started-step-text span {
+  font-size: 0.8rem;
+  color: #64707d;
+}
+
+.get-started-step-arrow {
+  flex: 0 0 auto;
+  color: #bcc4cc;
+}
+
+.get-started-step-urgent {
+  border-color: rgba(201, 147, 43, 0.45);
+  background: #fffdf7;
+}
+
+.get-started-step-urgent .get-started-step-icon {
+  background: #fff0cc;
+  color: #c9932b;
+}
+
+.get-started-step-urgent .get-started-step-text strong {
+  color: #7a4e08;
+}
+
+.get-started-step-urgent .get-started-step-text span {
+  color: #a07020;
+}
+
+.get-started-step-done .get-started-step-icon {
+  background: #e6f4ea;
+  color: #2e7d32;
+}
+
+.get-started-step-done .get-started-step-text span {
+  color: #2e7d32;
+}
