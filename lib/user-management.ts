@@ -66,6 +66,16 @@ export const portalModuleCatalog = [
   { key: "launch_gate", label: "Launch Gate", group: "Governance", pathPrefixes: ["/employee/launch-gate"] },
   { key: "users", label: "Users", group: "Admin", pathPrefixes: ["/employee/users"] },
   { key: "settings", label: "Settings", group: "Admin", pathPrefixes: ["/employee/settings"] },
+  { key: "platform_sprint", label: "Sprint Planning", group: "Platform", pathPrefixes: ["/employee/platform/sprint"] },
+  { key: "platform_releases", label: "Build & Release", group: "Platform", pathPrefixes: ["/employee/platform/releases"] },
+  { key: "platform_qa", label: "QA & Testing", group: "Platform", pathPrefixes: ["/employee/platform/qa"] },
+  { key: "platform_metrics", label: "Platform Metrics", group: "Platform", pathPrefixes: ["/employee/platform/metrics"] },
+  { key: "platform_docs", label: "Runbooks & Docs", group: "Platform", pathPrefixes: ["/employee/platform/docs"] },
+  { key: "platform_packages", label: "Vertical Packages", group: "Platform", pathPrefixes: ["/employee/platform/packages"] },
+  { key: "platform_billing", label: "Billing & Subscriptions", group: "Platform", pathPrefixes: ["/employee/platform/billing"] },
+  { key: "platform_audit", label: "Audit & Evidence", group: "Platform", pathPrefixes: ["/employee/platform/audit"] },
+  { key: "platform_ai_services", label: "AI Services", group: "Platform", pathPrefixes: ["/employee/platform/ai-services"] },
+  { key: "platform_infrastructure", label: "Infrastructure", group: "Platform", pathPrefixes: ["/employee/platform/infrastructure"] },
 ] as const;
 
 export type PortalModule = (typeof portalModuleCatalog)[number];
@@ -136,6 +146,13 @@ export function canAccessPortalModule(
   moduleKey: string | null | undefined,
   moduleKeys: readonly (string | null | undefined)[] | null | undefined,
 ) {
+  const module = isPortalModuleKey(moduleKey) ? portalModuleCatalog.find((m) => m.key === moduleKey) : undefined;
+
+  // Platform group requires platform_admin or super_admin regardless of granted keys
+  if (module?.group === "Platform") {
+    return accountStatus === "active" && (role === "platform_admin" || role === "super_admin");
+  }
+
   if (hasFullPortalVisibility(role, accountStatus)) {
     return true;
   }

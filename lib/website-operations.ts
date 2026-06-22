@@ -388,7 +388,7 @@ export async function getWebsiteOperationsSnapshot(supabase: PortalClient): Prom
     latestChecks: routeChecks,
     contentItems: contentItems ?? [],
     recentEvents: recentEvents ?? [],
-    recentDemoRequests: recentDemoRequests ?? [],
+    recentDemoRequests: (recentDemoRequests ?? []).map(r => ({ ...r, status: r.status ?? "", created_at: r.created_at ?? "" })),
     staleLeads: staleLeads ?? [],
     summary:
       `Website Operations is tracking ${counts.managedRoutes} managed routes, ${counts.unhealthyRoutes} route review item${counts.unhealthyRoutes === 1 ? "" : "s"}, ` +

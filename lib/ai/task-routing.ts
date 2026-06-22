@@ -71,6 +71,20 @@ export function getWorkflowActionHref({
       return "/employee/website-operations";
     case "workflow_action_proposal":
       return `/employee/ai#workflow-proposal-${sourceId}`;
+    case "platform_sprint":
+      return "/employee/platform/sprint";
+    case "platform_release":
+      return "/employee/platform/releases";
+    case "platform_qa":
+      return "/employee/platform/qa";
+    case "platform_billing":
+      return "/employee/platform/billing";
+    case "platform_audit":
+      return "/employee/platform/audit";
+    case "platform_infrastructure":
+      return "/employee/platform/infrastructure";
+    case "platform_packages":
+      return "/employee/platform/packages";
     default:
       return fallbackHref;
   }
@@ -103,6 +117,14 @@ export function getWorkflowSourceLabel(sourceType: string | null | undefined) {
     case "website_operations_event":
     case "website_scan":
       return "Website";
+    case "platform_sprint":
+    case "platform_release":
+    case "platform_qa":
+    case "platform_billing":
+    case "platform_audit":
+    case "platform_infrastructure":
+    case "platform_packages":
+      return "Platform";
     default:
       return "AI Notification";
   }

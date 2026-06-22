@@ -55,7 +55,7 @@ describe("portal module access", () => {
   });
 
   it("grants enough default visibility for invited employees to enter onboarding and mail", () => {
-    expect(defaultEmployeePortalModuleKeys).toEqual(["dashboard", "employee_mail", "hr_onboarding", "hr_documents", "time_cards"]);
+    expect(defaultEmployeePortalModuleKeys).toEqual(["dashboard", "employee_mail", "hr_onboarding", "hr_documents", "time_cards", "employee_calendar"]);
     expect(canAccessEmployeePath("employee", "active", "/employee", defaultEmployeePortalModuleKeys)).toBe(true);
     expect(canAccessEmployeePath("employee", "active", "/employee/mail", defaultEmployeePortalModuleKeys)).toBe(true);
     expect(canAccessEmployeePath("employee", "active", "/employee/hr-onboarding", defaultEmployeePortalModuleKeys)).toBe(true);

@@ -73,7 +73,7 @@ function normalizeLane(value: string): ParkingLotLane {
 }
 
 function sortCards(first: BrainstormingParkingLotCard, second: BrainstormingParkingLotCard) {
-  return first.sort_order - second.sort_order || first.created_at.localeCompare(second.created_at) || first.id.localeCompare(second.id);
+  return first.sort_order - second.sort_order || (first.created_at ?? "").localeCompare(second.created_at ?? "") || first.id.localeCompare(second.id);
 }
 
 function mergeRealtimeCard(cards: BrainstormingParkingLotCard[], card: BrainstormingParkingLotCard) {

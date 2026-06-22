@@ -20,7 +20,7 @@ export default async function SalesPipelinePage() {
           <p>Move prospects from lead and demo request through proposal, legal, onboarding, setup, and active status.</p>
         </div>
       </div>
-      <SalesPipelineManager demoRequests={demoRequests ?? []} initialClients={(clients ?? []) as CompanyClient[]} />
+      <SalesPipelineManager demoRequests={(demoRequests ?? []).map(r => ({ ...r, status: r.status ?? "", created_at: r.created_at ?? "" }))} initialClients={(clients ?? []) as CompanyClient[]} />
     </>
   );
 }

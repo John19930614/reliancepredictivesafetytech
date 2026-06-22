@@ -10,7 +10,8 @@
     "lint": "npm run typecheck",
     "start": "next start",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "types:generate": "supabase gen types typescript --project-id kmwgyoalstydoejqjemy > lib/supabase/types.ts"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.0",

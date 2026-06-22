@@ -331,7 +331,7 @@ export function EmployeeMailCenter({
                   )}
                 </div>
                 <div className="employee-mail-body">
-                  {selectedMessage.plain_body.split("\n").map((line, index) => (
+                  {selectedMessage.plain_body.split("\n").map((line: string, index: number) => (
                     <p key={`${selectedMessage.id}-${index}`}>{line || "\u00a0"}</p>
                   ))}
                 </div>

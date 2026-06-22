@@ -115,7 +115,7 @@ const screenShareCaptureOptions = {
 
 function mergeParticipant(participants: SalesMeetingParticipant[], participant: SalesMeetingParticipant) {
   const nextParticipants = participants.filter((item) => item.id !== participant.id);
-  return [...nextParticipants, participant].sort((first, second) => first.created_at.localeCompare(second.created_at));
+  return [...nextParticipants, participant].sort((first, second) => (first.created_at ?? "").localeCompare(second.created_at ?? ""));
 }
 
 function MeetingStreamTile({

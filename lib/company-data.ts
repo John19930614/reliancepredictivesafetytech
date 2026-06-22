@@ -981,15 +981,15 @@ export type EmployeeExpenseReceipt = {
   file_type: string | null;
   file_size: number | null;
   uploaded_by: string | null;
-  created_at: string;
+  created_at: string | null;
 };
 
 export type CompanyFinanceAuthorizedUser = {
   user_id: string;
   access_label: string | null;
   created_by: string | null;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
 };
 
 export type CompanyFinanceTransaction = {
@@ -1055,7 +1055,7 @@ export type CompanyFinanceReceipt = {
   file_type: string | null;
   file_size: number | null;
   uploaded_by: string | null;
-  created_at: string;
+  created_at: string | null;
 };
 
 export type CompanyOperationsRecord = {

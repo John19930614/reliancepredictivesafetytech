@@ -1,0 +1,69 @@
+name: Release Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. v1.2.0)"
+        required: true
+      environment:
+        description: "Target environment"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - pilot
+          - production
+      migration_required:
+        description: "Does this release include database migrations?"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+jobs:
+  pre-release-checks:
+    name: Pre-Release Gate (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Full test suite
+        run: npm test
+
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Check migration files exist (if required)
+        if: ${{ github.event.inputs.migration_required == 'true' }}
+        run: |
+          MIGRATION_COUNT=$(ls supabase/migrations/*.sql 2>/dev/null | wc -l)
+          echo "Found $MIGRATION_COUNT migration files"
+          if [ "$MIGRATION_COUNT" -lt 1 ]; then
+            echo "ERROR: migration_required=true but no SQL files found in supabase/migrations/"
+            exit 1
+          fi
+
+      - name: Release gate summary
+        run: |
+          echo "=================================="
+          echo "RELEASE GATE: ${{ github.event.inputs.version }}"
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          echo "Migration required: ${{ github.event.inputs.migration_required }}"
+          echo "All checks passed - awaiting human sign-off"
+          echo "=================================="

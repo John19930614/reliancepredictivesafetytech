@@ -14,6 +14,7 @@ import {
   Clock3,
   ClipboardList,
   BarChart2,
+  CreditCard,
   Database,
   DollarSign,
   FileSignature,
@@ -28,12 +29,16 @@ import {
   LogOut,
   Mail,
   Network,
+  Package,
   Presentation,
   ReceiptText,
   Scale,
   Settings,
+  ShieldCheck,
+  TestTube2,
   UploadCloud,
   Users,
+  Zap,
 } from "lucide-react";
 import { logout } from "@/app/employee-login/actions";
 import { COMPANY_NAME, TAGLINE } from "@/lib/company-data";
@@ -92,6 +97,21 @@ const navGroups = [
     items: [
       { href: "/employee/users", label: "Users", icon: Users },
       { href: "/employee/settings", label: "Settings", icon: Settings },
+    ],
+  },
+  {
+    label: "Platform",
+    items: [
+      { href: "/employee/platform/sprint", label: "Sprint Planning", icon: KanbanSquare, platformOnly: true },
+      { href: "/employee/platform/releases", label: "Build & Release", icon: Zap, platformOnly: true },
+      { href: "/employee/platform/qa", label: "QA & Testing", icon: TestTube2, platformOnly: true },
+      { href: "/employee/platform/metrics", label: "Platform Metrics", icon: BarChart2, platformOnly: true },
+      { href: "/employee/platform/docs", label: "Runbooks & Docs", icon: BookOpenCheck, platformOnly: true },
+      { href: "/employee/platform/packages", label: "Vertical Packages", icon: Package, platformOnly: true },
+      { href: "/employee/platform/billing", label: "Billing & Subscriptions", icon: CreditCard, platformOnly: true },
+      { href: "/employee/platform/audit", label: "Audit & Evidence", icon: ShieldCheck, platformOnly: true },
+      { href: "/employee/platform/ai-services", label: "AI Services", icon: Bot, platformOnly: true },
+      { href: "/employee/platform/infrastructure", label: "Infrastructure", icon: Database, platformOnly: true },
     ],
   },
 ];
@@ -155,6 +175,10 @@ export function EmployeeSidebar({
     .map((group) => ({
       ...group,
       items: group.items.filter((item) => {
+        if ("platformOnly" in item && item.platformOnly) {
+          return accountStatus === "active" && (currentRole === "platform_admin" || currentRole === "super_admin") && canAccessEmployeePath(currentRole, accountStatus, item.href, moduleKeys);
+        }
+
         if ("ownerOnly" in item && item.ownerOnly) {
           return accountStatus === "active" && isPortalOwnerRole(currentRole) && canAccessEmployeePath(currentRole, accountStatus, item.href, moduleKeys);
         }

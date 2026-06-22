@@ -1,6 +1,7 @@
 import { convertToModelMessages, stepCountIs, streamText, tool, type UIMessage } from "ai";
 import { z } from "zod";
 import { getCommandSnapshot } from "@/lib/ai/command-context";
+import { validateAIOutput } from "@/lib/ai/gateway";
 import { cleanEmployeeActionHref, getWorkflowActionHref } from "@/lib/ai/task-routing";
 import { createHrAutomationNotification } from "@/lib/hr-automation";
 import { createClient } from "@/lib/supabase/server";
@@ -344,6 +345,10 @@ export async function POST(req: Request) {
             actionHref: z.string().startsWith("/employee").optional(),
           }),
           execute: async ({ title, body, priority, actionHref }) => {
+            const gatewayResult = validateAIOutput({ rawOutput: `${title}\n${body}`, promptKey: "createReminderNotification" });
+            if (gatewayResult.status === "blocked") {
+              return { blocked: true, reason: gatewayResult.blockedReason ?? "AI Gateway safety check failed." };
+            }
             const { data, error } = await supabase
               .from("portal_notifications")
               .insert({
@@ -418,6 +423,10 @@ export async function POST(req: Request) {
             riskLevel: z.enum(["low", "medium", "high", "critical"]).default("medium"),
           }),
           execute: async ({ title, description, actionType, targetTable, targetRecordId, proposedPatch, riskLevel }) => {
+            const gatewayResult = validateAIOutput({ rawOutput: `${title}\n${description}`, promptKey: "proposeWorkflowAction" });
+            if (gatewayResult.status === "blocked") {
+              return { blocked: true, reason: gatewayResult.blockedReason ?? "AI Gateway safety check failed." };
+            }
             const { data, error } = await supabase
               .from("workflow_action_proposals")
               .insert({
