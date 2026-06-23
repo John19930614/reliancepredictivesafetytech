@@ -100,9 +100,10 @@ export async function runLegalResearch(query: string): Promise<LegalResearchResu
   }
 
   const client = new OpenAI({ apiKey });
+  const model = process.env.OPENAI_RESEARCH_MODEL || "gpt-4o-mini";
 
   const response = await client.responses.create({
-    model: "gpt-4o",
+    model,
     tools: [{ type: "web_search_preview" }],
     input: buildResearchPrompt(query),
   });

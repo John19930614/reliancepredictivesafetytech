@@ -49,7 +49,10 @@ create table if not exists public.legal_register_items (
   owner_user_id uuid references auth.users(id),
   created_by uuid references auth.users(id),
   created_at timestamptz default now(),
-  updated_at timestamptz default now()
+  updated_at timestamptz default now(),
+
+  -- Title is the upsert conflict target for AI-saved items
+  constraint legal_register_items_title_unique unique (title)
 );
 
 -- Research session log (tracks each AI research run)

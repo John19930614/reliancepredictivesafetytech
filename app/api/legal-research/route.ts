@@ -52,7 +52,7 @@ export async function POST(req: Request) {
     .from("legal_research_sessions")
     .insert({
       query,
-      model: "gpt-4o",
+      model: process.env.OPENAI_RESEARCH_MODEL || "gpt-4o-mini",
       status: "running",
       researched_by: user.id,
     })
