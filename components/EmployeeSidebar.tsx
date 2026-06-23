@@ -88,6 +88,7 @@ const navGroups = [
     items: [
       { href: "/employee/documents", label: "Master Document Library", icon: UploadCloud },
       { href: "/employee/legal-issues", label: "Legal Issues", icon: Scale },
+      { href: "/employee/legal-register", label: "Legal Register", icon: ShieldCheck },
       { href: "/employee/required-documents", label: "Required Documents", icon: FileText },
       { href: "/employee/launch-gate", label: "Launch Gate", icon: BookOpenCheck },
     ],

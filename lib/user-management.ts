@@ -62,6 +62,7 @@ export const portalModuleCatalog = [
   { key: "employee_calendar", label: "Calendar", group: "People", pathPrefixes: ["/employee/calendar"] },
   { key: "master_document_library", label: "Master Document Library", group: "Governance", pathPrefixes: ["/employee/documents"] },
   { key: "legal_issues", label: "Legal Issues", group: "Governance", pathPrefixes: ["/employee/legal-issues"] },
+  { key: "legal_register", label: "Legal Register", group: "Governance", pathPrefixes: ["/employee/legal-register"] },
   { key: "required_documents", label: "Required Documents", group: "Governance", pathPrefixes: ["/employee/required-documents"] },
   { key: "launch_gate", label: "Launch Gate", group: "Governance", pathPrefixes: ["/employee/launch-gate"] },
   { key: "users", label: "Users", group: "Admin", pathPrefixes: ["/employee/users"] },
