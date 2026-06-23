@@ -61,6 +61,7 @@ export const portalModuleCatalog = [
   { key: "time_cards", label: "Time Cards", group: "People", pathPrefixes: ["/employee/time-cards"] },
   { key: "employee_calendar", label: "Calendar", group: "People", pathPrefixes: ["/employee/calendar"] },
   { key: "master_document_library", label: "Master Document Library", group: "Governance", pathPrefixes: ["/employee/documents"] },
+  { key: "ai_document_builder", label: "Document Builder", group: "Governance", pathPrefixes: ["/employee/document-builder"] },
   { key: "legal_issues", label: "Legal Issues", group: "Governance", pathPrefixes: ["/employee/legal-issues"] },
   { key: "legal_register", label: "Legal Register", group: "Governance", pathPrefixes: ["/employee/legal-register"] },
   { key: "required_documents", label: "Required Documents", group: "Governance", pathPrefixes: ["/employee/required-documents"] },
