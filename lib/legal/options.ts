@@ -1,0 +1,61 @@
+// Shared option lists for the Legal Register module (doc §1, §5.2, §5.4).
+
+export const INDUSTRY_OPTIONS = [
+  "Construction Safety",
+  "General Industry Safety",
+  "DOT / Fleet Compliance",
+  "Chemical Management",
+  "Waste Management",
+  "Contractor Management",
+  "Healthcare Safety",
+  "Laboratory Safety",
+  "Environmental Compliance",
+  "Emergency Response",
+  "Training Management",
+  "Audit Management",
+  "Permit Management",
+] as const;
+
+export const PROGRAM_OPTIONS = [
+  "Fall Protection",
+  "Hazard Communication",
+  "Chemical Management",
+  "Waste Management",
+  "Hot Work",
+  "Lockout/Tagout",
+  "Confined Space",
+  "Trenching and Excavation",
+  "Cranes and Rigging",
+  "Powered Industrial Trucks",
+  "DOT Fleet Compliance",
+  "Fuel Transportation",
+  "Emergency Action Plan",
+  "Fire Prevention",
+  "Respiratory Protection",
+  "Hearing Conservation",
+  "PPE",
+  "Electrical Safety",
+  "Contractor Safety",
+  "Incident Reporting",
+  "OSHA Recordkeeping",
+  "Medical Surveillance",
+  "Laboratory Safety",
+  "Biosafety",
+  "Healthcare Safety",
+  "Environmental Compliance",
+] as const;
+
+// Review role options for the human review queue (doc §5.9) — descriptive, not auth roles.
+export const REVIEW_ROLE_OPTIONS = [
+  "Safety Manager",
+  "EHS Director",
+  "DOT Compliance Manager",
+  "Environmental Manager",
+  "Legal Counsel",
+  "Industrial Hygienist",
+  "Fire Protection Specialist",
+  "Engineer",
+  "Competent Person",
+  "Program Owner",
+  "Executive Approver",
+] as const;
