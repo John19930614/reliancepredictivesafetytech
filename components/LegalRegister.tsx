@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Loader2,
   Plus,
+  Printer,
   Search,
   X,
 } from "lucide-react";
@@ -22,6 +23,127 @@ import {
   type LegalRegisterItem,
   type ResearchedLegalItem,
 } from "@/lib/legal/types";
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * Renders the register as a clean, standalone document and opens the browser
+ * print dialog (which offers "Save as PDF"). Uses a hidden iframe so it never
+ * disturbs the app shell and isn't blocked by popup blockers.
+ */
+function printRegister(items: LegalRegisterItem[], generatedOn: string): void {
+  const rowsHtml = items
+    .map((item, idx) => {
+      const sources = (item.source_urls || [])
+        .map((u) => `<a href="${escapeHtml(u)}">${escapeHtml(u)}</a>`)
+        .join("<br/>");
+      return `
+        <tr>
+          <td class="num">${idx + 1}</td>
+          <td>
+            <div class="title">${escapeHtml(item.title)}</div>
+            ${item.citation ? `<div class="cite">${escapeHtml(item.citation)}</div>` : ""}
+            ${item.issuing_body ? `<div class="muted">${escapeHtml(item.issuing_body)}</div>` : ""}
+          </td>
+          <td>${escapeHtml(categoryLabels[item.category])}</td>
+          <td>${escapeHtml(jurisdictionLabels[item.jurisdiction])}${item.jurisdiction_state ? ` &middot; ${escapeHtml(item.jurisdiction_state)}` : ""}</td>
+          <td>${escapeHtml(statusLabels[item.compliance_status])}</td>
+        </tr>
+        <tr class="detail">
+          <td></td>
+          <td colspan="4">
+            ${item.description ? `<div class="block"><span class="lbl">Description:</span> ${escapeHtml(item.description)}</div>` : ""}
+            ${item.compliance_requirements ? `<div class="block"><span class="lbl">Compliance Requirements:</span> ${escapeHtml(item.compliance_requirements)}</div>` : ""}
+            ${item.penalties ? `<div class="block"><span class="lbl">Penalties:</span> ${escapeHtml(item.penalties)}</div>` : ""}
+            ${sources ? `<div class="block"><span class="lbl">Sources:</span><br/>${sources}</div>` : ""}
+          </td>
+        </tr>`;
+    })
+    .join("");
+
+  const doc = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Legal Register</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Georgia, 'Times New Roman', serif; color: #111; margin: 32px; font-size: 11px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .meta { color: #555; font-size: 11px; margin-bottom: 18px; border-bottom: 2px solid #111; padding-bottom: 10px; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { text-align: left; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; color: #444; border-bottom: 1px solid #999; padding: 6px 8px; }
+  tbody td { padding: 8px; vertical-align: top; border-bottom: 1px solid #ddd; }
+  td.num { color: #999; width: 24px; }
+  .title { font-weight: bold; font-size: 12px; }
+  .cite { font-family: 'Courier New', monospace; color: #a07b00; font-size: 10px; }
+  .muted { color: #666; font-size: 10px; }
+  tr.detail td { border-bottom: 1px solid #ddd; padding-top: 0; font-size: 10px; color: #333; }
+  .block { margin: 3px 0; }
+  .lbl { font-weight: bold; color: #000; }
+  a { color: #0645ad; word-break: break-all; }
+  @media print { body { margin: 12mm; } tr { page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+  <h1>Legal Register</h1>
+  <div class="meta">Reliance Predictive Safety Technologies &middot; ${escapeHtml(items.length.toString())} item${items.length === 1 ? "" : "s"} &middot; Generated ${escapeHtml(generatedOn)}</div>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Title / Citation / Issuing Body</th><th>Type</th><th>Jurisdiction</th><th>Status</th></tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+</body>
+</html>`;
+
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  document.body.appendChild(iframe);
+
+  const idoc = iframe.contentWindow?.document;
+  if (!idoc) {
+    document.body.removeChild(iframe);
+    return;
+  }
+  idoc.open();
+  idoc.write(doc);
+  idoc.close();
+
+  const win = iframe.contentWindow;
+  if (!win) {
+    document.body.removeChild(iframe);
+    return;
+  }
+
+  const triggerPrint = () => {
+    win.focus();
+    win.print();
+    // Remove the iframe after the print dialog has had time to open.
+    setTimeout(() => {
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+    }, 1000);
+  };
+
+  // Give the iframe a tick to render before printing.
+  if (idoc.readyState === "complete") {
+    setTimeout(triggerPrint, 250);
+  } else {
+    win.onload = () => setTimeout(triggerPrint, 250);
+  }
+}
 
 interface ResearchResult {
   sessionId: string;
@@ -219,6 +341,7 @@ function ResearchResults({
 }) {
   const [selected, setSelected] = useState<Set<number>>(new Set(result.items.map((_, i) => i)));
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
 
   function toggleAll() {
@@ -232,8 +355,11 @@ function ResearchResults({
   async function handleSave() {
     const toSave = result.items.filter((_, i) => selected.has(i));
     setSaving(true);
+    setSaveError(null);
     try {
       await onSave(toSave);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Save failed. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -308,6 +434,26 @@ function ResearchResults({
           Save to Register
         </button>
       </div>
+
+      {saveError && (
+        <div
+          style={{
+            margin: "12px 24px 0",
+            background: "#ef444422",
+            border: "1px solid #ef444444",
+            borderRadius: 6,
+            padding: "10px 14px",
+            fontSize: "0.82rem",
+            color: "#ef4444",
+            display: "flex",
+            gap: 8,
+            alignItems: "flex-start",
+          }}
+        >
+          <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>{saveError}</span>
+        </div>
+      )}
 
       <div style={{ maxHeight: 480, overflowY: "auto" }}>
         {result.items.map((item, i) => (
@@ -441,14 +587,14 @@ function RegisterTable({ items, onStatusChange }: { items: LegalRegisterItem[]; 
 
   return (
     <div>
-      <div style={{ marginBottom: 14 }}>
+      <div style={{ marginBottom: 14, display: "flex", gap: 12, alignItems: "center" }}>
         <input
           type="search"
           placeholder="Filter by title, issuing body, or citation…"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           style={{
-            width: "100%",
+            flex: 1,
             maxWidth: 400,
             background: "var(--portal-surface)",
             border: "1px solid var(--portal-border)",
@@ -459,6 +605,29 @@ function RegisterTable({ items, onStatusChange }: { items: LegalRegisterItem[]; 
             boxSizing: "border-box",
           }}
         />
+        <button
+          onClick={() => printRegister(filtered, new Date().toLocaleDateString())}
+          disabled={filtered.length === 0}
+          title="Print or save the register as a PDF"
+          style={{
+            marginLeft: "auto",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            background: "var(--portal-surface)",
+            border: "1px solid var(--portal-border)",
+            borderRadius: 6,
+            padding: "7px 14px",
+            fontSize: "0.82rem",
+            fontWeight: 600,
+            color: "inherit",
+            cursor: filtered.length === 0 ? "not-allowed" : "pointer",
+            opacity: filtered.length === 0 ? 0.5 : 1,
+          }}
+        >
+          <Printer size={14} />
+          Print / Save as PDF
+        </button>
       </div>
 
       {filtered.length === 0 ? (
