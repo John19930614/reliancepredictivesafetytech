@@ -67,7 +67,7 @@ function ResearchPanel({
   const [error, setError] = useState<string | null>(null);
 
   const defaultQuery =
-    "What federal and state regulations, OSHA standards, EPA rules, data privacy laws, and industry standards apply to a predictive workplace safety technology SaaS platform operating in the United States?";
+    "List all federal and state laws, regulations, standards, and guidelines that apply to our business. Include the issuing agency, citation, requirements, and penalties for each.";
 
   async function handleResearch() {
     const q = query.trim() || defaultQuery;
@@ -123,8 +123,10 @@ function ResearchPanel({
       </div>
 
       <p style={{ fontSize: "0.85rem", color: "var(--portal-muted)", marginBottom: 14 }}>
-        Describe your platform and jurisdiction. The AI will search the web for all applicable regulations, OSHA
-        standards, EPA rules, privacy laws, and industry standards — then generate a complete legal register document.
+        Describe your business, industry, and jurisdiction — for any domain (DOT, OSHA, EPA, privacy, financial,
+        healthcare, etc.). The AI will search the web for all applicable laws, regulations, standards, and guidelines,
+        then generate a complete legal register document. Example: &ldquo;DOT compliance for interstate and intrastate
+        trucking in WI and CA.&rdquo;
       </p>
 
       <textarea

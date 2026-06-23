@@ -36,8 +36,9 @@ export default async function LegalRegisterPage() {
           <div className="eyebrow">Governance</div>
           <h1>Legal Register</h1>
           <p>
-            AI-powered regulatory research. Run a deep web search to discover all applicable laws, OSHA standards, EPA
-            rules, privacy regulations, and industry guidelines — then save them to your compliance register.
+            AI-powered regulatory research for any industry or jurisdiction. Run a deep web search to discover all
+            applicable laws, regulations, standards, and guidelines — DOT, OSHA, EPA, privacy, financial, healthcare,
+            and more — then save them to your compliance register.
           </p>
         </div>
       </div>
