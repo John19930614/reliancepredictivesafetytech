@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Download, UploadCloud } from "lucide-react";
+import { useMemo, useState, useTransition } from "react";
+import { Download, Inbox, Share2, UploadCloud, X } from "lucide-react";
 import {
   documentCategories,
   documentStatuses,
@@ -13,19 +13,77 @@ import {
   type CompanyDocumentRequirement,
 } from "@/lib/company-data";
 import { createClient } from "@/lib/supabase/client";
+import { shareDocument, revokeShare, getSharedDownloadUrl } from "@/app/employee/documents/actions";
+
+type ShareUser = { userId: string; label: string };
+type IncomingShare = { id: string; document: CompanyDocument; sharedByLabel: string; note: string | null };
+type OutgoingRecipient = { id: string; recipientLabel: string };
 
 type DocumentLibraryManagerProps = {
   initialDocuments: CompanyDocument[];
   checklistItems: CompanyChecklistItem[];
   clients: CompanyClient[];
   requirements: CompanyDocumentRequirement[];
+  currentUserId?: string | null;
+  users?: ShareUser[];
+  incomingShares?: IncomingShare[];
+  outgoingByDocument?: Record<string, OutgoingRecipient[]>;
 };
 
-export function DocumentLibraryManager({ initialDocuments, checklistItems, clients, requirements }: DocumentLibraryManagerProps) {
+export function DocumentLibraryManager({
+  initialDocuments,
+  checklistItems,
+  clients,
+  requirements,
+  currentUserId = null,
+  users = [],
+  incomingShares = [],
+  outgoingByDocument = {},
+}: DocumentLibraryManagerProps) {
   const [documents, setDocuments] = useState(initialDocuments);
   const [filters, setFilters] = useState({ category: "", status: "", owner: "", recordType: "", lifecycleStage: "", clientId: "", legalHold: "" });
   const [message, setMessage] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [sharePanelFor, setSharePanelFor] = useState<string | null>(null);
+  const [shareRecipient, setShareRecipient] = useState("");
+  const [shareNote, setShareNote] = useState("");
+  const [shareMessage, setShareMessage] = useState("");
+  const [sharing, startSharing] = useTransition();
+  const sharingEnabled = Boolean(currentUserId);
+
+  function handleShare(documentId: string) {
+    if (!shareRecipient) {
+      setShareMessage("Pick someone to share with.");
+      return;
+    }
+    setShareMessage("");
+    startSharing(async () => {
+      const res = await shareDocument(documentId, shareRecipient, shareNote || undefined);
+      if (res.ok) {
+        setShareMessage("Shared. They'll see it under “Shared with me”.");
+        setShareRecipient("");
+        setShareNote("");
+      } else {
+        setShareMessage(res.error ?? "Could not share.");
+      }
+    });
+  }
+
+  function handleRevoke(shareId: string) {
+    startSharing(async () => {
+      const res = await revokeShare(shareId);
+      if (!res.ok) setShareMessage(res.error ?? "Could not revoke.");
+    });
+  }
+
+  async function downloadShared(documentId: string) {
+    const res = await getSharedDownloadUrl(documentId);
+    if (res.ok && res.url) {
+      window.open(res.url, "_blank", "noopener,noreferrer");
+    } else {
+      setShareMessage(res.error ?? "Could not open the document.");
+    }
+  }
 
   const filteredDocuments = useMemo(() => {
     return documents.filter((document) => {
@@ -281,6 +339,32 @@ export function DocumentLibraryManager({ initialDocuments, checklistItems, clien
       </form>
 
       <section>
+        {sharingEnabled && incomingShares.length > 0 ? (
+          <div className="doc-card" style={{ marginBottom: 16 }}>
+            <h3 style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+              <Inbox size={18} /> Shared with me
+            </h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {incomingShares.map((share) => (
+                <div key={share.id} className="portal-topline" style={{ alignItems: "center" }}>
+                  <div>
+                    <strong>{share.document.title}</strong>
+                    <p style={{ margin: 0, color: "var(--portal-muted)", fontSize: "0.82rem" }}>
+                      From {share.sharedByLabel}
+                      {share.note ? ` — “${share.note}”` : ""}
+                    </p>
+                  </div>
+                  <button className="button button-light" type="button" onClick={() => downloadShared(share.document.id)}>
+                    <Download size={16} /> View
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {shareMessage ? <div className="success-box" style={{ marginBottom: 12 }}>{shareMessage}</div> : null}
+
         <div className="filters">
           <select value={filters.category} onChange={(event) => setFilters((current) => ({ ...current, category: event.target.value }))}>
             <option value="">All categories</option>
@@ -339,11 +423,70 @@ export function DocumentLibraryManager({ initialDocuments, checklistItems, clien
                     <p>{document.record_type ?? "Company Record"} - {document.category} - {document.lifecycle_stage ?? "No stage"}</p>
                     <p>{document.legal_hold ? "Legal hold active" : "No legal hold"} - Expires {document.expiration_date ?? "TBD"}</p>
                   </div>
-                  <button className="button button-light" onClick={() => downloadDocument(document)} type="button">
-                    <Download size={16} />
-                    View
-                  </button>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="button button-light" onClick={() => downloadDocument(document)} type="button">
+                      <Download size={16} />
+                      View
+                    </button>
+                    {sharingEnabled ? (
+                      <button
+                        className="button button-light"
+                        type="button"
+                        onClick={() => {
+                          setSharePanelFor((current) => (current === document.id ? null : document.id));
+                          setShareRecipient("");
+                          setShareNote("");
+                          setShareMessage("");
+                        }}
+                      >
+                        <Share2 size={16} />
+                        Share
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
+
+                {sharingEnabled && sharePanelFor === document.id ? (
+                  <div className="doc-card" style={{ margin: "0 0 12px", background: "color-mix(in srgb, var(--portal-gold) 6%, transparent)" }}>
+                    <div className="portal-topline" style={{ marginBottom: 8 }}>
+                      <strong>Share “{document.title}” with a teammate</strong>
+                      <button className="button button-light" type="button" onClick={() => setSharePanelFor(null)} aria-label="Close">
+                        <X size={14} />
+                      </button>
+                    </div>
+                    <div className="form-grid" style={{ gridTemplateColumns: "1fr" }}>
+                      <div className="field">
+                        <label>Recipient</label>
+                        <select value={shareRecipient} onChange={(event) => setShareRecipient(event.target.value)}>
+                          <option value="">Select a teammate…</option>
+                          {users.map((u) => (
+                            <option key={u.userId} value={u.userId}>{u.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label>Note (optional)</label>
+                        <input value={shareNote} onChange={(event) => setShareNote(event.target.value)} placeholder="e.g. Please review section 3" />
+                      </div>
+                      <button className="button button-primary" type="button" disabled={sharing} style={{ justifySelf: "start" }} onClick={() => handleShare(document.id)}>
+                        <Share2 size={16} /> {sharing ? "Sharing…" : "Share"}
+                      </button>
+                    </div>
+                    {(outgoingByDocument[document.id] ?? []).length > 0 ? (
+                      <div style={{ marginTop: 12 }}>
+                        <label style={{ fontSize: "0.78rem", color: "var(--portal-muted)" }}>Shared with</label>
+                        {(outgoingByDocument[document.id] ?? []).map((recipient) => (
+                          <div key={recipient.id} className="portal-topline" style={{ alignItems: "center", marginTop: 4 }}>
+                            <span>{recipient.recipientLabel}</span>
+                            <button className="button button-light" type="button" disabled={sharing} onClick={() => handleRevoke(recipient.id)}>
+                              Revoke
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="form-grid">
                   <div className="field">
                     <label>Document number</label>
