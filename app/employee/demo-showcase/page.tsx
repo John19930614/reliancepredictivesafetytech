@@ -2,21 +2,20 @@
 
 import { useState } from "react";
 import {
-  AlertCircle,
+  Armchair,
   BarChart3,
   BriefcaseBusiness,
-  Calendar,
   ClipboardCheck,
   ExternalLink,
   FileCheck2,
-  FileText,
   FlaskConical,
   Gauge,
   GraduationCap,
   HardHat,
   Presentation,
+  Scale,
   ShieldAlert,
-  Siren,
+  Trash2,
   UserRound,
 } from "lucide-react";
 import { DemoDeckViewer } from "@/components/DemoDeckViewer";
@@ -73,77 +72,77 @@ const constructionLinks = [
   },
 ];
 
-const biotechLinks = [
+const macoLinks = [
   {
-    label: "Predictive Engine",
-    href: "https://predictsafe-bio.vercel.app/predictive-engine",
-    description: "AI risk forecasting and composite safety score.",
+    label: "Dashboard",
+    href: "https://safetyiq-platform.vercel.app/dashboard",
+    description: "Command center overview of safety status, alerts, and tasks.",
     icon: Gauge,
   },
   {
-    label: "Risk Command Center",
-    href: "https://predictsafe-bio.vercel.app/risk-command-center",
-    description: "Live compliance score and escalation overview.",
+    label: "Legal Register",
+    href: "https://safetyiq-platform.vercel.app/legal",
+    description: "Applicable legal and standards obligations with evidence.",
+    icon: Scale,
+  },
+  {
+    label: "Risk Intelligence",
+    href: "https://safetyiq-platform.vercel.app/risk",
+    description: "Predictive risk trends, heat maps, and recommended actions.",
     icon: ShieldAlert,
   },
   {
-    label: "Compliance Calendar",
-    href: "https://predictsafe-bio.vercel.app/compliance-calendar",
-    description: "Scheduled audits, inspections, and compliance deadlines.",
-    icon: Calendar,
-  },
-  {
-    label: "Assessments",
-    href: "https://predictsafe-bio.vercel.app/assessments",
-    description: "Risk assessments and control verification workflows.",
+    label: "Corrective Actions / CAPA",
+    href: "https://safetyiq-platform.vercel.app/capa",
+    description: "Assign, track, verify, and close findings to resolution.",
     icon: ClipboardCheck,
   },
   {
-    label: "Incidents",
-    href: "https://predictsafe-bio.vercel.app/incidents",
-    description: "Incident reporting, CAPAs, and trend tracking.",
-    icon: AlertCircle,
-  },
-  {
-    label: "Documents",
-    href: "https://predictsafe-bio.vercel.app/documents",
-    description: "SOPs, policies, and audit-ready document control.",
-    icon: FileText,
-  },
-  {
-    label: "Training Matrix",
-    href: "https://predictsafe-bio.vercel.app/training-matrix",
-    description: "Staff training status, completions, and gaps.",
+    label: "Training & Competency",
+    href: "https://safetyiq-platform.vercel.app/training",
+    description: "Role and hazard-based training status, completions, and gaps.",
     icon: GraduationCap,
   },
   {
-    label: "Chemical Inventory",
-    href: "https://predictsafe-bio.vercel.app/chemical-inventory",
+    label: "Chemical Management",
+    href: "https://safetyiq-platform.vercel.app/chemicals",
     description: "Chemical inventory, SDS currency, and hazard class tracking.",
     icon: FlaskConical,
   },
   {
-    label: "Emergency Response",
-    href: "https://predictsafe-bio.vercel.app/emergency-response",
-    description: "Drills, equipment checks, and emergency readiness.",
-    icon: Siren,
+    label: "Waste Management",
+    href: "https://safetyiq-platform.vercel.app/waste",
+    description: "Waste profiles, accumulation, manifests, and disposal records.",
+    icon: Trash2,
+  },
+  {
+    label: "Ergonomics",
+    href: "https://safetyiq-platform.vercel.app/ergonomics",
+    description: "Ergonomic assessments and musculoskeletal risk reduction.",
+    icon: Armchair,
+  },
+  {
+    label: "Reports & Analytics",
+    href: "https://safetyiq-platform.vercel.app/reports",
+    description: "Executive, compliance, risk, and audit reporting.",
+    icon: BarChart3,
   },
 ];
 
-type DemoTab = "construction" | "biotech" | "scheduler";
+type DemoTab = "construction" | "maco" | "scheduler";
 
 export default function DemoShowcasePage() {
   const [activeTab, setActiveTab] = useState<DemoTab>("construction");
 
-  const isDeckTab = activeTab === "construction" || activeTab === "biotech";
+  const isDeckTab = activeTab === "construction" || activeTab === "maco";
   const isConstruction = activeTab === "construction";
 
-  const links = isConstruction ? constructionLinks : biotechLinks;
-  const deckTitle = isConstruction ? "Reliance demo deck" : "PredictSafeBIO demo deck";
-  const deckPdfPath = isConstruction ? "/demo-deck.pdf" : "/bio-demo-deck.pdf";
-  const slidePath = isConstruction ? "/demo-deck-slides" : "/bio-demo-deck-slides";
-  const totalPages = isConstruction ? 29 : 23;
-  const platformLabel = isConstruction ? "SafetyDocs360 demo links" : "PredictSafeBIO demo links";
+  const links = isConstruction ? constructionLinks : macoLinks;
+  const deckTitle = isConstruction ? "Reliance demo deck" : "MACO demo deck";
+  const deckPdfPath = isConstruction ? "/demo-deck.pdf" : "/maco-demo-deck.pdf";
+  const slidePath = isConstruction ? "/demo-deck-slides" : "/maco-demo-deck-slides";
+  const totalPages = isConstruction ? 29 : 17;
+  const platformLabel = isConstruction ? "SafetyDocs360 demo links" : "MACO demo links";
 
   return (
     <div className="demo-showcase">
@@ -172,12 +171,12 @@ export default function DemoShowcasePage() {
         </button>
         <button
           role="tab"
-          aria-selected={activeTab === "biotech"}
-          className={`demo-tab${activeTab === "biotech" ? " demo-tab-active" : ""}`}
-          onClick={() => setActiveTab("biotech")}
+          aria-selected={activeTab === "maco"}
+          className={`demo-tab${activeTab === "maco" ? " demo-tab-active" : ""}`}
+          onClick={() => setActiveTab("maco")}
           type="button"
         >
-          BioTech
+          MACO
         </button>
         <button
           role="tab"
