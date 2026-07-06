@@ -36,6 +36,7 @@ import {
   Scale,
   Settings,
   ShieldCheck,
+  Terminal,
   TestTube2,
   UploadCloud,
   Users,
@@ -115,6 +116,7 @@ const navGroups = [
       { href: "/employee/platform/audit", label: "Audit & Evidence", icon: ShieldCheck, platformOnly: true },
       { href: "/employee/platform/ai-services", label: "AI Services", icon: Bot, platformOnly: true },
       { href: "/employee/platform/infrastructure", label: "Infrastructure", icon: Database, platformOnly: true },
+      { href: "/employee/platform/dev-command", label: "AI Dev Command Center", icon: Terminal, platformOnly: true },
     ],
   },
 ];

@@ -39,6 +39,15 @@ describe("portal module access", () => {
     expect(canAccessEmployeePath("super_admin", "archived", "/employee/finance", [])).toBe(false);
   });
 
+  it("restricts the AI Dev Command Center to platform admins and super admins only", () => {
+    expect(getPortalModuleForPath("/employee/platform/dev-command")?.key).toBe("platform_dev_command");
+    expect(getPortalModuleForPath("/employee/platform/dev-command/tasks/task-1")?.key).toBe("platform_dev_command");
+    expect(canAccessEmployeePath("platform_admin", "active", "/employee/platform/dev-command", [])).toBe(true);
+    expect(canAccessEmployeePath("super_admin", "active", "/employee/platform/dev-command", [])).toBe(true);
+    expect(canAccessEmployeePath("company_admin", "active", "/employee/platform/dev-command", ["platform_dev_command"])).toBe(false);
+    expect(canAccessEmployeePath("employee", "active", "/employee/platform/dev-command", [])).toBe(false);
+  });
+
   it("maps payroll tracker routes to the payroll module", () => {
     expect(getPortalModuleForPath("/employee/payroll")?.key).toBe("payroll_tracker");
     expect(canAccessEmployeePath("employee", "active", "/employee/payroll", ["payroll_tracker"])).toBe(true);
