@@ -19,6 +19,9 @@
   --muted: #a7a7a7;
   --line: rgba(240, 200, 106, 0.22);
   --shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+  --portal-gold: var(--gold);
+  --portal-gold-bright: var(--gold-bright);
+  --portal-muted: #64707d;
 }
 
 * {
@@ -1103,6 +1106,99 @@ textarea {
 
 .module-link-list svg:last-child {
   color: #98a2b3;
+}
+
+/* Platform group pages (Sprint Planning, Build & Release, AI Dev Command Center, etc.)
+   share the same light command-center card language so they read as one product. */
+.platform-page {
+  display: grid;
+  gap: 4px;
+}
+
+.platform-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.platform-page-header h1 {
+  margin: 0 0 8px;
+  font-size: clamp(1.6rem, 3vw, 2.3rem);
+  line-height: 1.05;
+}
+
+.platform-page-header p {
+  margin: 0;
+  max-width: 620px;
+  color: var(--portal-muted);
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+.platform-card {
+  border: 1px solid #e0e4e8;
+  border-radius: 8px;
+  background: #fff;
+  color: #111;
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.07);
+  transition:
+    border-color 180ms ease,
+    transform 180ms ease,
+    box-shadow 180ms ease;
+}
+
+a.platform-card:hover {
+  border-color: rgba(201, 147, 43, 0.55);
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.11);
+  transform: translateY(-1px);
+}
+
+.platform-btn {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #e0e4e8;
+  border-radius: 6px;
+  padding: 0 16px;
+  background: #fff;
+  color: #111;
+  cursor: pointer;
+  font-weight: 750;
+  font-size: 0.9rem;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.platform-btn:hover:not(:disabled) {
+  border-color: rgba(201, 147, 43, 0.55);
+  transform: translateY(-1px);
+}
+
+.platform-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  transform: none;
+}
+
+.platform-btn-primary {
+  border-color: var(--portal-gold);
+  background: linear-gradient(135deg, var(--portal-gold-bright), var(--portal-gold));
+  color: #090909;
+}
+
+.platform-empty {
+  border: 1px dashed #d6dbe1;
+  border-radius: 8px;
+  padding: 18px;
+  background: #fbfcfd;
+  color: var(--portal-muted);
+  font-size: 0.9rem;
 }
 
 .demo-showcase {
