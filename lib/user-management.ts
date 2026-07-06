@@ -78,6 +78,7 @@ export const portalModuleCatalog = [
   { key: "platform_audit", label: "Audit & Evidence", group: "Platform", pathPrefixes: ["/employee/platform/audit"] },
   { key: "platform_ai_services", label: "AI Services", group: "Platform", pathPrefixes: ["/employee/platform/ai-services"] },
   { key: "platform_infrastructure", label: "Infrastructure", group: "Platform", pathPrefixes: ["/employee/platform/infrastructure"] },
+  { key: "platform_dev_command", label: "AI Dev Command Center", group: "Platform", pathPrefixes: ["/employee/platform/dev-command"] },
 ] as const;
 
 export type PortalModule = (typeof portalModuleCatalog)[number];

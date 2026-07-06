@@ -1354,6 +1354,992 @@ export type Database = {
         }
         Relationships: []
       }
+      dev_agent_memory: {
+        Row: {
+          agent_id: string | null
+          content: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          kind: string | null
+          status: string
+          structured: Json
+          tags: string[]
+          task_id: string | null
+          title: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          agent_id?: string | null
+          content?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          kind?: string | null
+          status?: string
+          structured?: Json
+          tags?: string[]
+          task_id?: string | null
+          title?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          agent_id?: string | null
+          content?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          kind?: string | null
+          status?: string
+          structured?: Json
+          tags?: string[]
+          task_id?: string | null
+          title?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dev_agent_memory_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "dev_agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_agent_memory_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "dev_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dev_agent_messages: {
+        Row: {
+          agent_id: string | null
+          content: string | null
+          created_at: string | null
+          id: string
+          role: string | null
+          run_id: string | null
+          seq: number
+          structured: Json
+          task_id: string | null
+        }
+        Insert: {
+          agent_id?: string | null
+          content?: string | null
+          created_at?: string | null
+          id?: string
+          role?: string | null
+          run_id?: string | null
+          seq?: number
+          structured?: Json
+          task_id?: string | null
+        }
+        Update: {
+          agent_id?: string | null
+          content?: string | null
+          created_at?: string | null
+          id?: string
+          role?: string | null
+          run_id?: string | null
+          seq?: number
+          structured?: Json
+          task_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dev_agent_messages_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "dev_agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_agent_messages_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "dev_agent_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_agent_messages_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "dev_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dev_agent_runs: {
+        Row: {
+          agent_id: string | null
+          created_at: string | null
+          error: string | null
+          finished_at: string | null
+          id: string
+          input: Json
+          model: string | null
+          output: Json
+          phase: string | null
+          started_at: string | null
+          status: string
+          task_id: string | null
+          tokens_used: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          agent_id?: string | null
+          created_at?: string | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          input?: Json
+          model?: string | null
+          output?: Json
+          phase?: string | null
+          started_at?: string | null
+          status?: string
+          task_id?: string | null
+          tokens_used?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          agent_id?: string | null
+          created_at?: string | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          input?: Json
+          model?: string | null
+          output?: Json
+          phase?: string | null
+          started_at?: string | null
+          status?: string
+          task_id?: string | null
+          tokens_used?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dev_agent_runs_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "dev_agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_agent_runs_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "dev_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dev_agents: {
+        Row: {
+          allowed_tools: string[]
+          created_at: string | null
+          description: string | null
+          id: string
+          is_manager: boolean
+          key: string
+          model: string | null
+          name: string
+          restrictions: string[]
+          role: string
+          sort_order: number
+          status: string
+          system_prompt: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          allowed_tools?: string[]
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_manager?: boolean
+          key: string
+          model?: string | null
+          name: string
+          restrictions?: string[]
+          role: string
+          sort_order?: number
+          status?: string
+          system_prompt?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          allowed_tools?: string[]
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_manager?: boolean
+          key?: string
+          model?: string | null
+          name?: string
+          restrictions?: string[]
+          role?: string
+          sort_order?: number
+          status?: string
+          system_prompt?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      dev_approvals: {
+        Row: {
+          affected_files: Json
+          affected_tables: Json
+          created_at: string | null
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          experience_impact: string | null
+          id: string
+          plain_english_summary: string | null
+          requested_by: string | null
+          risk_level: string
+          status: string
+          summary: string | null
+          target_id: string | null
+          target_type: string | null
+          task_id: string | null
+          technical_summary: string | null
+          approval_type: string
+          updated_at: string | null
+        }
+        Insert: {
+          affected_files?: Json
+          affected_tables?: Json
+          created_at?: string | null
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          experience_impact?: string | null
+          id?: string
+          plain_english_summary?: string | null
+          requested_by?: string | null
+          risk_level?: string
+          status?: string
+          summary?: string | null
+          target_id?: string | null
+          target_type?: string | null
+          task_id?: string | null
+          technical_summary?: string | null
+          approval_type: string
+          updated_at?: string | null
+        }
+        Update: {
+          affected_files?: Json
+          affected_tables?: Json
+          created_at?: string | null
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          experience_impact?: string | null
+          id?: string
+          plain_english_summary?: string | null
+          requested_by?: string | null
+          risk_level?: string
+          status?: string
+          summary?: string | null
+          target_id?: string | null
+          target_type?: string | null
+          task_id?: string | null
+          technical_summary?: string | null
+          approval_type?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dev_approvals_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "dev_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dev_artifacts: {
+        Row: {
+          artifact_type: string | null
+          content: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          kind: string | null
+          path: string | null
+          run_id: string | null
+          status: string
+          task_id: string | null
+          title: string | null
+          updated_at: string | null
+          version: number
+        }
+        Insert: {
+          artifact_type?: string | null
+          content?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          kind?: string | null
+          path?: string | null
+          run_id?: string | null
+          status?: string
+          task_id?: string | null
+          title?: string | null
+          updated_at?: string | null
+          version?: number
+        }
+        Update: {
+          artifact_type?: string | null
+          content?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          kind?: string | null
+          path?: string | null
+          run_id?: string | null
+          status?: string
+          task_id?: string | null
+          title?: string | null
+          updated_at?: string | null
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dev_artifacts_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "dev_agent_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_artifacts_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "dev_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dev_audit_log: {
+        Row: {
+          action: string
+          actor_id: string | null
+          actor_type: string
+          agent_id: string | null
+          created_at: string | null
+          detail: Json
+          entity: string | null
+          entity_id: string | null
+          id: string
+          risk_level: string
+          task_id: string | null
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          actor_type: string
+          agent_id?: string | null
+          created_at?: string | null
+          detail?: Json
+          entity?: string | null
+          entity_id?: string | null
+          id?: string
+          risk_level?: string
+          task_id?: string | null
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          actor_type?: string
+          agent_id?: string | null
+          created_at?: string | null
+          detail?: Json
+          entity?: string | null
+          entity_id?: string | null
+          id?: string
+          risk_level?: string
+          task_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dev_audit_log_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "dev_agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_audit_log_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "dev_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dev_code_reviews: {
+        Row: {
+          artifact_id: string | null
+          created_at: string | null
+          findings: Json
+          id: string
+          reviewer_agent_id: string | null
+          risk_level: string
+          run_id: string | null
+          status: string
+          summary: string | null
+          task_id: string | null
+          updated_at: string | null
+          verdict: string
+        }
+        Insert: {
+          artifact_id?: string | null
+          created_at?: string | null
+          findings?: Json
+          id?: string
+          reviewer_agent_id?: string | null
+          risk_level?: string
+          run_id?: string | null
+          status?: string
+          summary?: string | null
+          task_id?: string | null
+          updated_at?: string | null
+          verdict?: string
+        }
+        Update: {
+          artifact_id?: string | null
+          created_at?: string | null
+          findings?: Json
+          id?: string
+          reviewer_agent_id?: string | null
+          risk_level?: string
+          run_id?: string | null
+          status?: string
+          summary?: string | null
+          task_id?: string | null
+          updated_at?: string | null
+          verdict?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dev_code_reviews_artifact_id_fkey"
+            columns: ["artifact_id"]
+            isOneToOne: false
+            referencedRelation: "dev_artifacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_code_reviews_reviewer_agent_id_fkey"
+            columns: ["reviewer_agent_id"]
+            isOneToOne: false
+            referencedRelation: "dev_agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_code_reviews_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "dev_agent_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_code_reviews_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "dev_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dev_deployments: {
+        Row: {
+          approval_id: string | null
+          branch: string | null
+          commit_sha: string | null
+          created_at: string | null
+          created_by: string | null
+          environment: string
+          id: string
+          notes: string | null
+          pr_number: number | null
+          preview_url: string | null
+          pull_request_url: string | null
+          release_tag: string | null
+          status: string
+          task_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          approval_id?: string | null
+          branch?: string | null
+          commit_sha?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          environment?: string
+          id?: string
+          notes?: string | null
+          pr_number?: number | null
+          preview_url?: string | null
+          pull_request_url?: string | null
+          release_tag?: string | null
+          status?: string
+          task_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          approval_id?: string | null
+          branch?: string | null
+          commit_sha?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          environment?: string
+          id?: string
+          notes?: string | null
+          pr_number?: number | null
+          preview_url?: string | null
+          pull_request_url?: string | null
+          release_tag?: string | null
+          status?: string
+          task_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dev_deployments_approval_id_fkey"
+            columns: ["approval_id"]
+            isOneToOne: false
+            referencedRelation: "dev_approvals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_deployments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "dev_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dev_experience_reviews: {
+        Row: {
+          created_at: string | null
+          findings: Json
+          id: string
+          perspective: string | null
+          reviewer_agent_id: string | null
+          run_id: string | null
+          score: number | null
+          status: string
+          summary: string | null
+          task_id: string | null
+          updated_at: string | null
+          verdict: string
+        }
+        Insert: {
+          created_at?: string | null
+          findings?: Json
+          id?: string
+          perspective?: string | null
+          reviewer_agent_id?: string | null
+          run_id?: string | null
+          score?: number | null
+          status?: string
+          summary?: string | null
+          task_id?: string | null
+          updated_at?: string | null
+          verdict?: string
+        }
+        Update: {
+          created_at?: string | null
+          findings?: Json
+          id?: string
+          perspective?: string | null
+          reviewer_agent_id?: string | null
+          run_id?: string | null
+          score?: number | null
+          status?: string
+          summary?: string | null
+          task_id?: string | null
+          updated_at?: string | null
+          verdict?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dev_experience_reviews_reviewer_agent_id_fkey"
+            columns: ["reviewer_agent_id"]
+            isOneToOne: false
+            referencedRelation: "dev_agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_experience_reviews_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "dev_agent_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_experience_reviews_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "dev_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dev_feedback: {
+        Row: {
+          category: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          message: string
+          resolved_at: string | null
+          resolved_by: string | null
+          risk_level: string
+          screen: string | null
+          status: string
+          task_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          message: string
+          resolved_at?: string | null
+          resolved_by?: string | null
+          risk_level?: string
+          screen?: string | null
+          status?: string
+          task_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          category?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          message?: string
+          resolved_at?: string | null
+          resolved_by?: string | null
+          risk_level?: string
+          screen?: string | null
+          status?: string
+          task_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dev_feedback_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "dev_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dev_file_change_plans: {
+        Row: {
+          applied_at: string | null
+          artifact_id: string | null
+          change_type: string
+          created_at: string | null
+          diff: string | null
+          file_path: string
+          id: string
+          language: string | null
+          rationale: string | null
+          risk_level: string
+          status: string
+          task_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          applied_at?: string | null
+          artifact_id?: string | null
+          change_type: string
+          created_at?: string | null
+          diff?: string | null
+          file_path: string
+          id?: string
+          language?: string | null
+          rationale?: string | null
+          risk_level?: string
+          status?: string
+          task_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          applied_at?: string | null
+          artifact_id?: string | null
+          change_type?: string
+          created_at?: string | null
+          diff?: string | null
+          file_path?: string
+          id?: string
+          language?: string | null
+          rationale?: string | null
+          risk_level?: string
+          status?: string
+          task_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dev_file_change_plans_artifact_id_fkey"
+            columns: ["artifact_id"]
+            isOneToOne: false
+            referencedRelation: "dev_artifacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_file_change_plans_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "dev_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dev_security_reviews: {
+        Row: {
+          created_at: string | null
+          findings: Json
+          id: string
+          reviewer_agent_id: string | null
+          risk_level: string
+          run_id: string | null
+          status: string
+          summary: string | null
+          task_id: string | null
+          updated_at: string | null
+          verdict: string
+        }
+        Insert: {
+          created_at?: string | null
+          findings?: Json
+          id?: string
+          reviewer_agent_id?: string | null
+          risk_level?: string
+          run_id?: string | null
+          status?: string
+          summary?: string | null
+          task_id?: string | null
+          updated_at?: string | null
+          verdict?: string
+        }
+        Update: {
+          created_at?: string | null
+          findings?: Json
+          id?: string
+          reviewer_agent_id?: string | null
+          risk_level?: string
+          run_id?: string | null
+          status?: string
+          summary?: string | null
+          task_id?: string | null
+          updated_at?: string | null
+          verdict?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dev_security_reviews_reviewer_agent_id_fkey"
+            columns: ["reviewer_agent_id"]
+            isOneToOne: false
+            referencedRelation: "dev_agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_security_reviews_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "dev_agent_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_security_reviews_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "dev_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dev_tasks: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          database_changes_allowed: boolean
+          deployment_allowed: boolean
+          description: string | null
+          file_changes_allowed: boolean
+          github_branch_allowed: boolean
+          human_approval_required: boolean
+          id: string
+          metadata: Json
+          priority: string
+          risk_level: string
+          stage: string
+          status: string
+          target_area: string | null
+          title: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          database_changes_allowed?: boolean
+          deployment_allowed?: boolean
+          description?: string | null
+          file_changes_allowed?: boolean
+          github_branch_allowed?: boolean
+          human_approval_required?: boolean
+          id?: string
+          metadata?: Json
+          priority?: string
+          risk_level?: string
+          stage?: string
+          status?: string
+          target_area?: string | null
+          title: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          database_changes_allowed?: boolean
+          deployment_allowed?: boolean
+          description?: string | null
+          file_changes_allowed?: boolean
+          github_branch_allowed?: boolean
+          human_approval_required?: boolean
+          id?: string
+          metadata?: Json
+          priority?: string
+          risk_level?: string
+          stage?: string
+          status?: string
+          target_area?: string | null
+          title?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      dev_test_results: {
+        Row: {
+          created_at: string | null
+          details: Json
+          failed: number
+          id: string
+          kind: string | null
+          log: string | null
+          passed: number
+          run_id: string | null
+          skipped: number
+          status: string
+          summary: string | null
+          task_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          details?: Json
+          failed?: number
+          id?: string
+          kind?: string | null
+          log?: string | null
+          passed?: number
+          run_id?: string | null
+          skipped?: number
+          status?: string
+          summary?: string | null
+          task_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          details?: Json
+          failed?: number
+          id?: string
+          kind?: string | null
+          log?: string | null
+          passed?: number
+          run_id?: string | null
+          skipped?: number
+          status?: string
+          summary?: string | null
+          task_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dev_test_results_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "dev_agent_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dev_test_results_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "dev_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dev_tool_permissions: {
+        Row: {
+          agent_id: string | null
+          allowed: boolean
+          created_at: string | null
+          id: string
+          notes: string | null
+          requires_approval: boolean
+          scope: Json
+          tool: string
+          updated_at: string | null
+        }
+        Insert: {
+          agent_id?: string | null
+          allowed?: boolean
+          created_at?: string | null
+          id?: string
+          notes?: string | null
+          requires_approval?: boolean
+          scope?: Json
+          tool: string
+          updated_at?: string | null
+        }
+        Update: {
+          agent_id?: string | null
+          allowed?: boolean
+          created_at?: string | null
+          id?: string
+          notes?: string | null
+          requires_approval?: boolean
+          scope?: Json
+          tool?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dev_tool_permissions_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "dev_agents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       employee_calendar_event_attendees: {
         Row: {
           created_at: string

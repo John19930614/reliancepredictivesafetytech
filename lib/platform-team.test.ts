@@ -10,9 +10,10 @@ describe("Platform Team module catalog", () => {
     "platform_sprint", "platform_releases", "platform_qa",
     "platform_metrics", "platform_docs", "platform_packages",
     "platform_billing", "platform_audit", "platform_ai_services", "platform_infrastructure",
+    "platform_dev_command",
   ] as const;
 
-  it("includes all 10 platform module keys", () => {
+  it("includes all 11 platform module keys", () => {
     const keys = portalModuleCatalog.map((m) => m.key);
     for (const key of platformKeys) {
       expect(keys).toContain(key);
@@ -21,7 +22,7 @@ describe("Platform Team module catalog", () => {
 
   it("assigns all platform modules to the Platform group", () => {
     const platformModules = portalModuleCatalog.filter((m) => m.group === "Platform");
-    expect(platformModules).toHaveLength(10);
+    expect(platformModules).toHaveLength(11);
     const keys = platformModules.map((m) => m.key);
     for (const key of platformKeys) {
       expect(keys).toContain(key);
