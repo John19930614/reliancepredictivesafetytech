@@ -43,5 +43,6 @@ export interface ProposalRevisionRow {
   body_markdown: string | null;
   change_note: string | null;
   status_at_save: string | null;
+  form_data: unknown;
   created_at: string;
 }

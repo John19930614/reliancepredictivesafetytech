@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, RotateCcw, Save, Trash2 } from "lucide-react";
+import { RotateCcw, Trash2, Upload } from "lucide-react";
 import {
   deleteProposal,
   restoreProposalRevision,
@@ -10,6 +10,12 @@ import {
   setProposalStatus,
   updateProposalMeta,
 } from "@/app/employee/proposals/actions";
+import {
+  buildPrefillState,
+  deriveSummaryFromState,
+  deriveTitleFromState,
+  isGeneratorState,
+} from "@/lib/proposals/generator-state";
 import { proposalStatusLabels, type ProposalRevisionRow, type ProposalStatus } from "@/lib/proposals/types";
 import { ProposalStatusBadge } from "./ProposalStatusBadge";
 
@@ -29,6 +35,13 @@ export interface WorkspaceProposal {
   summary: string | null;
   body_markdown: string | null;
   current_revision: number;
+  form_data: unknown;
+}
+
+export interface WorkspaceClientDetail {
+  name: string | null;
+  contact_name: string | null;
+  email: string | null;
 }
 
 const statusActions: Record<ProposalStatus, { to: ProposalStatus; label: string }[]> = {
@@ -60,37 +73,93 @@ export function ProposalWorkspace({
   proposal,
   revisions,
   clients,
+  assignedClient,
   isAdmin,
 }: {
   proposal: WorkspaceProposal;
   revisions: ProposalRevisionRow[];
   clients: ClientOption[];
+  assignedClient: WorkspaceClientDetail | null;
   isAdmin: boolean;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [title, setTitle] = useState(proposal.title);
-  const [summary, setSummary] = useState(proposal.summary ?? "");
-  const [body, setBody] = useState(proposal.body_markdown ?? "");
   const [changeNote, setChangeNote] = useState("");
   const [viewingRevision, setViewingRevision] = useState<ProposalRevisionRow | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const changeNoteRef = useRef(changeNote);
+  changeNoteRef.current = changeNote;
 
   const editable = proposal.status === "draft" || proposal.status === "in_review";
 
-  function run(action: () => Promise<{ ok: boolean; error?: string }>, successMessage: string) {
-    setError("");
-    setNotice("");
-    startTransition(async () => {
-      const result = await action();
-      if (!result.ok) {
-        setError(result.error ?? "Something went wrong.");
+  const postToGenerator = useCallback((message: object) => {
+    iframeRef.current?.contentWindow?.postMessage(message, window.location.origin);
+  }, []);
+
+  const run = useCallback(
+    (action: () => Promise<{ ok: boolean; error?: string }>, successMessage: string) => {
+      setError("");
+      setNotice("");
+      startTransition(async () => {
+        const result = await action();
+        if (!result.ok) {
+          setError(result.error ?? "Something went wrong.");
+          return;
+        }
+        setNotice(successMessage);
+        router.refresh();
+      });
+    },
+    [router],
+  );
+
+  // Bridge: the generator posts ready/save events; we answer with load/persist.
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      if (event.origin !== window.location.origin) return;
+      const msg = event.data;
+      if (!msg || typeof msg !== "object") return;
+
+      if (msg.type === "proposal:ready") {
+        const initial = isGeneratorState(proposal.form_data) ? proposal.form_data : buildPrefillState(assignedClient);
+        if (initial) postToGenerator({ type: "proposal:load", state: initial });
         return;
       }
-      setNotice(successMessage);
-      router.refresh();
-    });
+
+      if (msg.type === "proposal:save") {
+        if (!editable) {
+          setError(`This proposal is ${proposalStatusLabels[proposal.status].toLowerCase()} and locked. Reopen it as a draft to save a new revision.`);
+          return;
+        }
+        const state = isGeneratorState(msg.state) ? msg.state : null;
+        if (!state) {
+          setError("The generator sent malformed data — revision not saved.");
+          return;
+        }
+        run(
+          () =>
+            saveProposalRevision(proposal.id, {
+              title: deriveTitleFromState(state, proposal.title),
+              summary: deriveSummaryFromState(state),
+              changeNote: changeNoteRef.current,
+              formData: state,
+            }),
+          `Saved as revision v${proposal.current_revision + 1}.`,
+        );
+        setChangeNote("");
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [proposal.id, proposal.title, proposal.status, proposal.current_revision, proposal.form_data, assignedClient, editable, postToGenerator, run]);
+
+  function loadRevisionIntoEditor(rev: ProposalRevisionRow) {
+    if (!isGeneratorState(rev.form_data)) return;
+    if (!window.confirm(`Load revision v${rev.revision_number} into the editor? Unsaved edits in the editor will be replaced (nothing is saved until you click Save Draft).`)) return;
+    postToGenerator({ type: "proposal:load", state: rev.form_data });
+    setNotice(`Revision v${rev.revision_number} loaded into the editor — click Save Draft in the generator to keep it as a new revision.`);
   }
 
   return (
@@ -103,73 +172,40 @@ export function ProposalWorkspace({
 
         <div className="form-panel">
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <h2 style={{ margin: 0 }}>Revision v{proposal.current_revision}</h2>
+            <h2 style={{ margin: 0 }}>Proposal editor — revision v{proposal.current_revision}</h2>
             <ProposalStatusBadge status={proposal.status} />
           </div>
-
-          {!editable ? (
-            <p style={{ color: "var(--portal-muted)", marginTop: 8, fontSize: "0.9rem" }}>
-              This proposal is {proposalStatusLabels[proposal.status].toLowerCase()} and locked. Reopen it as a draft to
-              make a new revision.
-            </p>
-          ) : null}
-
-          <div className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 16 }}>
-            <div className="field">
-              <label htmlFor="proposal-title">Title</label>
-              <input
-                id="proposal-title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                disabled={!editable || isPending}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="proposal-summary">Summary</label>
-              <textarea
-                id="proposal-summary"
-                rows={2}
-                value={summary}
-                onChange={(e) => setSummary(e.target.value)}
-                disabled={!editable || isPending}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="proposal-body">Proposal body</label>
-              <textarea
-                id="proposal-body"
-                rows={14}
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                disabled={!editable || isPending}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="proposal-change-note">What changed? (revision note)</label>
-              <input
-                id="proposal-change-note"
-                value={changeNote}
-                onChange={(e) => setChangeNote(e.target.value)}
-                placeholder="e.g. Updated pricing after site walk"
-                disabled={!editable || isPending}
-              />
-            </div>
-            <button
-              className="button button-primary"
-              style={{ justifySelf: "start" }}
-              disabled={!editable || isPending}
-              onClick={() =>
-                run(
-                  () => saveProposalRevision(proposal.id, { title, summary, bodyMarkdown: body, changeNote }),
-                  `Saved as revision v${proposal.current_revision + 1}.`,
-                )
-              }
-            >
-              {isPending ? <Loader2 size={18} className="spin" /> : <Save size={18} />}
-              Save as new revision
-            </button>
+          <p style={{ color: "var(--portal-muted)", marginTop: 8, fontSize: "0.9rem" }}>
+            {editable
+              ? "Edit below, then click Save Draft inside the generator — each save is stored as a new revision on this proposal."
+              : `This proposal is ${proposalStatusLabels[proposal.status].toLowerCase()} and locked. Reopen it as a draft to save changes.`}
+          </p>
+          <div className="field" style={{ marginTop: 12 }}>
+            <label htmlFor="proposal-change-note">What changed? (saved with the next revision)</label>
+            <input
+              id="proposal-change-note"
+              value={changeNote}
+              onChange={(e) => setChangeNote(e.target.value)}
+              placeholder="e.g. Updated pricing after site walk"
+              disabled={isPending}
+            />
           </div>
         </div>
+
+        <iframe
+          ref={iframeRef}
+          src="/employee/proposals/generator"
+          title="Proposal & Billing Generator"
+          style={{
+            width: "100%",
+            height: "78vh",
+            minHeight: 720,
+            marginTop: 16,
+            border: "1px solid var(--portal-line, #dbe2e9)",
+            borderRadius: 8,
+            background: "#fff",
+          }}
+        />
 
         <div className="form-panel" style={{ marginTop: 20 }}>
           <h2>Revision history</h2>
@@ -194,12 +230,18 @@ export function ProposalWorkspace({
                     <td>{rev.change_note ?? "—"}</td>
                     <td>{new Date(rev.created_at).toLocaleString()}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
-                      <button
-                        className="button button-light"
-                        onClick={() => setViewingRevision(viewingRevision?.id === rev.id ? null : rev)}
-                      >
-                        {viewingRevision?.id === rev.id ? "Hide" : "View"}
-                      </button>{" "}
+                      {isGeneratorState(rev.form_data) ? (
+                        <button className="button button-light" onClick={() => loadRevisionIntoEditor(rev)}>
+                          <Upload size={14} /> Open in editor
+                        </button>
+                      ) : (
+                        <button
+                          className="button button-light"
+                          onClick={() => setViewingRevision(viewingRevision?.id === rev.id ? null : rev)}
+                        >
+                          {viewingRevision?.id === rev.id ? "Hide" : "View"}
+                        </button>
+                      )}{" "}
                       {rev.revision_number !== proposal.current_revision ? (
                         <button
                           className="button button-light"

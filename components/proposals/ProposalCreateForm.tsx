@@ -35,8 +35,6 @@ export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
       owner: String(formData.get("owner") ?? "").trim() || null,
       proposalValue: parsedValue,
       validUntil: String(formData.get("valid_until") ?? "") || null,
-      summary: String(formData.get("summary") ?? "").trim() || null,
-      bodyMarkdown: String(formData.get("body_markdown") ?? "") || null,
     });
 
     if (!result.ok || !result.proposalId) {
@@ -53,7 +51,8 @@ export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
     <form className="form-panel" onSubmit={handleSubmit}>
       <h2>New proposal</h2>
       <p style={{ color: "var(--portal-muted)", marginTop: 4, fontSize: "0.9rem" }}>
-        Start a proposal, assign it to a company, and refine it revision by revision.
+        Start a proposal and assign it to a company — then build it out in the Proposal &amp; Billing Generator, revision
+        by revision.
       </p>
       {error ? <div className="error-box" style={{ marginTop: 12 }}>{error}</div> : null}
 
@@ -84,14 +83,6 @@ export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
         <div className="field">
           <label htmlFor="valid_until">Valid until</label>
           <input id="valid_until" name="valid_until" type="date" />
-        </div>
-        <div className="field">
-          <label htmlFor="summary">Summary</label>
-          <textarea id="summary" name="summary" rows={2} placeholder="One-paragraph overview of what is being proposed." />
-        </div>
-        <div className="field">
-          <label htmlFor="body_markdown">Proposal body</label>
-          <textarea id="body_markdown" name="body_markdown" rows={6} placeholder="Scope, deliverables, pricing, terms…" />
         </div>
 
         <button className="button button-primary" disabled={submitting} type="submit" style={{ justifySelf: "start" }}>
