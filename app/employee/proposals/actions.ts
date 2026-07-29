@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getProposalAccess } from "@/lib/proposals/access";
 import { canEditProposalContent, canTransitionProposal, nextRevisionNumber } from "@/lib/proposals/policy";
+import { isGeneratorState } from "@/lib/proposals/generator-state";
 import { proposalStatuses, type ProposalStatus } from "@/lib/proposals/types";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
 
@@ -126,6 +127,8 @@ export interface SaveRevisionInput {
   summary?: string | null;
   bodyMarkdown?: string | null;
   changeNote?: string | null;
+  /** Serialized Proposal Generator state ({v, fields, phases, services}). */
+  formData?: unknown;
 }
 
 /** Saves content edits as a new immutable revision and updates the working copy. */
@@ -148,6 +151,11 @@ export async function saveProposalRevision(proposalId: string, input: SaveRevisi
   const editGate = canEditProposalContent(proposal.status as ProposalStatus);
   if (!editGate.ok) return { ok: false, error: editGate.reason };
 
+  if (input.formData !== undefined && input.formData !== null && !isGeneratorState(input.formData)) {
+    return { ok: false, error: "Malformed proposal form data." };
+  }
+  const formData = input.formData ?? null;
+
   const revisionNumber = nextRevisionNumber(proposal.current_revision);
 
   const { error: revisionError } = await supabase.from("client_proposal_revisions").insert({
@@ -158,6 +166,7 @@ export async function saveProposalRevision(proposalId: string, input: SaveRevisi
     body_markdown: input.bodyMarkdown ?? null,
     change_note: input.changeNote?.trim() || null,
     status_at_save: proposal.status,
+    form_data: formData,
     created_by: userId,
   });
   if (revisionError) return { ok: false, error: revisionError.message };
@@ -169,6 +178,7 @@ export async function saveProposalRevision(proposalId: string, input: SaveRevisi
       summary: input.summary?.trim() || null,
       body_markdown: input.bodyMarkdown ?? null,
       current_revision: revisionNumber,
+      form_data: formData,
     })
     .eq("id", proposalId);
   if (updateError) return { ok: false, error: updateError.message };
@@ -193,7 +203,7 @@ export async function restoreProposalRevision(proposalId: string, revisionId: st
 
   const { data: revision } = await supabase
     .from("client_proposal_revisions")
-    .select("id, proposal_id, revision_number, title, summary, body_markdown")
+    .select("id, proposal_id, revision_number, title, summary, body_markdown, form_data")
     .eq("id", revisionId)
     .eq("proposal_id", proposalId)
     .maybeSingle();
@@ -204,6 +214,7 @@ export async function restoreProposalRevision(proposalId: string, revisionId: st
     summary: revision.summary,
     bodyMarkdown: revision.body_markdown,
     changeNote: `Restored from revision ${revision.revision_number}`,
+    formData: revision.form_data,
   });
   return result;
 }
