@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  AppWindow,
   Armchair,
   BarChart3,
   BriefcaseBusiness,
@@ -12,6 +13,7 @@ import {
   Gauge,
   GraduationCap,
   HardHat,
+  MonitorPlay,
   Presentation,
   Scale,
   ShieldAlert,
@@ -19,7 +21,9 @@ import {
   UserRound,
 } from "lucide-react";
 import { DemoDeckViewer } from "@/components/DemoDeckViewer";
+import { InteractiveDemoViewer } from "@/components/InteractiveDemoViewer";
 import { SalesMeetingInvitePanel } from "@/components/SalesMeetingInvitePanel";
+import { interactiveDemos } from "@/lib/demos/interactive-demos";
 
 const constructionLinks = [
   {
@@ -129,10 +133,19 @@ const macoLinks = [
   },
 ];
 
-type DemoTab = "construction" | "maco" | "scheduler";
+const interactiveDemoIcons: Record<string, typeof Gauge> = {
+  safepredict: Gauge,
+  aeris: AppWindow,
+};
+
+type DemoTab = "construction" | "maco" | "interactive" | "scheduler";
 
 export default function DemoShowcasePage() {
   const [activeTab, setActiveTab] = useState<DemoTab>("construction");
+  const [activeInteractiveKey, setActiveInteractiveKey] = useState<string>(interactiveDemos[0].key);
+
+  const activeInteractiveDemo =
+    interactiveDemos.find((demo) => demo.key === activeInteractiveKey) ?? interactiveDemos[0];
 
   const isDeckTab = activeTab === "construction" || activeTab === "maco";
   const isConstruction = activeTab === "construction";
@@ -177,6 +190,15 @@ export default function DemoShowcasePage() {
           type="button"
         >
           MACO
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === "interactive"}
+          className={`demo-tab${activeTab === "interactive" ? " demo-tab-active" : ""}`}
+          onClick={() => setActiveTab("interactive")}
+          type="button"
+        >
+          Interactive
         </button>
         <button
           role="tab"
@@ -230,6 +252,56 @@ export default function DemoShowcasePage() {
                     </span>
                     <ExternalLink size={16} />
                   </a>
+                );
+              })}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {activeTab === "interactive" && (
+        <div className="demo-showcase-layout">
+          <section className="command-panel demo-presentation-panel" aria-labelledby="interactive-demo-title">
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">Interactive</span>
+                <h2 id="interactive-demo-title">{activeInteractiveDemo.label}</h2>
+              </div>
+              <span className="badge">{activeInteractiveDemo.href}</span>
+            </div>
+            <InteractiveDemoViewer src={activeInteractiveDemo.href} title={activeInteractiveDemo.label} />
+          </section>
+
+          <section className="command-panel" aria-labelledby="interactive-demo-links-title">
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">Demos</span>
+                <h2 id="interactive-demo-links-title">Clickable product demos</h2>
+              </div>
+              <span className="badge">{interactiveDemos.length} demos</span>
+            </div>
+
+            <div className="demo-link-grid">
+              {interactiveDemos.map((demo) => {
+                const Icon = interactiveDemoIcons[demo.key] ?? MonitorPlay;
+                const isActive = demo.key === activeInteractiveDemo.key;
+                return (
+                  <button
+                    className={`demo-link-card demo-link-button${isActive ? " demo-link-card-active" : ""}`}
+                    onClick={() => setActiveInteractiveKey(demo.key)}
+                    type="button"
+                    aria-pressed={isActive}
+                    key={demo.key}
+                  >
+                    <span className="demo-link-icon">
+                      <Icon size={19} />
+                    </span>
+                    <span className="demo-link-meta">
+                      <strong>{demo.label}</strong>
+                      <span>{demo.description}</span>
+                    </span>
+                    <MonitorPlay size={16} />
+                  </button>
                 );
               })}
             </div>

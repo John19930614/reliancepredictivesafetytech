@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AERIS — Interactive App Demo</title>
+<style>
+  /* AERIS app design system, replicated for the mock (the real app is light-only). */
+  :root{
+    --navy:#1F4E79; --navy-50:#EDF2F8; --navy-800:#173A5C; --navy-900:#102A44;
+    --teal:#0D8EA0; --teal-50:#E6F4F6; --teal-700:#0B6E7C;
+    --canvas:#F1F4F7; --paper:#FFFFFF; --ink:#1B2733; --muted:#5A6B7B; --faint:#8CA0B3; --line:#DCE4EC;
+    --green-100:#DCFCE7; --green-800:#166534; --green-600:#16A34A;
+    --amber-100:#FEF3C7; --amber-800:#92400E; --amber-50:#FFFBEB;
+    --orange-100:#FFEDD5; --orange-800:#9A3412;
+    --red-100:#FEE2E2; --red-800:#991B1B;
+    --slate-100:#F1F5F9; --slate-600:#475569; --slate-500:#64748B;
+    --p-red:#C0392B; --p-orange:#D97706; --p-amber:#E0B04B; --p-green:#1E8449;
+    --shadow:0 1px 2px rgba(16,42,68,.06), 0 3px 10px rgba(16,42,68,.06);
+    --pop:0 6px 24px rgba(16,42,68,.16);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--canvas);color:var(--ink);font:14px/1.5 Inter,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  .display{font-family:"Space Grotesk","Segoe UI",system-ui,sans-serif}
+  .mono{font-family:"IBM Plex Mono",Consolas,ui-monospace,monospace}
+  a{color:inherit}
+
+  /* ------- demo banner ------- */
+  .demo-banner{background:var(--teal);color:#fff;text-align:center;font-size:12px;padding:5px 12px;letter-spacing:.04em}
+  .demo-banner b{font-family:"IBM Plex Mono",Consolas,monospace}
+
+  /* ------- top nav (app shell) ------- */
+  .topbar{background:var(--navy-900);color:#fff;position:sticky;top:0;z-index:40}
+  .topbar-in{max-width:1120px;margin:0 auto;padding:0 20px;height:52px;display:flex;align-items:center;gap:18px}
+  .brand{display:flex;align-items:baseline;gap:8px;cursor:pointer}
+  .brand b{font-family:"Space Grotesk",system-ui,sans-serif;letter-spacing:.14em;font-size:17px}
+  .brand span{font-size:11px;color:#ffffff99}
+  nav.main{display:flex;gap:4px;font-size:13.5px;margin-left:6px}
+  nav.main .nl{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;color:#ffffffbf;cursor:pointer;font-weight:500;position:relative}
+  nav.main .nl:hover{background:#ffffff1a;color:#fff}
+  nav.main .nl.active{background:#ffffff26;color:#fff}
+  .qbadge{display:grid;place-items:center;height:16px;min-width:16px;border-radius:999px;background:var(--teal);font-size:10px;font-weight:700;padding:0 4px}
+  .dropdown{position:relative}
+  .dropdown .menu{position:absolute;left:0;top:calc(100% + 4px);background:var(--paper);color:var(--ink);border:1px solid var(--line);
+    border-radius:10px;box-shadow:var(--pop);min-width:200px;padding:4px 0;display:none;z-index:50}
+  .dropdown.open .menu{display:block}
+  .dropdown .menu div{padding:8px 14px;font-size:13.5px;cursor:pointer}
+  .dropdown .menu div:hover{background:var(--navy-50)}
+  .user{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12.5px;color:#ffffff99}
+  .avatar{width:28px;height:28px;border-radius:50%;background:var(--teal);display:grid;place-items:center;font-weight:700;font-size:12px;color:#fff}
+  .kbd{border:1px solid #ffffff4d;border-radius:4px;padding:1px 6px;font-size:10.5px;font-family:"IBM Plex Mono",Consolas,monospace;color:#ffffff99;cursor:pointer}
+
+  /* ------- page frame ------- */
+  .page{max-width:1120px;margin:0 auto;padding:24px 20px 72px}
+  .eyebrow{font-family:"IBM Plex Mono",Consolas,monospace;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--teal)}
+  h1{font-family:"Space Grotesk",system-ui,sans-serif;font-size:23px;font-weight:600;color:var(--navy);margin:2px 0 4px}
+  .pdesc{font-size:13.5px;color:var(--muted);margin:0;max-width:64ch}
+  .crumb{font-size:12px;color:var(--faint);margin-bottom:10px}
+  .crumb a{cursor:pointer;text-decoration:none}
+  .crumb a:hover{color:var(--navy)}
+  h2.sec{font-family:"Space Grotesk",system-ui,sans-serif;font-size:15px;font-weight:600;margin:22px 0 8px}
+
+  /* ------- primitives ------- */
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:18px 0}
+  .stat{padding:14px 16px}
+  .stat .l{font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+  .stat .v{font-family:"Space Grotesk",system-ui,sans-serif;font-size:24px;font-weight:600;color:var(--navy);margin-top:2px;font-variant-numeric:tabular-nums}
+  .stat .h{font-size:11.5px;color:var(--muted)}
+  .btn{display:inline-flex;align-items:center;gap:6px;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid transparent;background:none;font-family:inherit}
+  .btn-primary{background:var(--navy);color:#fff}
+  .btn-primary:hover{background:var(--navy-800)}
+  .btn-secondary{background:var(--paper);border-color:var(--line);color:var(--ink)}
+  .btn-secondary:hover{border-color:var(--navy);color:var(--navy)}
+  .btn-success{background:var(--green-600);color:#fff}
+  .btn-ghost{color:var(--muted)}
+  .btn-ghost:hover{color:var(--navy)}
+  .btn[disabled]{opacity:.45;cursor:not-allowed}
+
+  table.dt{width:100%;border-collapse:collapse;font-size:13.5px}
+  .dt-wrap{overflow-x:auto;border-radius:12px;border:1px solid var(--line);background:var(--paper);box-shadow:var(--shadow)}
+  table.dt thead{background:var(--navy);color:#ffffffe6;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  table.dt th{padding:9px 14px;font-weight:600;white-space:nowrap}
+  table.dt td{padding:10px 14px;border-top:1px solid var(--line)}
+  table.dt tbody tr{cursor:pointer}
+  table.dt tbody tr:hover{background:var(--navy-50)}
+  table.dt tbody tr.norow{cursor:default}
+  table.dt tbody tr.norow:hover{background:none}
+
+  .badge{display:inline-flex;align-items:center;border-radius:999px;padding:2px 10px;font-size:11.5px;font-weight:600;white-space:nowrap}
+  .s-draft{background:var(--slate-100);color:var(--slate-600)}
+  .s-in_review{background:var(--amber-100);color:var(--amber-800)}
+  .s-peer_reviewed{background:var(--teal-50);color:var(--teal-700)}
+  .s-needs_revision{background:var(--orange-100);color:var(--orange-800)}
+  .s-signed{background:var(--green-100);color:var(--green-800)}
+  .s-delivered{background:var(--green-600);color:#fff}
+  .s-overdue{background:var(--red-100);color:var(--red-800)}
+  .pbadge{display:inline-flex;border-radius:5px;padding:2px 8px;font-size:11px;font-weight:700;color:#fff}
+  .p-OVER{background:var(--p-red)} .p-ACTION{background:var(--p-orange)} .p-ACCEPTABLE{background:var(--p-green)} .p-FLAG{background:#7C3AED}
+
+  .chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:12px 0}
+  .chip{border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:4px 12px;font-size:12.5px;cursor:pointer}
+  .chip:hover{border-color:var(--teal)}
+  .chip.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .chip .n{font-family:"IBM Plex Mono",Consolas,monospace;font-size:10.5px;opacity:.75;margin-left:4px}
+  .tabs{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--paper)}
+  .tabs div{padding:6px 14px;font-size:13px;cursor:pointer;border-right:1px solid var(--line)}
+  .tabs div:last-child{border-right:0}
+  .tabs div.on{background:var(--navy);color:#fff;font-weight:600}
+  .toolrow-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:14px 0 10px}
+  input.search{border:1px solid var(--line);border-radius:8px;padding:7px 12px;font-size:13px;width:220px;font-family:inherit;background:var(--paper);color:var(--ink)}
+  input.search:focus{outline:2px solid var(--teal);outline-offset:0;border-color:var(--teal)}
+
+  /* attention cards */
+  .attn{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;margin:14px 0 4px}
+  .attn .a{border-left:4px solid var(--p-amber);padding:11px 14px;display:flex;gap:10px;align-items:center}
+  .attn .a.red{border-left-color:var(--p-red)} .attn .a.orange{border-left-color:var(--p-orange)}
+  .attn .a .t{font-weight:600;font-size:13px}
+  .attn .a .r{font-size:12px;color:var(--muted)}
+  .attn .a .cta{margin-left:auto;font-size:12.5px;color:var(--teal);font-weight:600;white-space:nowrap;cursor:pointer}
+
+  /* pulse card */
+  .pulse{border-radius:16px;border:1px solid;padding:14px 16px;margin:16px 0;box-shadow:var(--shadow)}
+  .pulse.green{border-color:#A7F3D0;background:#ECFDF599} .pulse.amber{border-color:#FDE68A;background:#FFFBEB99}
+  .pulse.orange{border-color:#FDBA74;background:#FFF7ED} .pulse.red{border-color:#FCA5A5;background:#FEF2F2}
+  .pulse .head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .pulse .dot{width:13px;height:13px;border-radius:50%}
+  .pulse.green .dot{background:#10B981} .pulse.amber .dot{background:#F59E0B} .pulse.orange .dot{background:#F97316} .pulse.red .dot{background:#DC2626}
+  .pulse .ttl{font-family:"Space Grotesk",system-ui,sans-serif;font-weight:700;font-size:13.5px;letter-spacing:.03em}
+  .pulse .sc{font-family:"IBM Plex Mono",Consolas,monospace;font-size:11.5px;color:var(--muted)}
+  .pulse .src{font-size:11.5px;color:var(--faint)}
+  .pulse ul{margin:8px 0 0;padding-left:26px;font-size:13px}
+  .pulse ul li.flag{color:var(--amber-800);font-weight:600}
+
+  /* forms */
+  .fgrid{display:grid;gap:14px}
+  .field label{display:block;font-size:12.5px;font-weight:600;color:#1b2733cc;margin-bottom:4px}
+  .field .hint{font-size:11.5px;color:var(--faint);margin-top:4px}
+  select,input[type=number],input[type=text]{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13.5px;font-family:inherit;background:var(--paper);color:var(--ink)}
+  select:focus,input:focus{outline:2px solid var(--teal);outline-offset:0;border-color:var(--teal)}
+  .rowb{display:grid;grid-template-columns:minmax(160px,2fr) 1fr 92px 34px;gap:8px;align-items:center;margin-bottom:8px}
+  .rowb .del{border:none;background:none;color:var(--faint);cursor:pointer;font-size:16px;padding:4px}
+  .rowb .del:hover{color:var(--p-red)}
+  .callout{border-left:4px solid;border-radius:8px;padding:12px 14px;font-size:13px;margin:12px 0}
+  .c-info{border-color:#0d8ea066;background:var(--teal-50);color:var(--teal-700)}
+  .c-warn{border-color:#FCD34D;background:var(--amber-50);color:var(--amber-800)}
+  .c-success{border-color:#86EFAC;background:#F0FDF4;color:var(--green-800)}
+
+  /* assessment detail layout */
+  .detail{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:start}
+  @media (max-width:900px){.detail{grid-template-columns:1fr}}
+  .rail .card{margin-bottom:14px;padding:14px 16px}
+  .rail h3{font-family:"Space Grotesk",system-ui,sans-serif;font-size:12.5px;margin:0 0 8px;color:var(--navy)}
+  .trail{font-size:12px;color:var(--muted)}
+  .trail div{padding:5px 0;border-bottom:1px dashed var(--line)}
+  .trail div:last-child{border-bottom:0}
+  .trail .who{color:var(--faint)}
+  .lifecycle{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+
+  /* toolbox groups */
+  .tgroup{margin-bottom:20px}
+  .tgroup h3{font-family:"Space Grotesk",system-ui,sans-serif;font-size:13px;color:var(--muted);margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em}
+  .tag{font-size:10px;font-family:"IBM Plex Mono",Consolas,monospace;letter-spacing:.05em;border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--faint);white-space:nowrap}
+  .tag.built{color:var(--green-800);border-color:#86EFAC;background:var(--green-100)}
+
+  /* deliverable modal */
+  .overlay{position:fixed;inset:0;background:#102A44b3;z-index:80;display:none;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto}
+  .overlay.open{display:flex}
+  .doc{background:#fff;color:#1a2430;max-width:760px;width:100%;border-radius:6px;box-shadow:var(--pop);padding:48px 56px;font-family:Georgia,"Times New Roman",serif;font-size:14.5px;line-height:1.65}
+  .doc .lh{display:flex;justify-content:space-between;border-bottom:3px solid var(--navy);padding-bottom:14px;margin-bottom:22px;font-family:Inter,system-ui,sans-serif}
+  .doc .lh b{font-family:"Space Grotesk",system-ui,sans-serif;font-size:18px;color:var(--navy);letter-spacing:.02em}
+  .doc .lh .m{text-align:right;font-size:11px;color:#5A6B7B;line-height:1.5}
+  .doc h1{font-family:Georgia,serif;font-size:21px;color:#102A44;margin:0 0 2px}
+  .doc .sub{font-size:12.5px;color:#5A6B7B;font-family:Inter,system-ui,sans-serif;margin-bottom:18px}
+  .doc table{width:100%;border-collapse:collapse;font-size:13px;font-family:Inter,system-ui,sans-serif;margin:14px 0}
+  .doc th{background:var(--navy);color:#fff;text-align:left;padding:7px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+  .doc td{border:1px solid #DCE4EC;padding:7px 10px}
+  .doc .prov{margin-top:26px;border-top:1px solid #DCE4EC;padding-top:14px;font-family:"IBM Plex Mono",Consolas,monospace;font-size:10.5px;color:#5A6B7B;line-height:1.7}
+  .doc .sig{margin-top:24px;display:flex;gap:40px;font-family:Inter,system-ui,sans-serif;font-size:12.5px}
+  .doc .sig .line{border-top:1px solid #1a2430;padding-top:4px;min-width:220px}
+  .doc-actions{position:sticky;top:0;display:flex;justify-content:flex-end;gap:8px;max-width:760px;width:100%;margin:0 auto 10px}
+
+  /* toasts */
+  .toasts{position:fixed;right:18px;bottom:18px;z-index:90;display:flex;flex-direction:column;gap:8px}
+  .toast{background:var(--navy-900);color:#fff;border-radius:10px;padding:10px 16px;font-size:13px;box-shadow:var(--pop);
+    animation:tin .18s ease-out;display:flex;gap:8px;align-items:center;max-width:340px}
+  .toast.ok::before{content:"✓";color:#4ADE80;font-weight:700}
+  @keyframes tin{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
+
+  /* command palette */
+  .cmdk{position:fixed;inset:0;background:#102A4480;z-index:85;display:none;align-items:flex-start;justify-content:center;padding-top:90px}
+  .cmdk.open{display:flex}
+  .cmdk .panel{background:var(--paper);border-radius:12px;box-shadow:var(--pop);width:520px;max-width:92vw;overflow:hidden}
+  .cmdk input{width:100%;border:none;border-bottom:1px solid var(--line);border-radius:0;padding:14px 18px;font-size:14.5px}
+  .cmdk input:focus{outline:none}
+  .cmdk .list{max-height:320px;overflow:auto;padding:6px 0}
+  .cmdk .it{padding:9px 18px;font-size:13.5px;cursor:pointer;display:flex;gap:10px;align-items:baseline}
+  .cmdk .it:hover,.cmdk .it.sel{background:var(--navy-50)}
+  .cmdk .it .k{font-family:"IBM Plex Mono",Consolas,monospace;font-size:10.5px;color:var(--teal)}
+  .empty{padding:34px;text-align:center;color:var(--muted);font-size:13.5px}
+</style>
+</head>
+<body>
+
+<div class="demo-banner"><b>INTERACTIVE DEMO</b> — a clickable replica of the AERIS app. All data synthetic; every action is a mock function running in your browser. Nothing is saved.
+  <a href="https://claude.ai/code/artifact/a43ce0e2-97c7-4732-aaa9-2eae62001004" style="color:#fff;font-weight:700;margin-left:10px">Metrics showcase →</a></div>
+
+<div class="topbar"><div class="topbar-in">
+  <div class="brand" onclick="go('dashboard')"><b>AERIS</b><span>Meridian Industrial Hygiene</span></div>
+  <nav class="main" id="nav"></nav>
+  <div class="user">
+    <span class="kbd" onclick="openCmdk()">Ctrl K</span>
+    <span>cih@meridian.demo</span><span class="avatar">JC</span>
+  </div>
+</div></div>
+
+<main class="page" id="page"></main>
+
+<div class="overlay" id="docOverlay" onclick="if(event.target===this)closeDoc()">
+  <div style="width:100%;max-width:760px">
+    <div class="doc-actions">
+      <button class="btn btn-secondary" onclick="toast('In the real app this opens the browser print dialog → PDF')">Print / Save as PDF</button>
+      <button class="btn btn-primary" onclick="closeDoc()">Close</button>
+    </div>
+    <div class="doc" id="docBody"></div>
+  </div>
+</div>
+
+<div class="cmdk" id="cmdk" onclick="if(event.target===this)closeCmdk()">
+  <div class="panel">
+    <input id="cmdkIn" placeholder="Jump to a page, client, or tool…" oninput="renderCmdk()">
+    <div class="list" id="cmdkList"></div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+"use strict";
+/* =====================================================================
+   AERIS interactive app demo — a faithful mock of the real product.
+   State lives in memory; every "server action" below is a mock function
+   mirroring its production counterpart (lifecycle.ts, engine.ts, etc.)
+   ===================================================================== */
+
+/* ---------------- mock reference libraries ---------------- */
+const CHEMS = [
+  { cas:"108-88-3",  name:"Toluene",             limit:200,  unit:"ppm",   basis:"OSHA PEL (TWA)" },
+  { cas:"67-64-1",   name:"Acetone",             limit:1000, unit:"ppm",   basis:"OSHA PEL (TWA)" },
+  { cas:"100-42-5",  name:"Styrene",             limit:100,  unit:"ppm",   basis:"OSHA PEL (TWA)" },
+  { cas:"14808-60-7",name:"Silica, respirable",  limit:0.05, unit:"mg/m3", basis:"OSHA PEL 1910.1053" },
+  { cas:"18540-29-9",name:"Chromium (VI)",       limit:0.14, unit:"ug/m3", basis:"TSCA ECEL" },
+  { cas:"7439-96-5", name:"Manganese (R)",       limit:0.02, unit:"mg/m3", basis:"ACGIH TLV" },
+  { cas:"GRAIN",     name:"Grain dust",          limit:10,   unit:"mg/m3", basis:"OSHA PEL (TWA)" },
+];
+const UNITS = ["ppm","mg/m3","ug/m3","fibers/cc"];
+
+const TOOL_GROUPS = [
+  { name:"Core IH workflow", tools:[
+    ["01","SDS → Sampling Plan",true],["02","Exposure Results Analyzer",true],["03","SDS Quality / Compliance Review",true],
+    ["04","Written Program Gap Analysis",true],["05","Respiratory Protection Program",true],["06","Regulatory Applicability",true],
+    ["07","Audit + CAPA",true],["23","Sampling Statistics / Bayesian Engine",true]]},
+  { name:"Health standards & programs", tools:[
+    ["15","TSCA WCPP / ECEL Compliance",true],["16","HazCom 2024 / GHS Rev 7 Updater",true],["17","Heat Program Builder",true],
+    ["18","Medical Surveillance Tracker",true],["19","Records Retention (1910.1020)",true],["20","Expanded Health Standard Packs",true],
+    ["09","Noise Survey Planner",true],["14","Reassessment Scheduler",true]]},
+  { name:"Practice operations", tools:[
+    ["21","Practice Compliance",true],["22","Data Privacy & Medical-Data Safeguards",true],["13","Proposal / SOW Generator",false],
+    ["11","Training Matrix Builder",false]]},
+  { name:"Planned coverage (honest stubs — fail closed)", tools:[
+    ["08","Ergonomic Risk (RULA/REBA)",false],["10","Heat Stress Sampling Planner",false],["12","Confined Space / LOTO",false],
+    ["24","HAZWOPER (1910.120)",false],["25","PSM (1910.119) / EPA RMP",false],["26","Bloodborne Pathogens",false],
+    ["27","IAQ / Mold / Legionella",false],["28","Ventilation (ACGIH)",false],["29","Asbestos / Lead",false],
+    ["30","Arc Flash / NFPA 70E",false],["31","Combustible Dust",false],["32","Environmental Bridges",false],
+    ["33","Direct-Reading Instruments",false]]},
+];
+const TOOL_NAME = {}; const TOOL_BUILT = {};
+for (const g of TOOL_GROUPS) for (const [id,n,b] of g.tools) { TOOL_NAME[id]=n; TOOL_BUILT[id]=b; }
+
+/* ---------------- mock workspace state ---------------- */
+const CLIENTS = [
+  { id:"c1", name:"Northgate Foundry",    industry:"Ferrous casting",   workers:210, sites:["Melt Deck","Shakeout","Fab Shop"],
+    pulse:{ drivers:[
+      {kind:"exposure",severity:9.5,toolId:"15",detail:"Cr(VI) at 160% of TSCA ECEL — Melt Deck welder, 8-hr TWA"},
+      {kind:"program", severity:6.0,toolId:"05",detail:"Respiratory protection program: 4 of 9 required elements missing"},
+      {kind:"cadence", severity:2.0,toolId:"14",detail:"Last full reassessment 4 months ago"}], unscored:[] } },
+  { id:"c2", name:"Summit Electroplating", industry:"Metal finishing",  workers:85,  sites:["Barrel Line","Rack Line"],
+    pulse:{ drivers:[
+      {kind:"exposure",severity:7.0,toolId:"09",detail:"Noise dose 118% — barrel line, 1910.95 8-hr TWA 91.2 dBA"},
+      {kind:"program", severity:6.5,toolId:"18",detail:"Medical surveillance: 6 workers overdue for audiometric testing"},
+      {kind:"cadence", severity:6.2,toolId:"14",detail:"Hex-chrome reassessment 92 days overdue"}], unscored:[] } },
+  { id:"c3", name:"Cascade Coatings",      industry:"Industrial painting", workers:60, sites:["Spray Booth 1","Spray Booth 2","Mix Room"],
+    pulse:{ drivers:[
+      {kind:"exposure",severity:4.2,toolId:"02",detail:"Toluene at 62% of PEL — spray booth 2, above action level"},
+      {kind:"program", severity:5.0,toolId:"16",detail:"HazCom library: 31 SDSs still pre-GHS Rev 7"},
+      {kind:"cadence", severity:3.0,toolId:"14",detail:"Reassessment due in 30 days"}], unscored:[] } },
+  { id:"c4", name:"Harbor Composites",     industry:"FRP fabrication",  workers:140, sites:["Layup","Gel-coat Line"],
+    pulse:{ drivers:[
+      {kind:"exposure",severity:2.5,toolId:"02",detail:"Acetone at 31% of PEL — layup area"},
+      {kind:"program", severity:2.0,toolId:"04",detail:"Written programs current; minor training-matrix gaps"}],
+      unscored:["styrene result reported in mg/m³ against a ppm limit (unit mismatch)"] } },
+  { id:"c5", name:"Prairie Grain Co-op",   industry:"Grain handling",   workers:45,  sites:["Receiving Pit","Elevator"],
+    pulse:{ drivers:[
+      {kind:"exposure",severity:1.8,toolId:"02",detail:"Grain dust at 28% of PEL — receiving pit"},
+      {kind:"cadence", severity:1.0,toolId:"14",detail:"Reassessed last month; next due in 11 months"}], unscored:[] } },
+];
+const cname = id => CLIENTS.find(c=>c.id===id)?.name ?? "—";
+
+let SEQ = 100;
+const daysAgo = d => { const t = new Date(2026,6,28); t.setDate(t.getDate()-d); return t; };
+const fmtD = d => d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+const rel = d => { const days = Math.round((new Date(2026,6,28)-d)/86400000);
+  return days<=0?"today":days===1?"yesterday":days<30?days+"d ago":Math.round(days/30)+"mo ago"; };
+
+const A = [];
+function seedA(tool, client, title, status, updDays, opts={}) {
+  A.push({ id:"a"+(SEQ++), tool_id:tool, client_id:client, title, status,
+    updated_at:daysAgo(updDays), due_date:opts.due??null, overdueDays:opts.overdue??0,
+    payload:opts.payload??null, versions:opts.versions??1,
+    trail:opts.trail??[{when:daysAgo(updDays),who:"J. Calloway, CIH",what:"created draft"}] });
+}
+seedA("15","c2","Hex-chrome reassessment — Barrel Line","signed",95,{overdue:92,versions:2,
+  trail:[{when:daysAgo(130),who:"J. Calloway, CIH",what:"created draft"},{when:daysAgo(120),who:"M. Osei",what:"peer review passed"},{when:daysAgo(95),who:"J. Calloway, CIH",what:"signed (CIH gate)"}]});
+seedA("05","c1","Respirator program rebuild — Melt Deck","in_review",11,{
+  trail:[{when:daysAgo(24),who:"J. Calloway, CIH",what:"created draft"},{when:daysAgo(11),who:"J. Calloway, CIH",what:"submitted for review"}]});
+seedA("16","c3","HazCom GHS Rev 7 migration","draft",19);
+seedA("11","c4","Training matrix — resin crew","draft",16);
+seedA("02","c3","Q3 solvent exposure round — Booth 2","peer_reviewed",3,{
+  trail:[{when:daysAgo(9),who:"J. Calloway, CIH",what:"created draft"},{when:daysAgo(5),who:"J. Calloway, CIH",what:"submitted for review"},{when:daysAgo(3),who:"M. Osei",what:"peer review passed"}]});
+seedA("01","c1","Sampling plan — Shakeout silica","signed",6,{versions:1,
+  trail:[{when:daysAgo(14),who:"J. Calloway, CIH",what:"created draft"},{when:daysAgo(8),who:"M. Osei",what:"peer review passed"},{when:daysAgo(6),who:"J. Calloway, CIH",what:"signed (CIH gate)"}]});
+seedA("09","c2","Noise survey plan — Rack Line","draft",2);
+seedA("18","c2","Audiometric recall list","signed",21,{versions:1});
+seedA("04","c4","Written program gap analysis","signed",33,{versions:1});
+seedA("02","c5","Grain dust baseline — Receiving Pit","delivered",40,{versions:1});
+seedA("14","c5","FY27 reassessment schedule","signed",28,{versions:1});
+seedA("06","c3","Reg applicability refresh","delivered",55,{versions:2});
+
+const DOCS = [
+  { id:"d1", title:"Grain dust baseline — Receiving Pit", client:"c5", tool:"02", issued:daysAgo(40), rev:"v1" },
+  { id:"d2", title:"Reg applicability refresh",           client:"c3", tool:"06", issued:daysAgo(55), rev:"v2" },
+  { id:"d3", title:"Hex-chrome reassessment — Barrel Line", client:"c2", tool:"15", issued:daysAgo(95), rev:"v2" },
+];
+
+/* ---------------- mock engines (mirror production logic) ---------------- */
+const KW = { exposure:.5, program:.3, cadence:.2 };
+const BANDS = ["green","amber","orange","red"];
+const atLeast = (a,b)=>BANDS[Math.max(BANDS.indexOf(a),BANDS.indexOf(b))];
+function computePulse(input){
+  const ds = input.drivers.filter(d=>Number.isFinite(d.severity)).map(d=>({...d,severity:Math.min(10,Math.max(0,d.severity))}));
+  const worst={}; for(const d of ds) worst[d.kind]=Math.max(worst[d.kind]??0,d.severity);
+  const score=Math.round(Object.keys(KW).reduce((s,k)=>s+(worst[k]??0)*KW[k],0)*10)/10;
+  let band=score<=3?"green":score<=6?"amber":score<=8?"orange":"red";
+  if((worst.exposure??0)>=9)band=atLeast(band,"red");
+  if((worst.exposure??0)>=6||(worst.cadence??0)>=6)band=atLeast(band,"orange");
+  if(ds.some(d=>d.severity>=4))band=atLeast(band,"amber");
+  const flags=input.unscored.map(n=>`Not scored — ${n}`);
+  if(flags.length)band=atLeast(band,"amber");
+  const top=[...ds].sort((a,b)=>b.severity-a.severity).slice(0,3);
+  return {score,band,topDrivers:top,nextToolId:top[0]?.toolId??null,flags};
+}
+const PULSE_LABEL={green:"STEADY",amber:"WATCH",orange:"DRIFTING",red:"ACT NOW"};
+
+/* Tool 02 engine: % of limit + verdict; fail-closed on unit mismatch */
+function analyzeExposure(rows){
+  return rows.map(r=>{
+    const chem=CHEMS.find(c=>c.cas===r.cas);
+    if(!chem) return {...r,verdict:"FLAG",note:"unknown agent"};
+    if(r.unit!==chem.unit) return {...r,chem,verdict:"FLAG",pct:null,
+      note:`not scored — result in ${r.unit} vs ${chem.basis} limit in ${chem.unit} (unit mismatch)`};
+    const pct=Math.round(r.twa/chem.limit*1000)/10;
+    return {...r,chem,pct,verdict:pct>=100?"OVER":pct>=50?"ACTION":"ACCEPTABLE",
+      note:`${pct}% of ${chem.basis} (${chem.limit} ${chem.unit})`};
+  });
+}
+
+function stuckReason(a){
+  if(a.overdueDays>0) return {sev:"red",  reason:`Reassessment overdue ${a.overdueDays}d`};
+  const age=Math.round((new Date(2026,6,28)-a.updated_at)/86400000);
+  if(a.status==="in_review"&&age>7) return {sev:"orange",reason:`In review ${age}d — assign a peer reviewer`};
+  if(a.status==="draft"&&age>14)    return {sev:"amber", reason:`Draft untouched ${age}d`};
+  return null;
+}
+
+/* FOLLOW_ON chain (mirrors lib/workflow.ts): a signature triggers the next tool */
+const FOLLOW_ON = { "01":"02", "02":"14", "15":"18", "05":"11", "09":"18", "16":"11", "04":"07" };
+
+/* AI narrative assist (mirrors NarrativePanel): AI drafts words, engines own numbers */
+function narrativeText(a){
+  const cl = cname(a.client_id);
+  if (a.payload) {
+    const parts = a.payload.map(r => r.pct == null
+      ? `${r.chem?.name ?? r.cas} could not be scored (unit mismatch) and is excluded from the determinations`
+      : `${r.chem?.name ?? r.cas} was measured at ${r.pct}% of its governing limit (${r.verdict})`);
+    return `On behalf of ${cl}, personal breathing-zone samples were collected and analyzed in accordance with the governing NIOSH methods. ${parts.join(". ")}. Results at or above the action level trigger the periodic monitoring and medical surveillance provisions of the applicable standard. All numeric determinations were computed by the AERIS engine; this narrative was drafted by AI assist and requires CIH review before issue.`;
+  }
+  return `This ${TOOL_NAME[a.tool_id] ?? ""} engagement for ${cl} was completed under the practice's standard methodology. The attached determinations were computed deterministically by the tool engine and are reproduced from the stored payload. This draft narrative was generated by AI assist for CIH review and must not be issued unreviewed.`;
+}
+function draftNarrative(id){
+  const a = A.find(x => x.id === id); if (!a || a.narrative != null) return;
+  const box = document.getElementById("narrbox"); if (!box) return;
+  box.innerHTML = `<div class="callout c-info" style="margin:0"><b>Narrative draft — AI assist</b><div id="narrtxt" style="margin-top:6px;min-height:40px"></div></div>`;
+  const text = narrativeText(a), t = document.getElementById("narrtxt");
+  let i = 0;
+  const iv = setInterval(() => {
+    i = Math.min(text.length, i + 4);
+    t.textContent = text.slice(0, i);
+    if (i >= text.length) {
+      clearInterval(iv);
+      a.narrative = text;
+      a.trail.push({ when: new Date(2026,6,28), who: "AI assist (metered)", what: "narrative drafted — pending CIH review" });
+      toast("Narrative drafted — words by AI, numbers by the engine");
+      render();
+    }
+  }, 16);
+}
+
+/* lifecycle mock (mirrors lib/actions/lifecycle.ts, incl. the CIH gate) */
+function lifecycleNext(a){
+  switch(a.status){
+    case "draft":          return {label:"Submit for review", to:"in_review",    who:"J. Calloway, CIH", what:"submitted for review"};
+    case "needs_revision": return {label:"Resubmit for review", to:"in_review",  who:"J. Calloway, CIH", what:"revised and resubmitted"};
+    case "in_review":      return {label:"Record peer review (as M. Osei)", to:"peer_reviewed",who:"M. Osei", what:"peer review passed"};
+    case "peer_reviewed":  return {label:"Sign as CIH", to:"signed", who:"J. Calloway, CIH", what:"signed (CIH gate: credential verified)"};
+    case "signed":         return {label:"Export deliverable", to:"delivered", who:"system", what:"deliverable v%V issued to client library"};
+    default: return null;
+  }
+}
+function requestChanges(id){
+  const a=A.find(x=>x.id===id); if(!a||!["in_review","peer_reviewed"].includes(a.status))return;
+  a.status="needs_revision"; a.updated_at=new Date(2026,6,28);
+  a.trail.push({when:new Date(2026,6,28),who:"M. Osei",what:"changes requested — sampling duration unclear for row 2"});
+  toast("Changes requested — back to the author with reviewer notes");
+  render();
+}
+
+/* ---------------- tiny helpers ---------------- */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+function toast(msg){const t=document.createElement("div");t.className="toast ok";t.textContent=msg;
+  $("#toasts").append(t);setTimeout(()=>t.remove(),3400);}
+const badge=s=>`<span class="badge s-${s}">${s.replace(/_/g," ")}</span>`;
+const pbadge=v=>`<span class="pbadge p-${v}">${v}</span>`;
+
+/* =====================================================================
+   ROUTER — hash-based SPA
+   ===================================================================== */
+const NAV=[["dashboard","Dashboard"],["clients","Clients"],["tools","Toolbox"],["queue","Sign-off queue"]];
+const PRACTICE=[["documents","Issued documents"],["usage","AI usage & cost"],["team","Team & credentials"]];
+let route={page:"dashboard"};
+function go(page,arg){route={page,arg};window.scrollTo(0,0);render();}
+
+function renderNav(){
+  const qn=A.filter(a=>["in_review","peer_reviewed"].includes(a.status)).length;
+  const cur=route.page;
+  $("#nav").innerHTML=
+    NAV.map(([k,l])=>`<div class="nl ${cur===k||(k==="clients"&&cur==="client")||(k==="tools"&&(cur==="tool"||cur==="assessment"))?"active":""}"
+      onclick="go('${k}')">${l}${k==="queue"&&qn?`<span class="qbadge">${qn}</span>`:""}</div>`).join("")+
+    `<div class="dropdown" id="pdd">
+       <div class="nl ${PRACTICE.some(([k])=>k===cur)?"active":""}" onclick="document.getElementById('pdd').classList.toggle('open')">
+         Practice <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg></div>
+       <div class="menu">${PRACTICE.map(([k,l])=>`<div onclick="go('${k}')">${l}</div>`).join("")}</div>
+     </div>`;
+}
+document.addEventListener("mousedown",e=>{const dd=$("#pdd");if(dd&&!dd.contains(e.target))dd.classList.remove("open");});
+
+/* =====================================================================
+   VIEWS
+   ===================================================================== */
+let dashFilter="all", dashClient=null, dashView="list", dashQ="";
+
+function vDashboard(){
+  const open=A.filter(a=>!["signed","delivered","archived"].includes(a.status));
+  const awaiting=A.filter(a=>["in_review","peer_reviewed"].includes(a.status));
+  const signed=A.filter(a=>["signed","delivered"].includes(a.status));
+  const stuck=A.map(a=>({a,s:stuckReason(a)})).filter(x=>x.s)
+    .sort((x,y)=>x.s.sev==="red"?-1:y.s.sev==="red"?1:x.s.sev==="orange"?-1:1);
+  const stuckIds=new Set(stuck.map(x=>x.a.id));
+  const attention=[...stuck.map(x=>({a:x.a,sev:x.s.sev,reason:x.s.reason,cta:"Unblock →"})),
+    ...awaiting.filter(a=>!stuckIds.has(a.id)).map(a=>({a,sev:"amber",reason:a.status==="peer_reviewed"?"Ready for your signature":"Awaiting CIH review",cta:"Review →"}))].slice(0,6);
+
+  let rows=dashFilter==="open"?open:dashFilter==="awaiting"?awaiting:dashFilter==="signed"?signed:A;
+  if(dashClient)rows=rows.filter(r=>r.client_id===dashClient);
+  if(dashQ)rows=rows.filter(r=>r.title.toLowerCase().includes(dashQ.toLowerCase()));
+  rows=[...rows].sort((a,b)=>b.updated_at-a.updated_at);
+
+  const chips=CLIENTS.map(c=>({c,open:open.filter(a=>a.client_id===c.id).length}))
+    .sort((a,b)=>b.open-a.open);
+
+  const tableRows = r=>`<tr onclick="go('assessment','${r.id}')">
+     <td style="font-weight:600">${esc(r.title)}</td>
+     <td><span class="mono" style="font-size:11px;color:var(--teal)">${r.tool_id}</span> ${esc(TOOL_NAME[r.tool_id]??"")}</td>
+     <td>${esc(cname(r.client_id))}</td><td>${badge(r.status)}</td>
+     <td style="color:var(--muted);white-space:nowrap">${rel(r.updated_at)}</td></tr>`;
+
+  const table = dashView==="list"
+    ? `<div class="dt-wrap"><table class="dt">
+        <thead><tr><th>Title</th><th>Tool</th><th>Client</th><th>Status</th><th>Updated</th></tr></thead>
+        <tbody>${rows.length?rows.map(tableRows).join(""):`<tr class="norow"><td colspan="5"><div class="empty">Nothing matches this filter.</div></td></tr>`}</tbody></table></div>`
+    : chips.filter(x=>!dashClient||x.c.id===dashClient).map(({c})=>{
+        const rs=rows.filter(r=>r.client_id===c.id); if(!rs.length)return "";
+        const p=computePulse(c.pulse);
+        return `<h2 class="sec" style="display:flex;gap:10px;align-items:center;cursor:pointer" onclick="go('client','${c.id}')">
+            ${esc(c.name)} <span class="sc mono" style="font-size:11px;color:var(--muted)">pulse ${p.score}/10 · ${PULSE_LABEL[p.band]}</span></h2>
+          <div class="dt-wrap" style="margin-bottom:16px"><table class="dt">
+          <thead><tr><th>Title</th><th>Tool</th><th>Client</th><th>Status</th><th>Updated</th></tr></thead>
+          <tbody>${rs.map(tableRows).join("")}</tbody></table></div>`;}).join("");
+
+  return `
+    <div class="eyebrow">Meridian Industrial Hygiene · workspace</div>
+    <h1>Dashboard</h1>
+    <p class="pdesc">Every engagement across the practice — filtered, sorted, and watched by the lost-paperwork radar.</p>
+    <div class="stats">
+      <div class="card stat"><div class="l">Open</div><div class="v">${open.length}</div><div class="h">drafts + in review</div></div>
+      <div class="card stat"><div class="l">Awaiting sign-off</div><div class="v">${awaiting.length}</div><div class="h">CIH gate</div></div>
+      <div class="card stat"><div class="l">Signed / issued</div><div class="v">${signed.length}</div><div class="h">this year</div></div>
+      <div class="card stat"><div class="l">Clients</div><div class="v">${CLIENTS.length}</div><div class="h">5 industries</div></div>
+    </div>
+    ${attention.length?`<h2 class="sec">Needs attention</h2><div class="attn">${attention.map(x=>`
+      <div class="card a ${x.sev}" onclick="go('assessment','${x.a.id}')">
+        <div><div class="t">${esc(x.a.title)}</div><div class="r">${esc(cname(x.a.client_id))} · ${x.reason}</div></div>
+        <span class="cta">${x.cta}</span></div>`).join("")}</div>`:""}
+    <div class="toolrow-head">
+      <div class="tabs">${[["all","All"],["open","Open"],["awaiting","Awaiting sign-off"],["signed","Signed"]]
+        .map(([k,l])=>`<div class="${dashFilter===k?"on":""}" onclick="dashFilter='${k}';render()">${l}</div>`).join("")}</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="search" placeholder="Search titles…" value="${esc(dashQ)}"
+          oninput="dashQ=this.value;render();requestAnimationFrame(()=>{const i=document.querySelector('input.search');i.focus();i.setSelectionRange(i.value.length,i.value.length)})">
+        <div class="tabs"><div class="${dashView==="list"?"on":""}" onclick="dashView='list';render()">List</div>
+        <div class="${dashView==="clients"?"on":""}" onclick="dashView='clients';render()">By client</div></div>
+        <button class="btn btn-secondary" onclick="exportCsv()">Export CSV</button>
+      </div>
+    </div>
+    <div class="chips">${chips.map(({c,open:o})=>`<span class="chip ${dashClient===c.id?"on":""}"
+        onclick="dashClient=dashClient==='${c.id}'?null:'${c.id}';render()">${esc(c.name)}<span class="n">${o}</span></span>`).join("")}
+      ${dashClient?`<span class="chip" onclick="dashClient=null;render()">✕ clear</span>`:""}</div>
+    ${table}`;
+}
+
+function vClients(){
+  return `<div class="eyebrow">Practice</div><h1>Clients</h1>
+    <p class="pdesc">Every client carries a live Pulse — computed from the practice's own signed work, no data entry.</p>
+    <div class="dt-wrap" style="margin-top:16px"><table class="dt">
+      <thead><tr><th>Client</th><th>Industry</th><th>Workers</th><th>Pulse</th><th>Open items</th></tr></thead>
+      <tbody>${CLIENTS.map(c=>{const p=computePulse(c.pulse);
+        const open=A.filter(a=>a.client_id===c.id&&!["signed","delivered","archived"].includes(a.status)).length;
+        return `<tr onclick="go('client','${c.id}')"><td style="font-weight:600">${esc(c.name)}</td>
+          <td>${esc(c.industry)}</td><td>${c.workers}</td>
+          <td><span class="badge s-${p.band==="green"?"signed":p.band==="amber"?"in_review":p.band==="orange"?"needs_revision":"overdue"}"
+            style="${p.band==="orange"?"background:var(--orange-100);color:var(--orange-800)":""}">${PULSE_LABEL[p.band]} · ${p.score}</span></td>
+          <td>${open}</td></tr>`;}).join("")}</tbody></table></div>`;
+}
+
+function vClient(id){
+  const c=CLIENTS.find(x=>x.id===id); if(!c)return go("clients");
+  const p=computePulse(c.pulse);
+  const mine=[...A.filter(a=>a.client_id===id)].sort((a,b)=>b.updated_at-a.updated_at);
+  return `<div class="crumb"><a onclick="go('clients')">Clients</a> / ${esc(c.name)}</div>
+    <div class="eyebrow">${esc(c.industry)} · ${c.workers} workers</div><h1>${esc(c.name)}</h1>
+    <section class="pulse ${p.band}">
+      <div class="head"><span class="dot"></span>
+        <span class="ttl">PULSE · ${PULSE_LABEL[p.band]} <span class="sc">${p.score}/10</span></span>
+        <span class="src">from ${mine.length} assessment(s) on file — no data entry needed</span>
+        ${p.nextToolId?`<button class="btn btn-primary" style="margin-left:auto;font-size:12px;padding:6px 12px"
+          onclick="go('tool','${p.nextToolId}')">Next: ${esc(TOOL_NAME[p.nextToolId])} →</button>`:""}</div>
+      <ul>${p.topDrivers.map(d=>`<li>${esc(d.detail)}</li>`).join("")}
+          ${p.flags.map(f=>`<li class="flag">${esc(f)}</li>`).join("")}</ul>
+    </section>
+    <h2 class="sec">Sites</h2>
+    <div class="chips">${c.sites.map(s=>`<span class="chip">${esc(s)}</span>`).join("")}</div>
+    <h2 class="sec">Assessments</h2>
+    <div class="dt-wrap"><table class="dt">
+      <thead><tr><th>Title</th><th>Tool</th><th>Status</th><th>Updated</th></tr></thead>
+      <tbody>${mine.map(r=>`<tr onclick="go('assessment','${r.id}')">
+        <td style="font-weight:600">${esc(r.title)}</td>
+        <td><span class="mono" style="font-size:11px;color:var(--teal)">${r.tool_id}</span> ${esc(TOOL_NAME[r.tool_id])}</td>
+        <td>${badge(r.status)}</td><td style="color:var(--muted)">${rel(r.updated_at)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function vTools(){
+  return `<div class="eyebrow">Toolbox</div><h1>33 tools, deterministic-first</h1>
+    <p class="pdesc">Pure engines compute every number; AI only drafts narrative around engine-stamped values. <b>Every BUILT tool runs in this demo</b> — Tool 02 with a full guided form, the rest one-click on a representative dataset. Planned tools are honest stubs that refuse to guess.</p>
+    ${TOOL_GROUPS.map(g=>`<div class="tgroup" style="margin-top:20px"><h3>${esc(g.name)}</h3>
+      <div class="dt-wrap"><table class="dt"><thead><tr><th style="width:46px">ID</th><th>Tool</th><th style="width:90px">Status</th></tr></thead>
+      <tbody>${g.tools.map(([id,n,b])=>`<tr onclick="go('tool','${id}')">
+        <td class="mono" style="color:var(--teal);font-size:12px">${id}</td>
+        <td style="font-weight:${b?600:400};color:${b?"inherit":"var(--muted)"}">${esc(n)}</td>
+        <td><span class="tag ${b?"built":""}">${b?"BUILT":"PLANNED"}</span></td></tr>`).join("")}</tbody></table></div></div>`).join("")}`;
+}
+
+/* ---- Tool 02: the interactive module ---- */
+let t2rows=[{cas:"108-88-3",twa:124,unit:"ppm"},{cas:"67-64-1",twa:310,unit:"ppm"}];
+let t2client="c3", t2result=null;
+
+/* ---- Generic fallback runner: every BUILT tool runs with demo data ---- */
+const TOOL_FALLBACK = {
+  "01":{cols:["Agent","CAS","Method","Media / duration"],rows:[
+    ["Toluene","108-88-3","NIOSH 1501","Charcoal tube · full-shift"],
+    ["Silica, respirable","14808-60-7","NIOSH 7500","PVC filter + cyclone · full-shift"],
+    ["Chromium (VI)","18540-29-9","OSHA ID-215","Binder-free PVC · full-shift"]],
+    note:"Sampling plan derived from the client's SDS inventory — methods and media come from the method library, never guessed."},
+  "03":{cols:["SDS","Issue found","Section","Severity"],rows:[
+    ["AcmeThin 2200","Pre-GHS Rev 7 pictograms","§2","MAJOR"],
+    ["WeldWire F70","Missing ECEL reference for Cr(VI)","§8","MAJOR"],
+    ["CoolCut fluid","Outdated PEL cited (pre-2016 silica)","§8","MINOR"]],
+    note:"Each finding cites the exact SDS section and the current regulatory basis."},
+  "04":{cols:["Program element","Status","Citation"],rows:[
+    ["Hazard assessment (written)","OK","1910.132(d)"],
+    ["Respirator medical evaluations","GAP","1910.134(e)"],
+    ["Annual fit testing records","GAP","1910.134(f)"],
+    ["Training documentation","OK","1910.132(f)"]],
+    note:"2 gaps found — each maps to a CAPA item in Tool 07."},
+  "05":{cols:["RPP element","Status","Citation"],rows:[
+    ["Written program & administrator","OK","1910.134(c)(1)"],
+    ["Medical evaluation before fit test","GAP","1910.134(e)"],
+    ["Fit testing (annual, QNFT)","GAP","1910.134(f)"],
+    ["Cartridge change schedule","GAP","1910.134(d)(3)"]],
+    note:"Program fails 3 of 9 required elements — engine cites each subsection."},
+  "06":{cols:["Standard","Applies?","Trigger"],rows:[
+    ["1910.1053 Respirable silica","YES","Shakeout results > action level"],
+    ["TSCA §6(a) Cr(VI) WCPP","YES","ECEL exceedance on file"],
+    ["1910.95 Hearing conservation","YES","TWA ≥ 85 dBA"],
+    ["1910.1030 Bloodborne","NO","No occupational exposure determination"]],
+    note:"Applicability is determined from the client's own results and operations — with citations."},
+  "07":{cols:["Finding","Risk","CAPA","Due"],rows:[
+    ["Eyewash blocked by pallets","Serious","Clear + weekly verification","Aug 4, 2026"],
+    ["Expired cartridges in use","Serious","Replace stock; change schedule","Aug 1, 2026"],
+    ["SDS binder outdated","Other","Tool 16 migration run","Aug 15, 2026"]],
+    note:"Every CAPA gets an owner, a due date, and lands on the dashboard radar until closed."},
+  "09":{cols:["Area","Strategy","Instrument","Duration"],rows:[
+    ["Barrel line","Full-shift dosimetry, 3 workers","Noise dosimeter (Class 2)","8 hr"],
+    ["Rack line","Task-based + area map","SLM + octave bands","4 hr"],
+    ["Compressor room","Area survey","SLM","30 min"]],
+    note:"1910.95 monitoring plan — exchange rate 5 dB, criterion 90 dBA, threshold 80 dBA."},
+  "14":{cols:["Assessment","Basis","Next due"],rows:[
+    ["Hex-chrome exposure round","ECEL program — quarterly","Sep 30, 2026"],
+    ["Noise dosimetry","≥ AL — annual","Mar 12, 2027"],
+    ["Silica monitoring","< AL twice — biennial","Jun 2, 2028"]],
+    note:"Cadence rules come from each governing standard; overdue items feed the client's Pulse."},
+  "15":{cols:["WCPP requirement","Status","Cite"],rows:[
+    ["Exposure below ECEL (0.14 µg/m³)","FAIL — 160%","40 CFR 751 subpart"],
+    ["Exposure control plan","GAP","§751 WCPP"],
+    ["Notification to affected workers","DUE","§751 WCPP"]],
+    note:"ECEL exceedance drives immediate obligations — the engine lists them in order."},
+  "16":{cols:["SDS batch","Rev status","Action"],rows:[
+    ["Solvents (14 SDSs)","Pre-Rev 7","Request updated SDS; re-author labels"],
+    ["Resins (9 SDSs)","Rev 7 OK","No action"],
+    ["Metals (8 SDSs)","Mixed","4 need re-issue"]],
+    note:"HazCom 2024 transition tracked per SDS with label + training impacts."},
+  "17":{cols:["Program element","Included","Basis"],rows:[
+    ["Heat trigger levels (heat index)","YES","NIOSH RELs / state rule"],
+    ["Acclimatization schedule","YES","20% rule, 5-day ramp"],
+    ["Work/rest cycles + hydration","YES","WBGT table"],
+    ["Emergency response plan","YES","Program template"]],
+    note:"Builds a complete written heat illness prevention program from site parameters."},
+  "18":{cols:["Worker group","Exam","Due"],rows:[
+    ["Cr(VI)-exposed welders (6)","Medical surveillance panel","OVERDUE 14d"],
+    ["HCP-enrolled (22)","Audiogram (annual)","Sep 2026"],
+    ["Respirator users (31)","Medical evaluation","Current"]],
+    note:"Tracks every exam obligation the standards trigger — overdue items feed the Pulse."},
+  "19":{cols:["Record","Retention","Disposition"],rows:[
+    ["Exposure records","30 years","1910.1020(d)"],
+    ["Medical records","Duration + 30 yr","1910.1020(d)"],
+    ["Audiometric tests","Duration of employment","1910.95(m)"]],
+    note:"Retention clock per record class, with transfer obligations on business closure."},
+  "20":{cols:["Standard pack","Trigger result","Obligations generated"],rows:[
+    ["1910.1053 Silica","85% of PEL","Periodic monitoring + regulated area review"],
+    ["1910.1026 Cr(VI)","160% ECEL","Full pack: monitoring, medical, training"],
+    ["1910.95 Noise","118% dose","HCP enrollment + annual audiograms"]],
+    note:"Each exceedance expands into the standard's full obligation set — nothing forgotten."},
+  "21":{cols:["Practice item","Status","Due"],rows:[
+    ["CIH certification (Calloway)","Current","Mar 2028"],
+    ["Professional liability policy","Current","Jan 2027"],
+    ["NIOSH 582 (Reyes)","EXPIRES SOON","Nov 2026"]],
+    note:"The practice itself is a compliance object — credentials, insurance, QA cycles."},
+  "22":{cols:["Safeguard","Status","Note"],rows:[
+    ["Medical data segregated (RLS)","OK","Row-level security by role"],
+    ["Worker identifiers minimized","OK","Sampling IDs, not names, in exports"],
+    ["Client data isolation","OK","Per-org tenancy enforced in the database"]],
+    note:"1910.1020 + state privacy obligations, verified against the actual schema."},
+  "23":{cols:["Statistic","Value","Interpretation"],rows:[
+    ["Geometric mean","42 ppm","Central tendency"],
+    ["GSD","2.1","Moderate variability"],
+    ["95th percentile","118 ppm","Above 50% of PEL"],
+    ["P(exceedance)","12%","Category 3 — periodic monitoring"]],
+    note:"AIHA exposure rating from the same lognormal math the profession trusts — deterministic."},
+};
+let gclient="c1", gresult=null;
+
+/* ---- Tool 01: SDS intake → constituents → sampling plan (mirrors runTool01FromPdfs) ---- */
+const SDS_SET = [
+  { product:"AcmeThin 2200 (lacquer thinner)", rows:[["Toluene","108-88-3","40%"],["Xylene","1330-20-7","25%"],["Methyl ethyl ketone","78-93-3","10%"]] },
+  { product:"WeldWire F70 (flux-cored wire)",  rows:[["Manganese","7439-96-5","1.2%"],["Iron oxide","1309-37-1","balance"]] },
+  { product:"CastClean 40 (mold release)",     rows:[["Acetone","67-64-1","55%"]] },
+];
+const T1_PLAN = {cols:["Agent","CAS","Method","Media / duration"],rows:[
+  ["Toluene","108-88-3","NIOSH 1501","Charcoal tube · full-shift"],
+  ["Xylene","1330-20-7","NIOSH 1501","Charcoal tube · full-shift"],
+  ["Methyl ethyl ketone","78-93-3","NIOSH 2500","Carbon-bead tube · full-shift"],
+  ["Manganese (R)","7439-96-5","NIOSH 7300","MCE filter + cyclone · full-shift"],
+  ["Acetone","67-64-1","NIOSH 1300","Charcoal tube · full-shift"]]};
+const T1_AI_ROW = ["n-Hexane (AI-suggested — verify vs SDS)","110-54-3","NIOSH 1500","Charcoal tube · full-shift"];
+let t1client="c1", t1loaded=false, t1ai=false, t1plan=null;
+function t1Load(){ t1loaded=true; t1plan=null; toast("3 SDS PDFs parsed — text extraction, no OCR needed"); render(); }
+function t1Suggest(){ t1ai=true; toast("AI suggestion added — marked for verification, never auto-trusted"); render(); }
+function t1Run(){
+  t1plan={cols:T1_PLAN.cols,rows:t1ai?[...T1_PLAN.rows,T1_AI_ROW]:T1_PLAN.rows};
+  toast("Sampling plan generated — methods from the method library"); render();
+}
+function t1Save(){
+  const a={id:"a"+(SEQ++),tool_id:"01",client_id:t1client,
+    title:"Sampling plan — SDS intake "+new Date(2026,6,28).toLocaleDateString("en-US",{month:"short",day:"numeric"}),
+    status:"draft",updated_at:new Date(2026,6,28),due_date:null,overdueDays:0,versions:1,
+    payload:null,payloadTable:t1plan,
+    trail:[{when:new Date(2026,6,28),who:"J. Calloway, CIH",what:"created draft (Tool 01 SDS intake)"}]};
+  A.unshift(a); t1plan=null; t1loaded=false; t1ai=false;
+  toast("Draft sampling plan created for "+cname(t1client));
+  go("assessment",a.id);
+}
+function runGeneric(id){ gresult=id; toast("Engine run complete — demo fallback dataset"); render(); }
+function saveGeneric(id){
+  const f=TOOL_FALLBACK[id];
+  const a={id:"a"+(SEQ++),tool_id:id,client_id:gclient,
+    title:TOOL_NAME[id]+" — "+new Date(2026,6,28).toLocaleDateString("en-US",{month:"short",day:"numeric"}),
+    status:"draft",updated_at:new Date(2026,6,28),due_date:null,overdueDays:0,versions:1,
+    payload:null,payloadTable:{cols:f.cols,rows:f.rows},
+    trail:[{when:new Date(2026,6,28),who:"J. Calloway, CIH",what:`created draft (Tool ${id} run)`}]};
+  A.unshift(a); gresult=null;
+  toast("Draft assessment created for "+cname(gclient));
+  go("assessment",a.id);
+}
+
+function vTool(id){
+  if(id==="01"){
+    return `<div class="crumb"><a onclick="go('tools')">Toolbox</a> / SDS → Sampling Plan</div>
+      <div style="max-width:680px;margin:0 auto">
+      <div class="eyebrow">Tool 01 · Anticipate · the flagship intake</div>
+      <h1>SDS → Sampling Plan</h1>
+      <p class="pdesc">Drop the client's SDS PDFs; AERIS extracts constituents, flags what the SDS hides, and builds the sampling plan — methods and media from the method library, never guessed.</p>
+      <div class="card" style="padding:18px;margin-top:16px">
+        <div class="fgrid">
+          <div class="field"><label>Client</label>
+            <select onchange="t1client=this.value;t1loaded=false;t1ai=false;t1plan=null;render()">
+              ${CLIENTS.map(c=>`<option value="${c.id}" ${c.id===t1client?"selected":""}>${esc(c.name)}</option>`).join("")}
+            </select></div>
+          ${!t1loaded?`
+            <div style="border:2px dashed var(--line);border-radius:10px;padding:26px;text-align:center;color:var(--muted)">
+              <div style="font-size:26px">📄</div>
+              <div style="margin:6px 0 10px;font-size:13px">In the product: drag SDS PDFs here — real text extraction, OCR-free</div>
+              <button class="btn btn-primary" onclick="t1Load()">Load sample SDS set (3 PDFs)</button>
+            </div>`:`
+            <div class="field"><label>Extracted constituents (from PDF text — 3 SDSs parsed)</label>
+              <div class="dt-wrap"><table class="dt">
+                <thead><tr><th>Product / SDS</th><th>Constituent</th><th>CAS</th><th>%</th></tr></thead>
+                <tbody>${SDS_SET.flatMap(s=>s.rows.map((r,i)=>`<tr class="norow">
+                  <td style="${i===0?"font-weight:600":""};color:${i===0?"inherit":"var(--faint)"}">${i===0?esc(s.product):"″"}</td>
+                  <td>${esc(r[0])}</td><td class="mono" style="font-size:11.5px">${r[1]}</td><td>${r[2]}</td></tr>`)).join("")}
+                </tbody></table></div></div>
+            ${!t1ai?`<div class="callout c-info" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0">
+                <span><b>✨ AI assist:</b> AcmeThin §3 lists a generic "petroleum distillate" — n-hexane (110-54-3) is common in this product class. Add it for verification?</span>
+                <button class="btn btn-secondary" style="margin-left:auto" onclick="t1Suggest()">Add suggestion</button></div>`
+             :`<div class="callout c-success" style="margin:0">n-Hexane added — <b>marked AI-suggested</b>; the plan prints it with a verify-against-SDS note. AI proposes, it never decides.</div>`}
+            <div><button class="btn btn-primary" onclick="t1Run()">Generate sampling plan</button>
+              <span style="font-size:12px;color:var(--faint);margin-left:8px">deterministic — methods from the method library</span></div>`}
+        </div>
+      </div>
+      ${t1plan?`
+        <h2 class="sec">Sampling plan</h2>
+        <div class="dt-wrap"><table class="dt">
+          <thead><tr>${t1plan.cols.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead>
+          <tbody>${t1plan.rows.map(r=>`<tr class="norow">${r.map((v,i)=>`<td style="${i===0?"font-weight:600":""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody>
+        </table></div>
+        <div style="margin-top:12px"><button class="btn btn-primary" onclick="t1Save()">Create draft assessment →</button></div>`:""}
+      </div>`;
+  }
+  if(id!=="02"){
+    const built=TOOL_BUILT[id], f=TOOL_FALLBACK[id];
+    if(!built||!f){
+      return `<div class="crumb"><a onclick="go('tools')">Toolbox</a> / ${esc(TOOL_NAME[id]??id)}</div>
+        <div style="max-width:640px;margin:0 auto">
+        <div class="eyebrow">Tool ${id}</div><h1>${esc(TOOL_NAME[id]??"Unknown tool")}</h1>
+        <div class="callout c-warn"><b>Honest stub — fails closed.</b> This tool is scoped but not yet built. In the product it renders exactly this notice and refuses to produce output it can't stand behind. No fake deliverables, ever.</div>
+        <button class="btn btn-secondary" onclick="go('tools')">← Back to Toolbox</button></div>`;
+    }
+    return `<div class="crumb"><a onclick="go('tools')">Toolbox</a> / ${esc(TOOL_NAME[id])}</div>
+      <div style="max-width:680px;margin:0 auto">
+      <div class="eyebrow">Tool ${id} · deterministic engine</div><h1>${esc(TOOL_NAME[id])}</h1>
+      <p class="pdesc">Demo fallback: one click runs the engine on a representative dataset so you can see the full flow. In the product, this page has a guided form fed by your client's own data.</p>
+      <div class="card" style="padding:18px;margin-top:16px">
+        <div class="fgrid">
+          <div class="field"><label>Client</label>
+            <select onchange="gclient=this.value;gresult=null;render()">
+              ${CLIENTS.map(c=>`<option value="${c.id}" ${c.id===gclient?"selected":""}>${esc(c.name)}</option>`).join("")}
+            </select></div>
+          <div><button class="btn btn-primary" onclick="runGeneric('${id}')">Run ${esc(TOOL_NAME[id])}</button>
+            <span style="font-size:12px;color:var(--faint);margin-left:8px">deterministic engine · demo dataset</span></div>
+        </div>
+      </div>
+      ${gresult===id?`
+        <h2 class="sec">Engine output</h2>
+        <div class="dt-wrap"><table class="dt">
+          <thead><tr>${f.cols.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead>
+          <tbody>${f.rows.map(r=>`<tr class="norow">${r.map((v,i)=>`<td style="${i===0?"font-weight:600":""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody>
+        </table></div>
+        <div class="callout c-info" style="margin-top:12px">${esc(f.note)}</div>
+        <div style="margin-top:8px"><button class="btn btn-primary" onclick="saveGeneric('${id}')">Create draft assessment →</button>
+          <span style="font-size:12px;color:var(--faint);margin-left:8px">stores the payload + provenance, status = draft</span></div>`:""}
+      </div>`;
+  }
+  const options=CHEMS.map(ch=>`value="${ch.cas}"`);
+  return `<div class="crumb"><a onclick="go('tools')">Toolbox</a> / Exposure Results Analyzer</div>
+    <div style="max-width:680px;margin:0 auto">
+    <div class="eyebrow">Tool 02 · Forecast · Pre-empt</div>
+    <h1>Exposure Results Analyzer</h1>
+    <p class="pdesc">Enter lab results; the engine compares each 8-hr TWA against its governing limit and issues a verdict. Unit mismatches are never guessed — they fail closed.</p>
+    <div class="card" style="padding:18px;margin-top:16px">
+      <div class="fgrid">
+        <div class="field"><label>Client</label>
+          <select onchange="t2client=this.value;t2result=null;render()">
+            ${CLIENTS.map(c=>`<option value="${c.id}" ${c.id===t2client?"selected":""}>${esc(c.name)}</option>`).join("")}
+          </select></div>
+        <div class="field"><label>Sample results (guided rows — chemical dropdown feeds CAS + governing limit)</label>
+          ${t2rows.map((r,i)=>`<div class="rowb">
+            <select onchange="t2rows[${i}].cas=this.value;t2result=null;render()">
+              ${CHEMS.map(ch=>`<option value="${ch.cas}" ${ch.cas===r.cas?"selected":""}>${esc(ch.name)} — ${ch.cas}</option>`).join("")}
+            </select>
+            <input type="number" step="any" min="0" value="${r.twa}" aria-label="8-hr TWA result"
+              onchange="t2rows[${i}].twa=+this.value;t2result=null">
+            <select onchange="t2rows[${i}].unit=this.value;t2result=null;render()" aria-label="Unit">
+              ${UNITS.map(u=>`<option ${u===r.unit?"selected":""}>${u}</option>`).join("")}
+            </select>
+            <button class="del" title="Remove row" onclick="t2rows.splice(${i},1);t2result=null;render()">✕</button>
+          </div>`).join("")}
+          <button class="btn btn-secondary" style="margin-top:2px" onclick="t2rows.push({cas:'100-42-5',twa:50,unit:'mg/m3'});t2result=null;render()">+ Add sample row</button>
+          <div class="hint">Tip: add Styrene with unit mg/m³ to watch the fail-closed path — its limit is in ppm.</div>
+        </div>
+        <div><button class="btn btn-primary" onclick="runTool02()">Run analysis</button>
+          <span style="font-size:12px;color:var(--faint);margin-left:8px">deterministic engine · no AI in the numbers</span></div>
+      </div>
+    </div>
+    ${t2result?`
+      <h2 class="sec">Engine output</h2>
+      <div class="dt-wrap"><table class="dt">
+        <thead><tr><th>Agent</th><th>Result</th><th>% of limit</th><th>Verdict</th></tr></thead>
+        <tbody>${t2result.map(r=>`<tr class="norow">
+          <td style="font-weight:600">${esc(r.chem?.name??r.cas)}<div class="mono" style="font-size:10.5px;color:var(--faint)">${r.cas}</div></td>
+          <td class="mono" style="font-size:12px">${r.twa} ${r.unit}</td>
+          <td class="mono" style="font-size:12px">${r.pct==null?"—":r.pct+"%"}</td>
+          <td>${pbadge(r.verdict)}<div style="font-size:11.5px;color:var(--muted);margin-top:2px">${esc(r.note)}</div></td></tr>`).join("")}
+        </tbody></table></div>
+      ${t2result.some(r=>r.verdict==="FLAG")?`<div class="callout c-warn" style="margin-top:12px"><b>Fail-closed:</b> flagged rows are excluded from scoring and the client's Pulse is floored at AMBER until resolved. AERIS never converts units it wasn't given authority for.</div>`:""}
+      <div style="margin-top:14px"><button class="btn btn-primary" onclick="saveTool02()">Create draft assessment →</button>
+        <span style="font-size:12px;color:var(--faint);margin-left:8px">stores the payload + provenance, status = draft</span></div>`:""}
+    </div>`;
+}
+function runTool02(){
+  if(!t2rows.length){toast("Add at least one sample row");return;}
+  t2result=analyzeExposure(t2rows);
+  toast("Engine run complete — "+t2result.length+" result(s) scored");render();
+}
+function saveTool02(){
+  const a={id:"a"+(SEQ++),tool_id:"02",client_id:t2client,
+    title:"Exposure results — "+new Date(2026,6,28).toLocaleDateString("en-US",{month:"short",day:"numeric"}),
+    status:"draft",updated_at:new Date(2026,6,28),due_date:null,overdueDays:0,versions:1,
+    payload:t2result,trail:[{when:new Date(2026,6,28),who:"J. Calloway, CIH",what:"created draft (Tool 02 run)"}]};
+  A.unshift(a);t2result=null;
+  toast("Draft assessment created for "+cname(t2client));
+  go("assessment",a.id);
+}
+
+function vAssessment(id){
+  const a=A.find(x=>x.id===id); if(!a)return go("dashboard");
+  const nxt=lifecycleNext(a);
+  const stepIdx={draft:0,in_review:1,peer_reviewed:2,signed:3,delivered:4}[a.status]??0;
+  const steps=["Draft","In review","Peer reviewed","Signed","Delivered"];
+  return `<div class="crumb"><a onclick="go('dashboard')">Dashboard</a> / <a onclick="go('client','${a.client_id}')">${esc(cname(a.client_id))}</a> / assessment</div>
+    <div class="eyebrow">Tool ${a.tool_id} · ${esc(TOOL_NAME[a.tool_id]??"")}</div>
+    <h1>${esc(a.title)}</h1>
+    <div style="display:flex;gap:10px;align-items:center;margin:6px 0 2px">${badge(a.status)}
+      <span style="font-size:12px;color:var(--faint)">updated ${rel(a.updated_at)}</span></div>
+    <div class="detail" style="margin-top:16px">
+      <div>
+        <div class="card" style="padding:16px 18px">
+          <div style="display:flex;gap:4px;margin-bottom:14px;flex-wrap:wrap">
+            ${steps.map((s,i)=>`<span style="font-size:11px;padding:3px 10px;border-radius:999px;
+              ${i<=stepIdx?"background:var(--navy);color:#fff":"background:var(--slate-100);color:var(--slate-500)"}">${i+1}. ${s}</span>`).join("")}
+          </div>
+          ${a.payload?`<h3 style="font-family:'Space Grotesk',sans-serif;font-size:13px;margin:0 0 8px">Engine payload</h3>
+            <div class="dt-wrap"><table class="dt">
+              <thead><tr><th>Agent</th><th>Result</th><th>% of limit</th><th>Verdict</th></tr></thead>
+              <tbody>${a.payload.map(r=>`<tr class="norow"><td>${esc(r.chem?.name??r.cas)}</td>
+                <td class="mono" style="font-size:12px">${r.twa} ${r.unit}</td>
+                <td class="mono" style="font-size:12px">${r.pct==null?"—":r.pct+"%"}</td>
+                <td>${pbadge(r.verdict)}</td></tr>`).join("")}</tbody></table></div>`
+          :a.payloadTable?`<h3 style="font-family:'Space Grotesk',sans-serif;font-size:13px;margin:0 0 8px">Engine payload</h3>
+            <div class="dt-wrap"><table class="dt">
+              <thead><tr>${a.payloadTable.cols.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead>
+              <tbody>${a.payloadTable.rows.map(r=>`<tr class="norow">${r.map((v,i)=>`<td style="${i===0?"font-weight:600":""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
+          :`<p style="font-size:13.5px;color:var(--muted);margin:0">Engine payload stored with provenance (engine version, reference revision, input hash). The deliverable renders from this payload — the numbers can never drift from what was computed.</p>`}
+          <div id="narrbox" style="margin-top:14px">${a.narrative
+            ?`<div class="callout c-info" style="margin:0"><b>Narrative draft — AI assist</b><div style="margin-top:6px">${esc(a.narrative)}</div></div>`
+            :`<button class="btn btn-secondary" onclick="draftNarrative('${a.id}')">✨ Draft narrative — AI assist</button>
+               <span style="font-size:12px;color:var(--faint);margin-left:8px">AI drafts the words; the engine owns the numbers (metered)</span>`}</div>
+          ${(a.status==="signed"||a.status==="delivered")&&FOLLOW_ON[a.tool_id]?`
+            <div class="callout c-success" style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <span><b>Next in the workflow:</b> this signature triggers Tool ${FOLLOW_ON[a.tool_id]} · ${esc(TOOL_NAME[FOLLOW_ON[a.tool_id]])}</span>
+              <button class="btn btn-primary" style="margin-left:auto;font-size:12px;padding:6px 12px"
+                onclick="go('tool','${FOLLOW_ON[a.tool_id]}')">Start →</button></div>`:""}
+          ${a.status==="peer_reviewed"&&(a.payload??[]).some(r=>r.verdict==="FLAG")?`
+            <div class="callout c-warn" style="margin-top:14px"><b>Acknowledge-flags gate:</b> this payload contains unscored (FLAG) results. Signature stays locked until the CIH explicitly acknowledges them.
+              <label style="display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer;font-weight:600">
+                <input type="checkbox" style="width:auto" ${a.flagsAcked?"checked":""}
+                  onchange="A.find(x=>x.id==='${a.id}').flagsAcked=this.checked;render()">
+                I acknowledge the flagged results and their exclusion from the determinations</label></div>`:""}
+          <div class="lifecycle">
+            ${nxt?`<button class="btn ${a.status==="peer_reviewed"?"btn-success":"btn-primary"}"
+              ${a.status==="peer_reviewed"&&(a.payload??[]).some(r=>r.verdict==="FLAG")&&!a.flagsAcked?"disabled":""}
+              onclick="advance('${a.id}')">${nxt.label}</button>`:
+              `<span class="badge s-delivered">delivered — in the client's document library</span>`}
+            ${["in_review","peer_reviewed"].includes(a.status)?`<button class="btn btn-secondary" onclick="requestChanges('${a.id}')">Request changes</button>`:""}
+            ${a.status==="signed"||a.status==="delivered"?`<button class="btn btn-secondary" onclick="openDoc('${a.id}')">View deliverable</button>`:""}
+          </div>
+          ${a.status==="peer_reviewed"?`<div class="callout c-info"><b>CIH gate:</b> only a credentialed CIH can sign. The demo user holds CIH #10482 — the real app verifies this against Team &amp; credentials before enabling the button.</div>`:""}
+          ${a.status==="needs_revision"?`<div class="callout c-warn"><b>Changes requested.</b> Reviewer notes are in the audit trail; revise and resubmit. Nothing signs until review passes.</div>`:""}
+          ${a.status==="draft"?`<div class="callout c-info">Submitting locks the payload and notifies the reviewer queue.</div>`:""}
+        </div>
+      </div>
+      <div class="rail">
+        <div class="card"><h3>Schedule</h3><div style="font-size:12.5px;color:var(--muted)">
+          ${a.overdueDays>0?`<span class="badge s-overdue">overdue ${a.overdueDays}d</span> reassessment window missed`:`Next reassessment auto-scheduled by Tool 14 on signature.`}</div></div>
+        <div class="card"><h3>Versions</h3><div style="font-size:12.5px;color:var(--muted)">v${a.versions} ${a.versions>1?"(superseding v"+(a.versions-1)+")":"— initial"}</div></div>
+        <div class="card"><h3>Audit trail</h3><div class="trail">
+          ${a.trail.map(t=>`<div>${esc(t.what)}<br><span class="who">${esc(t.who)} · ${fmtD(t.when)}</span></div>`).join("")}
+        </div></div>
+      </div>
+    </div>`;
+}
+
+function advance(id){
+  const a=A.find(x=>x.id===id); const nxt=lifecycleNext(a); if(!nxt)return;
+  if(a.status==="peer_reviewed"&&(a.payload??[]).some(r=>r.verdict==="FLAG")&&!a.flagsAcked){
+    toast("Blocked: acknowledge the flagged results before signing");return;
+  }
+  if(a.status==="signed"){ /* export → deliverable */
+    a.status="delivered";
+    DOCS.unshift({id:"d"+(SEQ++),title:a.title,client:a.client_id,tool:a.tool_id,issued:new Date(2026,6,28),rev:"v"+a.versions});
+    a.trail.push({when:new Date(2026,6,28),who:"system",what:"deliverable v"+a.versions+" issued to client library"});
+    toast("Deliverable issued — see Practice → Issued documents");
+    openDoc(id); render(); return;
+  }
+  a.status=nxt.to; a.updated_at=new Date(2026,6,28);
+  a.trail.push({when:new Date(2026,6,28),who:nxt.who,what:nxt.what});
+  toast(nxt.what[0].toUpperCase()+nxt.what.slice(1));
+  render();
+}
+
+function vQueue(){
+  const q=A.filter(a=>["in_review","peer_reviewed"].includes(a.status));
+  return `<div class="eyebrow">CIH gate</div><h1>Sign-off queue</h1>
+    <p class="pdesc">Nothing leaves the practice without a credentialed signature. Peer review first, then the CIH signs.</p>
+    ${q.length?`<div class="dt-wrap" style="margin-top:16px"><table class="dt">
+      <thead><tr><th>Title</th><th>Client</th><th>Status</th><th>Waiting</th><th></th></tr></thead>
+      <tbody>${q.map(a=>`<tr onclick="go('assessment','${a.id}')">
+        <td style="font-weight:600">${esc(a.title)}</td><td>${esc(cname(a.client_id))}</td>
+        <td>${badge(a.status)}</td><td style="color:var(--muted)">${rel(a.updated_at)}</td>
+        <td style="text-align:right;color:var(--teal);font-weight:600;font-size:12.5px">${a.status==="peer_reviewed"?"Review & sign →":"Open →"}</td></tr>`).join("")}
+      </tbody></table></div>`
+    :`<div class="card empty" style="margin-top:16px">Queue is clear — nothing awaiting review or signature.</div>`}`;
+}
+
+function vDocuments(){
+  return `<div class="eyebrow">Practice</div><h1>Issued documents</h1>
+    <p class="pdesc">Every deliverable the practice has issued — versioned, signed, and rendered from engine payloads. Click one to view.</p>
+    <div class="dt-wrap" style="margin-top:16px"><table class="dt">
+      <thead><tr><th>Document</th><th>Client</th><th>Tool</th><th>Rev</th><th>Issued</th></tr></thead>
+      <tbody>${DOCS.map(d=>`<tr onclick="openDocByDoc('${d.id}')">
+        <td style="font-weight:600">${esc(d.title)}</td><td>${esc(cname(d.client))}</td>
+        <td><span class="mono" style="font-size:11px;color:var(--teal)">${d.tool}</span> ${esc(TOOL_NAME[d.tool]??"")}</td>
+        <td class="mono" style="font-size:12px">${d.rev}</td><td style="color:var(--muted)">${fmtD(d.issued)}</td></tr>`).join("")}
+      </tbody></table></div>`;
+}
+
+function vUsage(){
+  return `<div class="eyebrow">Practice</div><h1>AI usage &amp; cost</h1>
+    <p class="pdesc">AI drafts narrative only — engines own the numbers. Usage is metered per run and per client.</p>
+    <div class="stats">
+      <div class="card stat"><div class="l">AI-assist runs (July)</div><div class="v">38</div><div class="h">narrative drafting</div></div>
+      <div class="card stat"><div class="l">Tokens</div><div class="v">412k</div><div class="h">in + out</div></div>
+      <div class="card stat"><div class="l">Est. cost</div><div class="v">$6.14</div><div class="h">this month</div></div>
+      <div class="card stat"><div class="l">Engine runs</div><div class="v">96</div><div class="h">$0 — deterministic</div></div>
+    </div>
+    <div class="callout c-info"><b>Design principle:</b> the expensive, auditable part of IH consulting is judgment and math. AERIS keeps the math deterministic and free; AI is a writing assistant with a meter on it.</div>`;
+}
+
+function vTeam(){
+  return `<div class="eyebrow">Practice</div><h1>Team &amp; credentials</h1>
+    <p class="pdesc">The CIH gate reads from this table — sign-off is impossible without a current credential on file.</p>
+    <div class="dt-wrap" style="margin-top:16px"><table class="dt">
+      <thead><tr><th>Member</th><th>Role</th><th>Credential</th><th>Expires</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr class="norow"><td style="font-weight:600">Jordan Calloway</td><td>Principal</td><td>CIH #10482</td><td>Mar 2028</td><td>${badge("signed")}</td></tr>
+        <tr class="norow"><td style="font-weight:600">Maya Osei</td><td>Senior IH</td><td>CIH candidate (eligible 2027)</td><td>—</td><td>${badge("in_review")}</td></tr>
+        <tr class="norow"><td style="font-weight:600">Sam Reyes</td><td>Field technician</td><td>NIOSH 582 (sampling)</td><td>Nov 2026</td><td>${badge("signed")}</td></tr>
+      </tbody></table></div>
+    <div class="callout c-warn" style="margin-top:14px"><b>Radar:</b> Sam's NIOSH 582 expires in 4 months — renewal reminder scheduled.</div>`;
+}
+
+/* ---------------- deliverable renderer (house style) ---------------- */
+function docHtml(title,client,tool,rev,issued,payload,ptable){
+  return `<div class="lh"><div><b>MERIDIAN</b><div style="font-size:11px;color:#5A6B7B">Industrial Hygiene, PLLC</div></div>
+      <div class="m">2140 Harbor Ave SW, Suite 300<br>Seattle, WA 98126 · (206) 555-0141<br>AIHA Laboratory-accredited partners</div></div>
+    <h1>${esc(title)}</h1>
+    <div class="sub">Prepared for ${esc(client)} · Tool ${tool} — ${esc(TOOL_NAME[tool]??"")} · Revision ${rev} · Issued ${fmtD(issued)}</div>
+    <p><b>Scope.</b> This report presents the results of personal exposure monitoring and the resulting compliance determinations. All numeric determinations were computed deterministically by the AERIS Tool ${tool} engine and are reproduced verbatim from the stored payload; the narrative was reviewed and approved by the undersigned.</p>
+    ${payload?`<table><thead><tr><th>Agent</th><th>Result (8-hr TWA)</th><th>% of limit</th><th>Determination</th></tr></thead>
+      <tbody>${payload.map(r=>`<tr><td>${esc(r.chem?.name??r.cas)}</td><td>${r.twa} ${r.unit}</td>
+        <td>${r.pct==null?"not scored":r.pct+"%"}</td><td>${r.verdict}${r.pct==null?" — "+esc(r.note):""}</td></tr>`).join("")}</tbody></table>`
+    :ptable?`<table><thead><tr>${ptable.cols.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead>
+      <tbody>${ptable.rows.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`
+    :`<p><i>[Engine payload table renders here — plans, gap matrices, schedules, or results depending on the tool.]</i></p>`}
+    <p><b>Determinations</b> follow 29 CFR 1910 Subpart Z and, where applicable, TSCA §6(a) workplace chemical protection requirements. Results at or above the action level trigger the periodic monitoring and medical surveillance provisions of the governing standard.</p>
+    <div class="sig"><div class="line">Jordan Calloway, CIH #10482<br><span style="color:#5A6B7B">Certified Industrial Hygienist</span></div>
+      <div class="line">${fmtD(issued)}<br><span style="color:#5A6B7B">Date of issue</span></div></div>
+    <div class="prov">PROVENANCE · engine tool-${tool} v1.4.2 · reference revision DEMO-2026-07 · payload sha256 9f31…c2ae<br>
+      peer review: M. Osei · CIH signature: J. Calloway #10482 · rendered by AERIS deliverable service — numbers cannot drift from the computed payload</div>`;
+}
+function openDoc(assessmentId){
+  const a=A.find(x=>x.id===assessmentId);
+  $("#docBody").innerHTML=docHtml(a.title,cname(a.client_id),a.tool_id,"v"+a.versions,new Date(2026,6,28),a.payload,a.payloadTable);
+  $("#docOverlay").classList.add("open");
+}
+function openDocByDoc(docId){
+  const d=DOCS.find(x=>x.id===docId);
+  $("#docBody").innerHTML=docHtml(d.title,cname(d.client),d.tool,d.rev,d.issued,null);
+  $("#docOverlay").classList.add("open");
+}
+function closeDoc(){$("#docOverlay").classList.remove("open");}
+
+/* ---------------- CSV export (real download, like the app's dashboard export) ---------------- */
+function exportCsv(){
+  const head="title,tool,client,status,updated";
+  const lines=A.map(a=>[a.title,TOOL_NAME[a.tool_id]??a.tool_id,cname(a.client_id),a.status,fmtD(a.updated_at)]
+    .map(v=>`"${String(v).replace(/"/g,'""')}"`).join(","));
+  const blob=new Blob([head+"\n"+lines.join("\n")],{type:"text/csv"});
+  const u=URL.createObjectURL(blob), aEl=document.createElement("a");
+  aEl.href=u; aEl.download="aeris-assessments-demo.csv"; aEl.click(); URL.revokeObjectURL(u);
+  toast("CSV exported — "+A.length+" assessments");
+}
+
+/* ---------------- command palette ---------------- */
+function cmdkItems(){
+  return [
+    ...NAV.map(([k,l])=>({k:"page",label:l,go:()=>go(k)})),
+    ...PRACTICE.map(([k,l])=>({k:"page",label:l,go:()=>go(k)})),
+    ...CLIENTS.map(c=>({k:"client",label:c.name,go:()=>go("client",c.id)})),
+    ...Object.entries(TOOL_NAME).map(([id,n])=>({k:"tool "+id,label:n,go:()=>go("tool",id)})),
+  ];
+}
+function openCmdk(){$("#cmdk").classList.add("open");$("#cmdkIn").value="";renderCmdk();$("#cmdkIn").focus();}
+function closeCmdk(){$("#cmdk").classList.remove("open");}
+function renderCmdk(){
+  const q=$("#cmdkIn").value.toLowerCase();
+  const items=cmdkItems().filter(i=>i.label.toLowerCase().includes(q)).slice(0,10);
+  $("#cmdkList").innerHTML=items.length?items.map((i,ix)=>
+    `<div class="it" data-ix="${ix}"><span class="k">${i.k}</span>${esc(i.label)}</div>`).join("")
+    :`<div class="empty">No matches.</div>`;
+  [...$("#cmdkList").children].forEach((el,ix)=>{
+    if(items[ix]) el.onclick=()=>{closeCmdk();items[ix].go();};
+  });
+}
+document.addEventListener("keydown",e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();openCmdk();}
+  if(e.key==="Escape"){closeCmdk();closeDoc();}
+});
+
+/* ---------------- render ---------------- */
+function render(){
+  renderNav();
+  const p=route.page,a=route.arg;
+  $("#page").innerHTML =
+    p==="dashboard"?vDashboard():
+    p==="clients"?vClients():
+    p==="client"?vClient(a):
+    p==="tools"?vTools():
+    p==="tool"?vTool(a):
+    p==="assessment"?vAssessment(a):
+    p==="queue"?vQueue():
+    p==="documents"?vDocuments():
+    p==="usage"?vUsage():
+    p==="team"?vTeam():vDashboard();
+}
+render();
+</script>
+</body>
+</html>
