@@ -1336,6 +1336,67 @@ a.platform-card:hover {
   background: #111;
 }
 
+.demo-interactive-shell {
+  display: grid;
+  gap: 10px;
+}
+
+.demo-interactive-shell:fullscreen {
+  align-content: stretch;
+  gap: 12px;
+  overflow: hidden;
+  padding: 18px;
+  background: #070707;
+}
+
+.demo-interactive-title {
+  min-width: 0;
+  overflow: hidden;
+  color: #344054;
+  font-size: 0.88rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.demo-interactive-shell:fullscreen .demo-interactive-title {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.demo-interactive-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.demo-interactive-frame {
+  display: block;
+  width: 100%;
+  height: min(760px, calc(100vh - 240px));
+  min-height: 560px;
+  border: 1px solid #e0e4e8;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.demo-interactive-shell:fullscreen .demo-interactive-frame {
+  height: calc(100vh - 76px);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.demo-link-button {
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.demo-link-card-active {
+  border-color: rgba(201, 147, 43, 0.55);
+  background: #fffaf0;
+}
+
 .demo-scheduler-tab {
   display: flex;
   justify-content: center;
