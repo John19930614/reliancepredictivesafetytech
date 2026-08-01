@@ -6,3 +6,5 @@ tsconfig.tsbuildinfo
 next-dev*.log
 next-smoke*.log
 next-*.log
+
+safetyiq-ios

@@ -4,22 +4,18 @@ import { MobileTabBar } from "@/components/mobile/MobileTabBar";
 import { COMPANY_NAME } from "@/lib/company-data";
 import { loadMobileSession } from "./session";
 
+// The installable/standalone meta lives in the root layout so every page is
+// installable, including the sign-in page a signed-out employee lands on.
 export const metadata: Metadata = {
   title: `${COMPANY_NAME} Mobile`,
   description: "Chat with the team, submit ideas, and update leads from your phone.",
-  appleWebApp: {
-    capable: true,
-    title: "SafetyIQ",
-    statusBarStyle: "black-translucent",
-  },
 };
 
 export const viewport: Viewport = {
   themeColor: "#070707",
   width: "device-width",
   initialScale: 1,
-  // Home-screen apps should not rubber-band zoom on double tap, but pinch zoom
-  // stays available so the app remains usable for low-vision employees.
+  // Pinch zoom stays available so the app remains usable for low-vision employees.
   maximumScale: 5,
   viewportFit: "cover",
 };

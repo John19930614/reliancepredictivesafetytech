@@ -7,8 +7,9 @@ import type { MetadataRoute } from "next";
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Reliance SafetyIQ",
-    short_name: "SafetyIQ",
+    name: "Reliance Predictive Safety Technologies",
+    // Home-screen label. iOS truncates past ~12 characters, so keep it short.
+    short_name: "RPST",
     description: "Chat with the team, submit ideas, and update leads from your phone.",
     start_url: "/m",
     scope: "/",

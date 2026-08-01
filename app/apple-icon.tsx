@@ -31,12 +31,12 @@ export default function AppleIcon() {
             borderRadius: 34,
             background: "linear-gradient(150deg, #f0c86a 0%, #c9932b 100%)",
             color: "#070707",
-            fontSize: 78,
+            fontSize: 36,
             fontWeight: 700,
-            letterSpacing: -3,
+            letterSpacing: 1,
           }}
         >
-          R
+          RPST
         </div>
       </div>
     ),
