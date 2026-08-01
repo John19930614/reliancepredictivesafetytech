@@ -38,6 +38,7 @@ export function isPortalSuperAdminRole(role: string | null | undefined) {
 
 export const portalModuleCatalog = [
   { key: "dashboard", label: "Dashboard", group: "Command", pathPrefixes: ["/employee"] },
+  { key: "mobile_app", label: "Mobile App", group: "Command", pathPrefixes: ["/m"] },
   { key: "ai_command", label: "AI Command", group: "Command", pathPrefixes: ["/employee/ai"] },
   { key: "website_operations", label: "Website Ops", group: "Command", pathPrefixes: ["/employee/website-operations"] },
   { key: "work_management", label: "Work Management", group: "Command", pathPrefixes: ["/employee/work"] },
@@ -86,7 +87,7 @@ export type PortalModule = (typeof portalModuleCatalog)[number];
 export type PortalModuleKey = PortalModule["key"];
 
 export const portalModuleKeys = portalModuleCatalog.map((module) => module.key);
-export const defaultEmployeePortalModuleKeys = ["dashboard", "employee_mail", "hr_onboarding", "hr_documents", "time_cards", "employee_calendar"] as const satisfies readonly PortalModuleKey[];
+export const defaultEmployeePortalModuleKeys = ["dashboard", "mobile_app", "employee_mail", "hr_onboarding", "hr_documents", "time_cards", "employee_calendar"] as const satisfies readonly PortalModuleKey[];
 
 function normalizePortalPath(pathname: string) {
   const [pathWithoutHash] = pathname.split("#", 1);

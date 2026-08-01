@@ -37,6 +37,7 @@ import {
   ScrollText,
   Settings,
   ShieldCheck,
+  Smartphone,
   Terminal,
   TestTube2,
   UploadCloud,
@@ -52,6 +53,7 @@ const navGroups = [
     label: "Command",
     items: [
       { href: "/employee", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/m", label: "Mobile App", icon: Smartphone },
       { href: "/employee/ai", label: "AI Command", icon: Bot },
       { href: "/employee/website-operations", label: "Website Ops", icon: Globe2 },
       { href: "/employee/work", label: "Work Management", icon: KanbanSquare },
