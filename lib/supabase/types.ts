@@ -4193,6 +4193,140 @@ export type Database = {
           },
         ]
       }
+      employee_time_off_balances: {
+        Row: {
+          accrued_hours: number
+          carryover_hours: number
+          created_at: string
+          id: string
+          leave_type: string
+          policy_year: number
+          updated_at: string
+          used_hours: number
+          user_id: string
+        }
+        Insert: {
+          accrued_hours?: number
+          carryover_hours?: number
+          created_at?: string
+          id?: string
+          leave_type: string
+          policy_year: number
+          updated_at?: string
+          used_hours?: number
+          user_id: string
+        }
+        Update: {
+          accrued_hours?: number
+          carryover_hours?: number
+          created_at?: string
+          id?: string
+          leave_type?: string
+          policy_year?: number
+          updated_at?: string
+          used_hours?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      employee_time_off_policies: {
+        Row: {
+          active: boolean
+          annual_hours: number
+          carryover_cap_hours: number
+          created_at: string
+          id: string
+          is_paid: boolean
+          label: string
+          leave_type: string
+          requires_approval: boolean
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          annual_hours?: number
+          carryover_cap_hours?: number
+          created_at?: string
+          id?: string
+          is_paid?: boolean
+          label: string
+          leave_type: string
+          requires_approval?: boolean
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          annual_hours?: number
+          carryover_cap_hours?: number
+          created_at?: string
+          id?: string
+          is_paid?: boolean
+          label?: string
+          leave_type?: string
+          requires_approval?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      employee_time_off_requests: {
+        Row: {
+          calendar_event_id: string | null
+          created_at: string
+          end_date: string
+          hours_requested: number
+          id: string
+          leave_type: string
+          reason: string | null
+          review_note: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          start_date: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          calendar_event_id?: string | null
+          created_at?: string
+          end_date: string
+          hours_requested: number
+          id?: string
+          leave_type: string
+          reason?: string | null
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          start_date: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          calendar_event_id?: string | null
+          created_at?: string
+          end_date?: string
+          hours_requested?: number
+          id?: string
+          leave_type?: string
+          reason?: string | null
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          start_date?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_time_off_requests_calendar_event_id_fkey"
+            columns: ["calendar_event_id"]
+            isOneToOne: false
+            referencedRelation: "employee_calendar_events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       gap_analysis_results: {
         Row: {
           company_id: string | null
@@ -4728,6 +4862,114 @@ export type Database = {
           scanned_at?: string | null
           status?: string
           summary?: string | null
+        }
+        Relationships: []
+      }
+      lead_triage_results: {
+        Row: {
+          acted_at: string | null
+          acted_by: string | null
+          confidence: string
+          created_at: string
+          human_review_required: boolean
+          id: string
+          lead_id: string
+          next_step: string
+          priority_rank: number
+          priority_score: number
+          rationale: string | null
+          run_id: string
+          segment: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          acted_at?: string | null
+          acted_by?: string | null
+          confidence?: string
+          created_at?: string
+          human_review_required?: boolean
+          id?: string
+          lead_id: string
+          next_step: string
+          priority_rank: number
+          priority_score?: number
+          rationale?: string | null
+          run_id: string
+          segment?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          acted_at?: string | null
+          acted_by?: string | null
+          confidence?: string
+          created_at?: string
+          human_review_required?: boolean
+          id?: string
+          lead_id?: string
+          next_step?: string
+          priority_rank?: number
+          priority_score?: number
+          rationale?: string | null
+          run_id?: string
+          segment?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_triage_results_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "demo_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_triage_results_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "lead_triage_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      lead_triage_runs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          gateway_status: string | null
+          id: string
+          leads_analyzed: number
+          model: string | null
+          run_date: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          gateway_status?: string | null
+          id?: string
+          leads_analyzed?: number
+          model?: string | null
+          run_date: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          gateway_status?: string | null
+          id?: string
+          leads_analyzed?: number
+          model?: string | null
+          run_date?: string
+          status?: string
+          updated_at?: string
         }
         Relationships: []
       }

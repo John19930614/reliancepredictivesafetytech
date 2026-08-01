@@ -1,6 +1,8 @@
 import { Target } from "lucide-react";
+import { LeadTriagePanel } from "@/components/LeadTriagePanel";
 import { MobileHeader } from "@/components/mobile/MobileHeader";
 import { MobileLeadsList } from "@/components/mobile/MobileLeadsList";
+import { loadLatestLeadTriage } from "@/lib/leads/latest-triage";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
 import { requireMobileTabSession } from "../session";
 
@@ -33,17 +35,22 @@ export default async function MobileLeadsPage() {
     console.error("Could not load mobile leads.", error);
   }
 
+  const triage = await loadLatestLeadTriage(supabase);
+
   return (
-    <MobileLeadsList
-      leads={(clients ?? []).map((client) => ({
-        id: client.id,
-        name: client.name,
-        contactName: client.contact_name,
-        lifecycleStage: client.lifecycle_stage,
-        status: client.status,
-        owner: client.owner,
-        updatedAt: client.updated_at,
-      }))}
-    />
+    <>
+      <LeadTriagePanel compact runDate={triage.runDate} suggestions={triage.suggestions} />
+      <MobileLeadsList
+        leads={(clients ?? []).map((client) => ({
+          id: client.id,
+          name: client.name,
+          contactName: client.contact_name,
+          lifecycleStage: client.lifecycle_stage,
+          status: client.status,
+          owner: client.owner,
+          updatedAt: client.updated_at,
+        }))}
+      />
+    </>
   );
 }
