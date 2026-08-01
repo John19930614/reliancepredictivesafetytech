@@ -6,3 +6,8 @@ node_modules
 supabase/.temp
 tsconfig.tsbuildinfo
 *.log
+
+# Internal business documents — this repo is public, keep these local only
+NDA_Reliance_PST.docx
+Chemical_Management_Checklist.pdf
+Project_Maco_AI_Code_Ready_Blueprint_v0.9_UPDATED.html
