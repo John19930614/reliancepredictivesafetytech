@@ -13,9 +13,13 @@ export async function updateSession(request: NextRequest) {
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   const isEmployeeRoute =
     request.nextUrl.pathname === "/employee" || request.nextUrl.pathname.startsWith("/employee/");
+  // The installable mobile app lives outside /employee so it can render its own
+  // full-screen shell, but it is the same portal and needs the same gate.
+  const isMobileRoute = request.nextUrl.pathname === "/m" || request.nextUrl.pathname.startsWith("/m/");
+  const isPortalRoute = isEmployeeRoute || isMobileRoute;
 
   if (!url || !key) {
-    if (isEmployeeRoute) {
+    if (isPortalRoute) {
       const loginUrl = request.nextUrl.clone();
       loginUrl.pathname = "/employee-login";
       loginUrl.searchParams.set("message", "supabase-required");
@@ -46,14 +50,14 @@ export async function updateSession(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const userId = data?.claims?.sub;
 
-  if (isEmployeeRoute && !userId) {
+  if (isPortalRoute && !userId) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/employee-login";
     loginUrl.searchParams.set("next", request.nextUrl.pathname);
     return withPortalSecurityHeaders(NextResponse.redirect(loginUrl));
   }
 
-  if (isEmployeeRoute && userId) {
+  if (isPortalRoute && userId) {
     const { data: role } = await supabase
       .from("user_roles")
       .select("role, account_status")
@@ -87,7 +91,9 @@ export async function updateSession(request: NextRequest) {
     const moduleKeys = (moduleAccess ?? []).map((access) => access.module_key);
 
     if (!canAccessEmployeePath(role.role, role.account_status, request.nextUrl.pathname, moduleKeys)) {
-      if (!canAccessEmployeePath(role.role, role.account_status, "/employee", moduleKeys)) {
+      // The mobile app has no desktop shell to fall back to — bouncing a phone
+      // user to /employee would just strand them, so send them back to sign-in.
+      if (isMobileRoute || !canAccessEmployeePath(role.role, role.account_status, "/employee", moduleKeys)) {
         const loginUrl = request.nextUrl.clone();
         loginUrl.pathname = "/employee-login";
         loginUrl.searchParams.set("message", "portal-module-required");
