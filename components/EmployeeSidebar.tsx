@@ -26,6 +26,7 @@ import {
   Inbox,
   KanbanSquare,
   LayoutDashboard,
+  LayoutTemplate,
   ListChecks,
   LogOut,
   Mail,
@@ -74,6 +75,9 @@ const navGroups = [
       { href: "/employee/inbox", label: "Request Inbox", icon: Inbox },
       { href: "/employee/sales", label: "Sales Pipeline", icon: BriefcaseBusiness },
       { href: "/employee/proposals", label: "Proposals", icon: ScrollText },
+      // Same module key as Proposals (client_proposals resolves by path prefix),
+      // so this widens nothing — it only surfaces the templates manager.
+      { href: "/employee/proposals/templates", label: "Proposal Templates", icon: LayoutTemplate },
       { href: "/employee/active-companies", label: "Active Companies", icon: Gauge },
       { href: "/employee/mail", label: "Employee Mail", icon: Mail },
     ],

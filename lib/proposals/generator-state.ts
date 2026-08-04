@@ -12,23 +12,71 @@ export interface GeneratorItem {
   unit: string;
 }
 
+/** Scalar values a form field may hold. Never objects/arrays/null. */
+export type GeneratorFieldValue = string | number | boolean;
+
 export interface GeneratorState {
   v: number;
-  fields: Record<string, string | boolean>;
+  fields: Record<string, GeneratorFieldValue>;
   phases: GeneratorItem[];
   services: GeneratorItem[];
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/** Optional string members may be absent, but must never be a non-string. */
+function isOptionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === "string";
+}
+
+/**
+ * A field value must be a scalar. Rejecting objects/arrays here stops a
+ * hand-crafted POST from smuggling structured data into the generator, where it
+ * would be written straight back into DOM input values.
+ */
+export function isGeneratorFieldValue(value: unknown): value is GeneratorFieldValue {
+  if (typeof value === "string" || typeof value === "boolean") return true;
+  return isFiniteNumber(value);
+}
+
+/**
+ * Deep guard for a single phase/service line item.
+ *
+ * `qty` and `price` MUST be finite numbers — never numeric-looking strings.
+ * They are interpolated into the generator's `innerHTML` templates, so allowing
+ * a string there is a stored-XSS vector even though the asset now coerces
+ * defensively at the interpolation site.
+ */
+export function isGeneratorItem(value: unknown): value is GeneratorItem {
+  if (!isPlainRecord(value)) return false;
+  if (typeof value.type !== "string") return false;
+  if (typeof value.key !== "string") return false;
+  if (!isOptionalString(value.name)) return false;
+  if (!isOptionalString(value.desc)) return false;
+  if (!isOptionalString(value.unit)) return false;
+  if (!isFiniteNumber(value.qty)) return false;
+  if (!isFiniteNumber(value.price)) return false;
+  return true;
+}
+
 export function isGeneratorState(value: unknown): value is GeneratorState {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  return (
-    typeof v.v === "number" &&
-    typeof v.fields === "object" &&
-    v.fields !== null &&
-    Array.isArray(v.phases) &&
-    Array.isArray(v.services)
-  );
+  if (!isPlainRecord(value)) return false;
+  if (!isFiniteNumber(value.v)) return false;
+  if (!isPlainRecord(value.fields)) return false;
+  for (const fieldValue of Object.values(value.fields)) {
+    if (!isGeneratorFieldValue(fieldValue)) return false;
+  }
+  if (!Array.isArray(value.phases)) return false;
+  if (!Array.isArray(value.services)) return false;
+  if (!value.phases.every((item) => isGeneratorItem(item))) return false;
+  if (!value.services.every((item) => isGeneratorItem(item))) return false;
+  return true;
 }
 
 function fieldText(state: GeneratorState, id: string): string {

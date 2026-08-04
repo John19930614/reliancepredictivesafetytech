@@ -1,0 +1,595 @@
+/* Client-facing proposal document.
+ *
+ * Ported from the `.proposal` document styles and the `@media print` block in
+ * assets/proposal-generator-v15.html (the generator's document pane, lines
+ * ~85-160). The repo has no CSS modules and no Tailwind — components style
+ * themselves with class names backed by global CSS — so this is a plain global
+ * stylesheet imported by the component that owns it.
+ *
+ * Every colour is a CSS custom property. Per CLAUDE.md no brand colour may be
+ * written as an inline style, so the component carries class names only and the
+ * palette lives here: the accent is the portal gold, muted text is the portal
+ * muted grey, and the document's own paper/navy chrome is declared as
+ * document-scoped variables rather than hard-coded at each use site.
+ */
+
+.rp-doc {
+  --rp-doc-ink: #16242f;
+  --rp-doc-muted: var(--portal-muted, #64707d);
+  --rp-doc-faint: #8190a0;
+  --rp-doc-line: #dbe2e9;
+  --rp-doc-line-2: #c6d0da;
+  --rp-doc-paper: #fdfdfb;
+  --rp-doc-navy: #0c3450;
+  --rp-doc-navy-2: #16627f;
+  --rp-doc-accent: var(--portal-gold, #c9932b);
+  --rp-doc-accent-bright: var(--portal-gold-bright, #f0c86a);
+  --rp-doc-accent-tint: #fbf2dd;
+  --rp-doc-panel: #ffffff;
+  --rp-doc-band: #f1f6fa;
+  --rp-doc-band-2: #eef3f8;
+  --rp-doc-warn-bg: #fff8ed;
+  --rp-doc-warn-line: #f3dcb4;
+  --rp-doc-warn-ink: #7c4a12;
+
+  position: relative;
+  max-width: 8.5in;
+  margin: 0 auto;
+  padding: 40px 44px;
+  border: 1px solid var(--rp-doc-line);
+  border-radius: 16px;
+  background: var(--rp-doc-paper);
+  box-shadow: 0 18px 44px rgba(12, 52, 80, 0.14);
+  color: var(--rp-doc-ink);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.rp-doc p {
+  margin: 6px 0;
+}
+
+/* ---------- Revision / status banner ---------- */
+
+.rp-doc-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: baseline;
+  margin: 0 0 18px;
+  padding: 11px 13px;
+  border: 1px solid var(--rp-doc-warn-line);
+  border-radius: 12px;
+  background: var(--rp-doc-warn-bg);
+  color: var(--rp-doc-warn-ink);
+  font-size: 12px;
+}
+
+.rp-doc-banner strong {
+  font-weight: 700;
+}
+
+/* ---------- Masthead ---------- */
+
+.rp-doc-head {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 24px;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 3px solid var(--rp-doc-navy);
+}
+
+.rp-doc-head::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -3px;
+  width: 128px;
+  height: 3px;
+  background: var(--rp-doc-accent);
+}
+
+.rp-doc-mast-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.rp-doc-seal {
+  flex: 0 0 auto;
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+}
+
+.rp-doc-wordmark {
+  font-weight: 700;
+  font-size: 19px;
+  line-height: 1.12;
+  color: var(--rp-doc-navy);
+}
+
+.rp-doc-docline {
+  margin-top: 5px;
+  color: var(--rp-doc-muted);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.rp-doc-mast-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  text-align: right;
+}
+
+.rp-doc-stamp {
+  padding: 5px 11px;
+  border-radius: 6px;
+  background: var(--rp-doc-navy);
+  color: var(--rp-doc-panel);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.rp-doc-conf {
+  color: var(--rp-doc-accent);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.rp-doc-revtag {
+  padding: 3px 9px;
+  border: 1px solid var(--rp-doc-line-2);
+  border-radius: 999px;
+  background: var(--rp-doc-panel);
+  color: var(--rp-doc-navy);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ---------- Title + meta ---------- */
+
+.rp-doc-title-block {
+  margin: 0 0 14px;
+}
+
+.rp-doc-title {
+  margin: 0;
+  color: var(--rp-doc-navy);
+  font-weight: 700;
+  font-size: 26px;
+  line-height: 1.08;
+}
+
+.rp-doc-subtitle {
+  margin: 6px 0 0;
+  color: var(--rp-doc-muted);
+  font-weight: 500;
+  font-size: 12.5px;
+}
+
+.rp-doc-meta {
+  width: 100%;
+  margin: 0 0 16px;
+  border: 1px solid var(--rp-doc-line);
+  border-radius: 10px;
+  border-collapse: collapse;
+  overflow: hidden;
+}
+
+.rp-doc-meta td {
+  padding: 6px 11px;
+  border-bottom: 1px solid var(--rp-doc-line);
+  vertical-align: top;
+  font-size: 11.5px;
+}
+
+.rp-doc-meta tr:last-child td {
+  border-bottom: 0;
+}
+
+.rp-doc-meta td:first-child {
+  width: 158px;
+  background: var(--rp-doc-navy);
+  color: var(--rp-doc-panel);
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.rp-doc-party-name {
+  font-weight: 700;
+}
+
+.rp-doc-party-line {
+  display: block;
+}
+
+/* ---------- Section headings ---------- */
+
+.rp-doc-h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rp-doc-line);
+  color: var(--rp-doc-navy);
+  font-weight: 700;
+  font-size: 17px;
+}
+
+.rp-doc-secno {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--rp-doc-navy);
+  color: var(--rp-doc-accent-bright);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.rp-doc-h3 {
+  margin: 10px 0 4px;
+  color: #1d405f;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.rp-doc-lead {
+  color: #283c4f;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.rp-doc-callout {
+  margin: 10px 0;
+  padding: 9px 12px;
+  border: 1px solid #dde8f0;
+  border-left: 4px solid var(--rp-doc-accent);
+  border-radius: 10px;
+  background: var(--rp-doc-band);
+  font-size: 12px;
+}
+
+.rp-doc-callout strong {
+  color: var(--rp-doc-navy);
+}
+
+.rp-doc-empty {
+  color: var(--rp-doc-muted);
+  font-style: italic;
+}
+
+.rp-doc-muted {
+  color: var(--rp-doc-muted);
+}
+
+.rp-doc-prewrap {
+  white-space: pre-wrap;
+}
+
+/* ---------- Pills + lists ---------- */
+
+.rp-doc-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 4px;
+  padding: 0;
+  list-style: none;
+}
+
+.rp-doc-pill {
+  padding: 5px 9px;
+  border: 1px solid var(--rp-doc-line-2);
+  border-radius: 7px;
+  background: var(--rp-doc-panel);
+  color: var(--rp-doc-navy);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.rp-doc-list {
+  margin: 9px 0 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+.rp-doc-list li {
+  position: relative;
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.rp-doc-list li::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 9px;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--rp-doc-accent);
+  transform: rotate(45deg);
+}
+
+/* ---------- Fee schedule ---------- */
+
+.rp-doc-fee {
+  width: 100%;
+  margin: 10px 0 14px;
+  border: 1px solid var(--rp-doc-line);
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+
+.rp-doc-fee th {
+  padding: 7px 9px;
+  background: var(--rp-doc-navy);
+  color: var(--rp-doc-panel);
+  text-align: left;
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.rp-doc-fee td {
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--rp-doc-line);
+  vertical-align: top;
+}
+
+.rp-doc-right {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.rp-doc-fee-group td {
+  background: var(--rp-doc-band-2);
+  color: var(--rp-doc-navy);
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.rp-doc-fee tfoot td {
+  border-bottom: 1px solid var(--rp-doc-line);
+  background: var(--rp-doc-band-2);
+}
+
+.rp-doc-fee-total td {
+  background: var(--rp-doc-navy);
+  color: var(--rp-doc-panel);
+  font-weight: 700;
+  font-size: 12.5px;
+}
+
+.rp-doc-fee-deposit td {
+  background: var(--rp-doc-accent-tint);
+  color: var(--rp-doc-navy);
+  font-weight: 700;
+}
+
+/* ---------- Terms + signature ---------- */
+
+.rp-doc-terms {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.rp-doc-term {
+  padding: 8px 10px;
+  border: 1px solid var(--rp-doc-line);
+  border-top: 2px solid var(--rp-doc-navy-2);
+  border-radius: 9px;
+  background: var(--rp-doc-panel);
+}
+
+.rp-doc-term h4 {
+  margin: 0 0 3px;
+  color: var(--rp-doc-navy);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.rp-doc-term p {
+  margin: 0;
+  color: #3a4c5e;
+  font-size: 10.5px;
+  line-height: 1.42;
+}
+
+.rp-doc-sign {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-top: 16px;
+}
+
+.rp-doc-sigbox {
+  min-height: 118px;
+  padding: 14px;
+  border: 1px solid var(--rp-doc-line);
+  border-radius: 12px;
+  background: #fcfdfe;
+}
+
+.rp-doc-sigbox > strong {
+  color: var(--rp-doc-navy);
+  font-size: 15px;
+}
+
+.rp-doc-sigline {
+  margin-top: 26px;
+  padding-top: 5px;
+  border-top: 1px solid #4a5a6a;
+  color: var(--rp-doc-muted);
+  font-size: 10.5px;
+}
+
+.rp-doc-legal {
+  margin-top: 22px;
+  color: var(--rp-doc-muted);
+  font-size: 12px;
+}
+
+/* ---------- Narrow viewports ---------- */
+
+@media (max-width: 900px) {
+  .rp-doc {
+    padding: 24px 20px;
+  }
+
+  .rp-doc-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .rp-doc-mast-right {
+    flex-direction: row;
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .rp-doc-terms,
+  .rp-doc-sign {
+    grid-template-columns: 1fr;
+  }
+
+  .rp-doc-title {
+    font-size: 22px;
+  }
+}
+
+/* Wide content must scroll inside its own container, never the page body. */
+.rp-doc-scroll {
+  overflow-x: auto;
+}
+
+/* ---------- Print / Save as PDF ----------
+ *
+ * Ported from the asset's @media print block. This stylesheet only loads on the
+ * routes that render a proposal document, so hiding the portal shell chrome here
+ * cannot affect any other page. Anything the app adds around the document —
+ * back links, toolbars, page headers — carries .rp-doc-noprint.
+ */
+
+@media print {
+  @page {
+    size: letter;
+    margin: 0.45in;
+  }
+
+  html,
+  body {
+    background: #fff;
+  }
+
+  .rp-doc-noprint,
+  .portal-sidebar,
+  .portal-topline,
+  .employee-chat-shell {
+    display: none !important;
+  }
+
+  .portal-shell {
+    display: block;
+    background: #fff;
+  }
+
+  .portal-main {
+    padding: 0;
+  }
+
+  .rp-doc {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: #fff;
+    color: #000;
+    font-size: 11.5px;
+  }
+
+  .rp-doc-scroll {
+    overflow-x: visible;
+  }
+
+  .rp-doc-lead,
+  .rp-doc-term p,
+  .rp-doc-h3 {
+    color: #000;
+  }
+
+  .rp-doc-terms,
+  .rp-doc-sign {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* Keep a heading with its section, and never split a fee row or a term. */
+  .rp-doc-h2,
+  .rp-doc-term,
+  .rp-doc-sigbox,
+  .rp-doc-fee tr,
+  .rp-doc-banner {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .rp-doc-h2 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  /* Repeat the fee-table header on every page the table spills onto. */
+  .rp-doc-fee thead {
+    display: table-header-group;
+  }
+
+  .rp-doc-fee tfoot {
+    display: table-row-group;
+  }
+
+  /* The navy/gold fills carry meaning (totals, deposit, section numbers), so
+     keep them when the browser would otherwise drop backgrounds. */
+  .rp-doc-seal,
+  .rp-doc-stamp,
+  .rp-doc-secno,
+  .rp-doc-meta td:first-child,
+  .rp-doc-fee th,
+  .rp-doc-fee-group td,
+  .rp-doc-fee tfoot td,
+  .rp-doc-fee-total td,
+  .rp-doc-fee-deposit td,
+  .rp-doc-callout,
+  .rp-doc-banner,
+  .rp-doc-head::after {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

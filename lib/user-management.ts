@@ -52,7 +52,15 @@ export const portalModuleCatalog = [
   { key: "demo_showcase", label: "Demo Showcase", group: "Commercial", pathPrefixes: ["/employee/demo-showcase"] },
   { key: "request_inbox", label: "Request Inbox", group: "Commercial", pathPrefixes: ["/employee/inbox"] },
   { key: "sales_pipeline", label: "Sales Pipeline", group: "Commercial", pathPrefixes: ["/employee/sales", "/employee/sales-meetings"] },
-  { key: "client_proposals", label: "Proposals", group: "Commercial", pathPrefixes: ["/employee/proposals"] },
+  // Covers the whole Proposal Builder surface: the list, the read-only document
+  // (/[id]), the generator editor (/[id]/edit), revision views
+  // (/[id]/revisions/[revisionId]), the generator asset route (/generator) and
+  // the templates manager (/templates). `/employee/proposals` alone already
+  // prefix-matches all of them; `/employee/proposals/templates` is listed
+  // explicitly so the templates module stays visible in this catalog. It is
+  // deliberately NOT a separate module key — a new key would have to be granted
+  // per user, so everyone who can reach Proposals today would lose the page.
+  { key: "client_proposals", label: "Proposals", group: "Commercial", pathPrefixes: ["/employee/proposals", "/employee/proposals/templates"] },
   { key: "active_companies", label: "Active Companies", group: "Commercial", pathPrefixes: ["/employee/active-companies", "/employee/clients"] },
   { key: "employee_mail", label: "Employee Mail", group: "Commercial", pathPrefixes: ["/employee/mail"] },
   { key: "company_tree", label: "Company Tree", group: "People", pathPrefixes: ["/employee/company-tree"] },

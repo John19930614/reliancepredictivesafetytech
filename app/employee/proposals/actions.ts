@@ -1,20 +1,146 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { getProposalAccess } from "@/lib/proposals/access";
-import { canEditProposalContent, canTransitionProposal, nextRevisionNumber } from "@/lib/proposals/policy";
-import { isGeneratorState } from "@/lib/proposals/generator-state";
+import {
+  canEditProposalContent,
+  canEditProposalMeta,
+  canTransitionProposal,
+  isProposalUuid,
+  nextRevisionNumber,
+  proposalTitleMaxLength,
+  validateProposalFields,
+} from "@/lib/proposals/policy";
+import {
+  buildShareLinkUrl,
+  canShareProposal,
+  clampShareLinkDays,
+  extractClientIp,
+  shareLinkExpiryIso,
+  validateAcceptanceInput,
+} from "./share-link-policy";
+import { generateShareToken, hashShareToken } from "./share-token";
+import { applyShareLinkAcceptance, resolveShareLink } from "./share-link-server";
+import {
+  buildPrefillState,
+  isGeneratorState,
+  type GeneratorItem,
+  type GeneratorState,
+} from "@/lib/proposals/generator-state";
+import { lookupPhase, type PhaseKey } from "@/lib/proposals/catalog";
+import { computeProposalTotals } from "@/lib/proposals/pricing";
 import { proposalStatuses, type ProposalStatus } from "@/lib/proposals/types";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
 
 export interface ActionResult {
   ok: boolean;
   error?: string;
+  /** Field-level messages keyed by input field name, when validation failed. */
+  fieldErrors?: Record<string, string>;
 }
+
+/**
+ * PostgREST returns no error for an UPDATE/DELETE that matched zero rows —
+ * whether the id does not exist or RLS filtered it out. Every mutation in this
+ * file therefore asks for the affected ids back and treats an empty result as a
+ * failure, so we never report success (or write an audit event) for a no-op.
+ */
+const NO_ROWS_MESSAGE = "Proposal not found or you do not have permission to change it.";
+
+/** Postgres unique_violation. */
+const UNIQUE_VIOLATION = "23505";
 
 function revalidateProposals(proposalId?: string) {
   revalidatePath("/employee/proposals");
   if (proposalId) revalidatePath(`/employee/proposals/${proposalId}`);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function errorCode(error: any): string | null {
+  return typeof error?.code === "string" ? error.code : null;
+}
+
+async function recordProposalAudit(
+  role: string | null,
+  action: "create" | "update" | "delete",
+  proposalId: string,
+  userId: string,
+  summary: string,
+  before?: Record<string, unknown> | null,
+  after?: Record<string, unknown> | null,
+) {
+  await recordAuditEvent({
+    ...buildDataAuditEvent(action, "client_proposal", proposalId, userId, summary, before, after),
+    actor_role: role,
+  });
+}
+
+/**
+ * The phase rows the generator seeds for a blank form — transcribed from the
+ * `addPhase(...)` calls in the DOMContentLoaded handler of
+ * assets/proposal-generator-v15.html. All three are priced at 0 because the
+ * pilot bundles them into the package fee, and each carries a pilot-specific
+ * description that overrides the catalog copy.
+ *
+ * These must be persisted rather than left implicit: the bridge replaces the
+ * generator's item lists whenever they are present as arrays, so seeding empty
+ * arrays would open a brand-new proposal with no line items at all. The asset
+ * seeds no default SERVICE rows, so `services` stays empty.
+ */
+const defaultPilotPhases: ReadonlyArray<{ key: PhaseKey; desc: string }> = [
+  {
+    key: "discovery",
+    desc: "Kickoff, platform access setup, and configuration of the two pilot jobsites and user accounts — included in the pilot.",
+  },
+  {
+    key: "build",
+    desc: "Configure modules, templates, dashboards, and workflows for pilot use — included in the pilot.",
+  },
+  {
+    key: "launch",
+    desc: "User training, launch support, and check-ins across the 6-month pilot — included in the pilot.",
+  },
+];
+
+function buildDefaultPhaseItems(): GeneratorItem[] {
+  return defaultPilotPhases.map(({ key, desc }) => ({
+    type: "phase",
+    key,
+    name: lookupPhase(key)?.name ?? "",
+    qty: 1,
+    price: 0,
+    desc,
+    // Phase options carry no billing unit; the asset writes `o.unit || ""`.
+    unit: "",
+  }));
+}
+
+/** Full, valid generator state so revision 1 is openable and restorable. */
+function buildInitialFormState(
+  client: { name?: string | null; contact_name?: string | null; email?: string | null } | null,
+): GeneratorState {
+  const prefill = buildPrefillState(client);
+  return {
+    v: prefill?.v ?? 1,
+    fields: prefill?.fields ?? {},
+    phases: buildDefaultPhaseItems(),
+    services: [],
+  };
+}
+
+/**
+ * Recomputes the fee total from the SUBMITTED generator state instead of
+ * trusting a number posted by the browser, so `client_proposals.proposal_value`
+ * always matches the document the customer is shown. Returns null when there is
+ * no state to price, or when the total falls outside what the column and the
+ * field validator accept — in that case proposal_value is left untouched rather
+ * than failing the save on a pricing overflow.
+ */
+function recomputeProposalValue(formData: GeneratorState | null): number | null {
+  if (!formData) return null;
+  const { total } = computeProposalTotals(formData);
+  return validateProposalFields({ proposalValue: total }).ok ? total : null;
 }
 
 export interface CreateProposalInput {
@@ -28,25 +154,50 @@ export interface CreateProposalInput {
 }
 
 export async function createProposal(input: CreateProposalInput): Promise<ActionResult & { proposalId?: string }> {
-  const { supabase, userId, canManage } = await getProposalAccess();
+  const { supabase, userId, canManage, role } = await getProposalAccess();
   if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
   if (!canManage) return { ok: false, error: "You do not have permission to create proposals." };
 
-  const title = input.title?.trim();
-  if (!title) return { ok: false, error: "Give the proposal a title." };
+  const validation = validateProposalFields({
+    title: input.title,
+    clientId: input.clientId,
+    proposalValue: input.proposalValue,
+    validUntil: input.validUntil,
+  });
+  if (!validation.ok) return { ok: false, error: validation.error, fieldErrors: validation.errors };
+
+  const title = input.title.trim();
+  const clientId = input.clientId || null;
+  const summary = input.summary?.trim() || null;
+
+  // Seed revision 1 with a complete generator state (prefilled from the
+  // assigned company when there is one). Without this the first revision has
+  // null form_data, which makes it un-openable and blanks the working copy if
+  // anyone restores it.
+  let client: { name: string | null; contact_name: string | null; email: string | null } | null = null;
+  if (clientId) {
+    const { data } = await supabase
+      .from("company_clients")
+      .select("name, contact_name, email")
+      .eq("id", clientId)
+      .maybeSingle();
+    client = data ?? null;
+  }
+  const formData = buildInitialFormState(client);
 
   const { data: proposal, error } = await supabase
     .from("client_proposals")
     .insert({
       title,
-      client_id: input.clientId || null,
+      client_id: clientId,
       owner: input.owner?.trim() || null,
       proposal_value: input.proposalValue ?? null,
       valid_until: input.validUntil || null,
-      summary: input.summary?.trim() || null,
+      summary,
       body_markdown: input.bodyMarkdown ?? null,
       status: "draft",
       current_revision: 1,
+      form_data: formData,
       created_by: userId,
     })
     .select("id")
@@ -58,19 +209,18 @@ export async function createProposal(input: CreateProposalInput): Promise<Action
     proposal_id: proposal.id,
     revision_number: 1,
     title,
-    summary: input.summary?.trim() || null,
+    summary,
     body_markdown: input.bodyMarkdown ?? null,
     change_note: "Initial version",
     status_at_save: "draft",
+    form_data: formData,
     created_by: userId,
   });
   if (revisionError) return { ok: false, error: `Proposal created but revision 1 failed: ${revisionError.message}` };
 
-  await recordAuditEvent(
-    buildDataAuditEvent("create", "client_proposal", proposal.id, userId, `Created proposal "${title}"`, null, {
-      client_id: input.clientId ?? null,
-    }),
-  );
+  await recordProposalAudit(role, "create", proposal.id, userId, `Created proposal "${title}"`, null, {
+    client_id: clientId,
+  });
 
   revalidateProposals(proposal.id);
   return { ok: true, proposalId: proposal.id };
@@ -85,10 +235,17 @@ export interface ProposalMetaPatch {
 
 /** Updates assignment/commercial fields. Does NOT create a revision (content is unchanged). */
 export async function updateProposalMeta(proposalId: string, patch: ProposalMetaPatch): Promise<ActionResult> {
-  const { supabase, userId, canManage } = await getProposalAccess();
+  const { supabase, userId, canManage, role } = await getProposalAccess();
   if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
   if (!canManage) return { ok: false, error: "You do not have permission to edit proposals." };
   if (!proposalId) return { ok: false, error: "Missing proposal id." };
+
+  const validated: Parameters<typeof validateProposalFields>[0] = {};
+  if (patch.clientId !== undefined) validated.clientId = patch.clientId;
+  if (patch.proposalValue !== undefined) validated.proposalValue = patch.proposalValue;
+  if (patch.validUntil !== undefined) validated.validUntil = patch.validUntil;
+  const validation = validateProposalFields(validated);
+  if (!validation.ok) return { ok: false, error: validation.error, fieldErrors: validation.errors };
 
   const update: Record<string, unknown> = {};
   if (patch.clientId !== undefined) update.client_id = patch.clientId || null;
@@ -99,23 +256,37 @@ export async function updateProposalMeta(proposalId: string, patch: ProposalMeta
 
   const { data: before } = await supabase
     .from("client_proposals")
-    .select("client_id, owner, proposal_value, valid_until, title")
+    .select("client_id, owner, proposal_value, valid_until, title, status")
     .eq("id", proposalId)
     .maybeSingle();
+  if (!before) return { ok: false, error: NO_ROWS_MESSAGE };
 
-  const { error } = await supabase.from("client_proposals").update(update).eq("id", proposalId);
+  // The commercial fields are part of the offer and their edits create no
+  // revision, so they freeze once the proposal leaves the working states.
+  // `owner` stays editable — it is internal routing, not part of the offer.
+  const touchesLockedFields =
+    patch.clientId !== undefined || patch.proposalValue !== undefined || patch.validUntil !== undefined;
+  if (touchesLockedFields) {
+    const metaGate = canEditProposalMeta(before.status as ProposalStatus);
+    if (!metaGate.ok) return { ok: false, error: metaGate.reason };
+  }
+
+  const { data: updated, error } = await supabase
+    .from("client_proposals")
+    .update(update)
+    .eq("id", proposalId)
+    .select("id");
   if (error) return { ok: false, error: error.message };
+  if (!updated || updated.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
 
-  await recordAuditEvent(
-    buildDataAuditEvent(
-      "update",
-      "client_proposal",
-      proposalId,
-      userId,
-      patch.clientId !== undefined ? "Updated proposal company assignment" : "Updated proposal details",
-      before ?? null,
-      update,
-    ),
+  await recordProposalAudit(
+    role,
+    "update",
+    proposalId,
+    userId,
+    patch.clientId !== undefined ? "Updated proposal company assignment" : "Updated proposal details",
+    before,
+    update,
   );
 
   revalidateProposals(proposalId);
@@ -129,32 +300,48 @@ export interface SaveRevisionInput {
   changeNote?: string | null;
   /** Serialized Proposal Generator state ({v, fields, phases, services}). */
   formData?: unknown;
+  /**
+   * Optimistic lock: the `current_revision` the editor was opened on. When
+   * supplied and stale, the save is rejected instead of racing another editor
+   * into a unique-constraint error. Omit to skip the check.
+   */
+  baseRevision?: number;
+}
+
+function concurrentSaveMessage(revisionNumber: number): string {
+  return `Someone else saved v${revisionNumber} while you were editing.`;
 }
 
 /** Saves content edits as a new immutable revision and updates the working copy. */
 export async function saveProposalRevision(proposalId: string, input: SaveRevisionInput): Promise<ActionResult & { revisionNumber?: number }> {
-  const { supabase, userId, canManage } = await getProposalAccess();
+  const { supabase, userId, canManage, role } = await getProposalAccess();
   if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
   if (!canManage) return { ok: false, error: "You do not have permission to edit proposals." };
   if (!proposalId) return { ok: false, error: "Missing proposal id." };
 
-  const title = input.title?.trim();
-  if (!title) return { ok: false, error: "The proposal needs a title." };
+  const validation = validateProposalFields({ title: input.title });
+  if (!validation.ok) return { ok: false, error: validation.error, fieldErrors: validation.errors };
+  const title = input.title.trim();
 
   const { data: proposal } = await supabase
     .from("client_proposals")
     .select("id, status, current_revision")
     .eq("id", proposalId)
     .maybeSingle();
-  if (!proposal) return { ok: false, error: "Proposal not found." };
+  if (!proposal) return { ok: false, error: NO_ROWS_MESSAGE };
 
   const editGate = canEditProposalContent(proposal.status as ProposalStatus);
   if (!editGate.ok) return { ok: false, error: editGate.reason };
 
-  if (input.formData !== undefined && input.formData !== null && !isGeneratorState(input.formData)) {
-    return { ok: false, error: "Malformed proposal form data." };
+  if (typeof input.baseRevision === "number" && proposal.current_revision !== input.baseRevision) {
+    return { ok: false, error: concurrentSaveMessage(proposal.current_revision) };
   }
-  const formData = input.formData ?? null;
+
+  let formData: GeneratorState | null = null;
+  if (input.formData !== undefined && input.formData !== null) {
+    if (!isGeneratorState(input.formData)) return { ok: false, error: "Malformed proposal form data." };
+    formData = input.formData;
+  }
 
   const revisionNumber = nextRevisionNumber(proposal.current_revision);
 
@@ -169,29 +356,84 @@ export async function saveProposalRevision(proposalId: string, input: SaveRevisi
     form_data: formData,
     created_by: userId,
   });
-  if (revisionError) return { ok: false, error: revisionError.message };
+  if (revisionError) {
+    // Lost the race with a concurrent save: (proposal_id, revision_number) is
+    // unique. Never surface the raw constraint text.
+    if (errorCode(revisionError) === UNIQUE_VIOLATION) {
+      return { ok: false, error: concurrentSaveMessage(revisionNumber) };
+    }
+    return { ok: false, error: revisionError.message };
+  }
 
-  const { error: updateError } = await supabase
+  const workingCopy: Record<string, unknown> = {
+    title,
+    summary: input.summary?.trim() || null,
+    body_markdown: input.bodyMarkdown ?? null,
+    current_revision: revisionNumber,
+    form_data: formData,
+  };
+  const proposalValue = recomputeProposalValue(formData);
+  if (proposalValue !== null) workingCopy.proposal_value = proposalValue;
+
+  const { data: updated, error: updateError } = await supabase
     .from("client_proposals")
-    .update({
-      title,
-      summary: input.summary?.trim() || null,
-      body_markdown: input.bodyMarkdown ?? null,
-      current_revision: revisionNumber,
-      form_data: formData,
-    })
-    .eq("id", proposalId);
+    .update(workingCopy)
+    .eq("id", proposalId)
+    .select("id");
   if (updateError) return { ok: false, error: updateError.message };
+  if (!updated || updated.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
 
-  await recordAuditEvent(
-    buildDataAuditEvent("update", "client_proposal", proposalId, userId, `Saved proposal revision ${revisionNumber}`, null, {
-      revision_number: revisionNumber,
-      change_note: input.changeNote?.trim() || null,
-    }),
-  );
+  await recordProposalAudit(role, "update", proposalId, userId, `Saved proposal revision ${revisionNumber}`, null, {
+    revision_number: revisionNumber,
+    change_note: input.changeNote?.trim() || null,
+    proposal_value: proposalValue,
+  });
 
   revalidateProposals(proposalId);
   return { ok: true, revisionNumber };
+}
+
+/**
+ * Saves the working copy's form state WITHOUT minting a revision. Autosave and
+ * "Save Draft" go through here; only an explicit "Save revision" should grow
+ * the immutable history.
+ */
+export async function saveProposalDraft(proposalId: string, formData: unknown): Promise<ActionResult> {
+  const { supabase, userId, canManage, role } = await getProposalAccess();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+  if (!canManage) return { ok: false, error: "You do not have permission to edit proposals." };
+  if (!proposalId) return { ok: false, error: "Missing proposal id." };
+  if (!isGeneratorState(formData)) return { ok: false, error: "Malformed proposal form data." };
+
+  const { data: proposal } = await supabase
+    .from("client_proposals")
+    .select("id, status")
+    .eq("id", proposalId)
+    .maybeSingle();
+  if (!proposal) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  const editGate = canEditProposalContent(proposal.status as ProposalStatus);
+  if (!editGate.ok) return { ok: false, error: editGate.reason };
+
+  const draft: Record<string, unknown> = { form_data: formData, updated_at: new Date().toISOString() };
+  const proposalValue = recomputeProposalValue(formData);
+  if (proposalValue !== null) draft.proposal_value = proposalValue;
+
+  const { data: updated, error } = await supabase
+    .from("client_proposals")
+    .update(draft)
+    .eq("id", proposalId)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!updated || updated.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  await recordProposalAudit(role, "update", proposalId, userId, "Saved proposal draft (no new revision)", null, {
+    form_data_saved: true,
+    proposal_value: proposalValue,
+  });
+
+  revalidateProposals(proposalId);
+  return { ok: true };
 }
 
 /** Restores an earlier revision by copying it forward as a NEW revision (history stays intact). */
@@ -209,6 +451,15 @@ export async function restoreProposalRevision(proposalId: string, revisionId: st
     .maybeSingle();
   if (!revision) return { ok: false, error: "Revision not found." };
 
+  // Restoring a revision with no usable form state would blank the working
+  // copy — refuse rather than destroy the current draft.
+  if (!isGeneratorState(revision.form_data)) {
+    return {
+      ok: false,
+      error: `Revision ${revision.revision_number} has no usable saved form data, so restoring it would blank the current proposal.`,
+    };
+  }
+
   const result = await saveProposalRevision(proposalId, {
     title: revision.title,
     summary: revision.summary,
@@ -219,8 +470,65 @@ export async function restoreProposalRevision(proposalId: string, revisionId: st
   return result;
 }
 
+/** Copies a proposal into a fresh draft, carrying the generator state over. */
+export async function duplicateProposal(proposalId: string): Promise<ActionResult & { proposalId?: string }> {
+  const { supabase, userId, canManage, role } = await getProposalAccess();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+  if (!canManage) return { ok: false, error: "You do not have permission to create proposals." };
+  if (!proposalId) return { ok: false, error: "Missing proposal id." };
+
+  const { data: source } = await supabase
+    .from("client_proposals")
+    .select("id, title, summary, body_markdown, proposal_value, valid_until, client_id, owner, form_data")
+    .eq("id", proposalId)
+    .maybeSingle();
+  if (!source) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  const title = `${source.title} (Copy)`.slice(0, proposalTitleMaxLength);
+  const formData = isGeneratorState(source.form_data) ? source.form_data : buildInitialFormState(null);
+
+  const { data: created, error } = await supabase
+    .from("client_proposals")
+    .insert({
+      title,
+      client_id: source.client_id ?? null,
+      owner: source.owner ?? null,
+      proposal_value: source.proposal_value ?? null,
+      valid_until: source.valid_until ?? null,
+      summary: source.summary ?? null,
+      body_markdown: source.body_markdown ?? null,
+      status: "draft",
+      current_revision: 1,
+      form_data: formData,
+      created_by: userId,
+    })
+    .select("id")
+    .single();
+  if (error || !created) return { ok: false, error: error?.message ?? "Failed to duplicate proposal." };
+
+  const { error: revisionError } = await supabase.from("client_proposal_revisions").insert({
+    proposal_id: created.id,
+    revision_number: 1,
+    title,
+    summary: source.summary ?? null,
+    body_markdown: source.body_markdown ?? null,
+    change_note: `Duplicated from ${source.title}`,
+    status_at_save: "draft",
+    form_data: formData,
+    created_by: userId,
+  });
+  if (revisionError) return { ok: false, error: `Proposal duplicated but revision 1 failed: ${revisionError.message}` };
+
+  await recordProposalAudit(role, "create", created.id, userId, `Duplicated proposal "${source.title}"`, null, {
+    duplicated_from: proposalId,
+  });
+
+  revalidateProposals(created.id);
+  return { ok: true, proposalId: created.id };
+}
+
 export async function setProposalStatus(proposalId: string, status: ProposalStatus): Promise<ActionResult> {
-  const { supabase, userId, canManage } = await getProposalAccess();
+  const { supabase, userId, canManage, role } = await getProposalAccess();
   if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
   if (!canManage) return { ok: false, error: "You do not have permission to update proposals." };
   if (!proposalId) return { ok: false, error: "Missing proposal id." };
@@ -231,24 +539,27 @@ export async function setProposalStatus(proposalId: string, status: ProposalStat
     .select("id, status, title")
     .eq("id", proposalId)
     .maybeSingle();
-  if (!proposal) return { ok: false, error: "Proposal not found." };
+  if (!proposal) return { ok: false, error: NO_ROWS_MESSAGE };
 
   const gate = canTransitionProposal(proposal.status as ProposalStatus, status);
   if (!gate.ok) return { ok: false, error: gate.reason };
 
-  const { error } = await supabase.from("client_proposals").update({ status }).eq("id", proposalId);
+  const { data: updated, error } = await supabase
+    .from("client_proposals")
+    .update({ status })
+    .eq("id", proposalId)
+    .select("id");
   if (error) return { ok: false, error: error.message };
+  if (!updated || updated.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
 
-  await recordAuditEvent(
-    buildDataAuditEvent(
-      "update",
-      "client_proposal",
-      proposalId,
-      userId,
-      `Moved proposal "${proposal.title}" from ${proposal.status} to ${status}`,
-      { status: proposal.status },
-      { status },
-    ),
+  await recordProposalAudit(
+    role,
+    "update",
+    proposalId,
+    userId,
+    `Moved proposal "${proposal.title}" from ${proposal.status} to ${status}`,
+    { status: proposal.status },
+    { status },
   );
 
   revalidateProposals(proposalId);
@@ -256,7 +567,7 @@ export async function setProposalStatus(proposalId: string, status: ProposalStat
 }
 
 export async function deleteProposal(proposalId: string): Promise<ActionResult> {
-  const { supabase, userId, isAdmin } = await getProposalAccess();
+  const { supabase, userId, isAdmin, role } = await getProposalAccess();
   if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
   if (!isAdmin) return { ok: false, error: "Admin role required to delete proposals." };
   if (!proposalId) return { ok: false, error: "Missing proposal id." };
@@ -267,13 +578,271 @@ export async function deleteProposal(proposalId: string): Promise<ActionResult> 
     .eq("id", proposalId)
     .maybeSingle();
 
-  const { error } = await supabase.from("client_proposals").delete().eq("id", proposalId);
+  const { data: deleted, error } = await supabase
+    .from("client_proposals")
+    .delete()
+    .eq("id", proposalId)
+    .select("id");
   if (error) return { ok: false, error: error.message };
+  if (!deleted || deleted.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
 
-  await recordAuditEvent(
-    buildDataAuditEvent("delete", "client_proposal", proposalId, userId, `Deleted proposal "${before?.title ?? proposalId}"`, before ?? null),
+  await recordProposalAudit(
+    role,
+    "delete",
+    proposalId,
+    userId,
+    `Deleted proposal "${before?.title ?? proposalId}"`,
+    before ?? null,
   );
 
-  revalidateProposals();
+  // The detail route must be revalidated too, or /employee/proposals/[id]
+  // keeps serving a cached page for a proposal that no longer exists.
+  revalidateProposals(proposalId);
+  return { ok: true };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Client-facing share links                                                   */
+/*                                                                             */
+/* A `sent` proposal used to have no stored artifact: no record of what the     */
+/* client received, no binding to a revision, and no client-facing path at all  */
+/* now that the generator's "Download HTML" is hidden (it leaked the internal   */
+/* price book). A share link fixes all three — it renders ONE immutable         */
+/* revision at a public URL, and the acceptance captured through it is stamped  */
+/* with that same revision id.                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** Absolute origin for a share URL, or null so the caller falls back to a path. */
+async function shareLinkOrigin(): Promise<string | null> {
+  const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (configured) return configured;
+  try {
+    const store = await headers();
+    const host = store.get("x-forwarded-host") ?? store.get("host");
+    if (!host) return null;
+    const proto = store.get("x-forwarded-proto") ?? "https";
+    return `${proto}://${host}`;
+  } catch {
+    return null;
+  }
+}
+
+export interface CreateShareLinkInput {
+  /** The revision to bind the link to. Must belong to this proposal. */
+  revisionId: string;
+  /** Clamped to 1–180 days. */
+  expiresInDays?: number;
+}
+
+export interface CreateShareLinkResult extends ActionResult {
+  /**
+   * The RAW token, returned EXACTLY ONCE. Only its SHA-256 hash is stored, so
+   * this value cannot be recovered afterwards — not by an admin, not from a
+   * database dump. Surface it to the creator with that warning and never log it.
+   */
+  token?: string;
+  url?: string;
+  linkId?: string;
+  expiresAt?: string;
+}
+
+export async function createProposalShareLink(
+  proposalId: string,
+  input: CreateShareLinkInput,
+): Promise<CreateShareLinkResult> {
+  const { supabase, userId, canManage, role } = await getProposalAccess();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+  if (!canManage) return { ok: false, error: "You do not have permission to share proposals." };
+  if (!proposalId || !isProposalUuid(proposalId)) return { ok: false, error: "Missing or invalid proposal id." };
+  if (!input?.revisionId || !isProposalUuid(input.revisionId)) {
+    return { ok: false, error: "Choose which revision the client should see." };
+  }
+
+  const { data: proposal } = await supabase
+    .from("client_proposals")
+    .select("id, title, status")
+    .eq("id", proposalId)
+    .maybeSingle();
+  if (!proposal) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  const gate = canShareProposal(proposal.status as ProposalStatus);
+  if (!gate.ok) return { ok: false, error: gate.reason };
+
+  // Scoped by proposal id as well as revision id: a revision uuid from another
+  // proposal must never become a shareable document under this heading.
+  const { data: revision } = await supabase
+    .from("client_proposal_revisions")
+    .select("id, revision_number, form_data")
+    .eq("id", input.revisionId)
+    .eq("proposal_id", proposalId)
+    .maybeSingle();
+  if (!revision) return { ok: false, error: "That revision does not belong to this proposal." };
+  if (!isGeneratorState(revision.form_data)) {
+    return {
+      ok: false,
+      error: `Revision v${revision.revision_number} has no saved document content, so there is nothing to show a client.`,
+    };
+  }
+
+  const days = clampShareLinkDays(input.expiresInDays);
+  const expiresAt = shareLinkExpiryIso(days);
+  const token = generateShareToken();
+
+  const { data: created, error } = await supabase
+    .from("client_proposal_share_links")
+    .insert({
+      proposal_id: proposalId,
+      revision_id: revision.id,
+      // Only the digest is persisted. `token` never leaves this function except
+      // in the return value below.
+      token_hash: hashShareToken(token),
+      expires_at: expiresAt,
+      created_by: userId,
+    })
+    .select("id")
+    .single();
+
+  if (error || !created) return { ok: false, error: error?.message ?? "Failed to create the share link." };
+
+  await recordProposalAudit(
+    role,
+    "create",
+    proposalId,
+    userId,
+    `Issued a client share link for "${proposal.title}" bound to revision v${revision.revision_number}`,
+    null,
+    // Deliberately records the link id, the revision binding and the expiry —
+    // never the token or its hash.
+    { share_link_id: created.id, revision_number: revision.revision_number, expires_at: expiresAt, expires_in_days: days },
+  );
+
+  revalidateProposals(proposalId);
+  return {
+    ok: true,
+    token,
+    url: buildShareLinkUrl(await shareLinkOrigin(), token),
+    linkId: created.id,
+    expiresAt,
+  };
+}
+
+export async function revokeProposalShareLink(linkId: string): Promise<ActionResult> {
+  const { supabase, userId, canManage, role } = await getProposalAccess();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+  if (!canManage) return { ok: false, error: "You do not have permission to manage share links." };
+  if (!linkId || !isProposalUuid(linkId)) return { ok: false, error: "Missing or invalid share link id." };
+
+  // `revoked_at is null` is part of the predicate so a second revoke is a
+  // no-op rather than moving the timestamp and rewriting the evidence.
+  const { data: revoked, error } = await supabase
+    .from("client_proposal_share_links")
+    .update({ revoked_at: new Date().toISOString(), revoked_by: userId })
+    .eq("id", linkId)
+    .is("revoked_at", null)
+    .select("id, proposal_id");
+  if (error) return { ok: false, error: error.message };
+  if (!revoked || revoked.length === 0) {
+    return { ok: false, error: "That share link was not found, or it was already revoked." };
+  }
+
+  const proposalId = revoked[0].proposal_id as string;
+  await recordProposalAudit(role, "update", proposalId, userId, "Revoked a client share link", null, {
+    share_link_id: linkId,
+    revoked: true,
+  });
+
+  revalidateProposals(proposalId);
+  return { ok: true };
+}
+
+export interface AcceptViaShareLinkInput {
+  name: string;
+  email: string;
+  /** The explicit agreement checkbox. Acceptance is refused without it. */
+  agreed: boolean;
+}
+
+/**
+ * CLIENT-FACING and UNAUTHENTICATED. Reachable by anyone holding a valid,
+ * unexpired, unrevoked share token — that token is the entire credential.
+ *
+ * Everything the caller supplies is untrusted:
+ *   * the token is format-checked, hashed, and matched constant-time;
+ *   * name/email/agreement go through validateAcceptanceInput();
+ *   * the IP is read from request headers here, never from the payload;
+ *   * the accepted revision is taken from the LINK, never from the caller, so a
+ *     client cannot accept a revision they were not shown.
+ *
+ * Failure messages are deliberately uniform and say nothing about whether a
+ * proposal exists behind an unknown token.
+ */
+export async function acceptProposalViaShareLink(
+  token: string,
+  input: AcceptViaShareLinkInput,
+): Promise<ActionResult> {
+  const genericRejection = "This proposal link is no longer available.";
+
+  const validation = validateAcceptanceInput(input ?? {});
+  if (!validation.ok || !validation.value) {
+    return { ok: false, error: validation.error, fieldErrors: validation.errors };
+  }
+
+  const resolved = await resolveShareLink(token);
+  if (resolved.state !== "valid" || !resolved.view) return { ok: false, error: genericRejection };
+  const view = resolved.view;
+
+  // The same workflow gate the employee-facing status change uses, so a share
+  // link can never move a proposal along a path the platform forbids.
+  const gate = canTransitionProposal(view.status, "accepted");
+  if (!gate.ok) return { ok: false, error: "This proposal is no longer open for acceptance." };
+
+  let ip: string | null = null;
+  let userAgent: string | null = null;
+  try {
+    const store = await headers();
+    ip = extractClientIp(store.get("x-forwarded-for"));
+    userAgent = store.get("user-agent")?.slice(0, 500) ?? null;
+  } catch {
+    // Header access can fail outside a request scope; the acceptance still
+    // stands, it just carries no IP evidence.
+  }
+
+  const written = await applyShareLinkAcceptance({
+    proposalId: view.proposalId,
+    revisionId: view.revisionId,
+    name: validation.value.name,
+    email: validation.value.email,
+    ip,
+  });
+  if (!written.ok) return { ok: false, error: written.error };
+
+  // Acceptance is the most consequential event in this module's lifecycle and
+  // has no signed-in actor, so the audit trail is the only record of who did it.
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "update",
+      "client_proposal",
+      view.proposalId,
+      null,
+      `Client accepted proposal "${view.title}" (revision v${view.revisionNumber}) via share link`,
+      { status: view.status, accepted_at: null },
+      {
+        status: "accepted",
+        accepted_by_name: validation.value.name,
+        accepted_by_email: validation.value.email,
+        accepted_revision_id: view.revisionId,
+        revision_number: view.revisionNumber,
+        share_link_id: view.linkId,
+      },
+    ),
+    event_category: "data",
+    severity: "warn",
+    actor_role: "client_share_link",
+    ip_address: ip,
+    user_agent: userAgent,
+    evidence_links: [view.linkId],
+  });
+
+  revalidateProposals(view.proposalId);
   return { ok: true };
 }

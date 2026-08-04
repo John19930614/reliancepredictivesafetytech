@@ -158,6 +158,15 @@ p{margin:6px 0}
   .fee-table tfoot tr:nth-child(4) td,.fee-table tfoot tr:nth-child(5) td,
   .callout,.pagehead::after,.fee-table tbody tr:nth-child(even){-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
+
+/* Embedded in the platform Proposals workspace (class set by the injected
+   bridge). Local drafts are per-origin, not per-proposal, so Save/Load Draft
+   would leak one client's details into another proposal; Download HTML dumps
+   the whole document including this control panel and the internal price book.
+   Saving/loading is the platform's job when embedded. Print / Save PDF stays. */
+body.embedded [data-action="save"],
+body.embedded [data-action="load"],
+body.embedded [data-action="download"]{display:none!important}
 </style>
 </head>
 <body>
@@ -373,18 +382,20 @@ const packageData = {
   custom:{name:'Basic Pilot Program \u2014 Platform Access (6-Month)',price:Number($('annualPrice')?.value||0),users:Number($('includedUsers')?.value||0),sites:Number($('includedSites')?.value||0),desc:'A 6-month pilot providing basic platform access for up to 50 users across 2 jobsites at a flat pilot fee, with no additional setup or licensing cost.'}
 };
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function num(x,d=0){const n=Number(x); return Number.isFinite(n)?n:d;}
+function isEmbedded(){return !!(document.body&&document.body.classList.contains('embedded'));}
 function nl(s){return esc(s).replace(/\n/g,'<br>');}
 function setStatus(msg){$('status').textContent=msg; setTimeout(()=>{$('status').textContent=''},3000)}
 function addPhase(key='discovery',qty=1,price=null,desc=null){
  const wrap=$('phases'); const o=phaseOptions[key]||phaseOptions.discovery;
  const div=document.createElement('div'); div.className='row5 item phase';
- div.innerHTML=`<div><label>Phase</label><select class="phaseKey">${Object.keys(phaseOptions).map(k=>`<option value="${k}" ${k===key?'selected':''}>${esc(phaseOptions[k].name)}</option>`).join('')}</select></div><div><label>Qty</label><input class="phaseQty" type="number" step="any" value="${qty}"></div><div><label>Unit Fee</label><input class="phasePrice" type="number" step="any" value="${price===null?o.price:price}"></div><div><label>Description</label><input class="phaseDesc" value="${esc(desc===null?o.desc:desc)}"></div><div><button type="button" class="btn btn-danger small" data-action="removeItem">X</button></div>`;
+ div.innerHTML=`<div><label>Phase</label><select class="phaseKey">${Object.keys(phaseOptions).map(k=>`<option value="${k}" ${k===key?'selected':''}>${esc(phaseOptions[k].name)}</option>`).join('')}</select></div><div><label>Qty</label><input class="phaseQty" type="number" step="any" value="${num(qty,1)}"></div><div><label>Unit Fee</label><input class="phasePrice" type="number" step="any" value="${num(price===null?o.price:price,0)}"></div><div><label>Description</label><input class="phaseDesc" value="${esc(desc===null?o.desc:desc)}"></div><div><button type="button" class="btn btn-danger small" data-action="removeItem">X</button></div>`;
  wrap.appendChild(div); update(); return div;
 }
 function addService(key='document',qty=1,price=null,desc=null){
  const wrap=$('services'); const o=serviceOptions[key]||serviceOptions.document;
  const div=document.createElement('div'); div.className='row5 item service';
- div.innerHTML=`<div><label>Service / Add-On</label><select class="svcKey">${serviceSelectHTML(key)}</select></div><div><label class="qtyLabel">Qty \u00b7 ${esc(o.unit||'Unit')}</label><input class="svcQty" type="number" step="any" value="${qty}"></div><div><label>Unit Fee</label><input class="svcPrice" type="number" step="any" value="${price===null?o.price:price}"></div><div><label>Description</label><input class="svcDesc" value="${esc(desc===null?o.desc:desc)}"></div><div><button type="button" class="btn btn-danger small" data-action="removeItem">X</button></div>`;
+ div.innerHTML=`<div><label>Service / Add-On</label><select class="svcKey">${serviceSelectHTML(key)}</select></div><div><label class="qtyLabel">Qty \u00b7 ${esc(o.unit||'Unit')}</label><input class="svcQty" type="number" step="any" value="${num(qty,1)}"></div><div><label>Unit Fee</label><input class="svcPrice" type="number" step="any" value="${num(price===null?o.price:price,0)}"></div><div><label>Description</label><input class="svcDesc" value="${esc(desc===null?o.desc:desc)}"></div><div><button type="button" class="btn btn-danger small" data-action="removeItem">X</button></div>`;
  wrap.appendChild(div); update(); return div;
 }
 function collectItems(cls, type){const opts=type==='phase'?phaseOptions:serviceOptions; const prefix=type==='phase'?'phase':'svc'; return Array.from(document.querySelectorAll('.'+cls)).map(el=>{const key=el.querySelector('.'+prefix+'Key').value; const o=opts[key]||{}; return {type,key,name:el.dataset.customName||o.name||'',qty:Number(el.querySelector('.'+prefix+'Qty').value||0),price:Number(el.querySelector('.'+prefix+'Price').value||0),desc:el.querySelector('.'+prefix+'Desc').value||o.desc||'',unit:o.unit||''};});}
@@ -460,12 +471,14 @@ function update(){
 }
 function packageChange(){const key=$('packageSelect').value;if(key!=='custom'){const p=packageData[key];$('annualPrice').value=p.price;$('includedUsers').value=p.users;$('includedSites').value=p.sites;}update();}
 function optionChange(e){const sel=e.target; if(sel.classList.contains('phaseKey')){const o=phaseOptions[sel.value]; const row=sel.closest('.phase'); row.querySelector('.phasePrice').value=o.price; row.querySelector('.phaseDesc').value=o.desc;} if(sel.classList.contains('svcKey')){const o=serviceOptions[sel.value]; const row=sel.closest('.service'); row.querySelector('.svcPrice').value=o.price; row.querySelector('.svcDesc').value=o.desc; if(row.dataset.customName) delete row.dataset.customName; const ql=row.querySelector('.qtyLabel'); if(ql) ql.textContent='Qty \u00b7 '+(o.unit||'Unit');} update();}
-function save(){const data={}; document.querySelectorAll('input,select,textarea').forEach((el,i)=>{if(!el.className.includes('phase')&&!el.className.includes('svc')) data[el.id||('field'+i)]=el.value;}); localStorage.setItem('proposalGeneratorV4',JSON.stringify(data)); setStatus('Saved in this browser.');}
-function load(){const data=JSON.parse(localStorage.getItem('proposalGeneratorV4')||'{}'); Object.entries(data).forEach(([k,v])=>{if($(k)) $(k).value=v}); update(); setStatus('Loaded saved data.');}
-function download(){update(); var html='<!DOCTYPE html>\n'+document.documentElement.outerHTML; var fname=($('clientCompany').value||'proposal').replace(/[^a-z0-9]+/gi,'_')+'_pilot_proposal.html'; try{ var blob=new Blob([html],{type:'text/html'}); if(window.navigator&&window.navigator.msSaveOrOpenBlob){window.navigator.msSaveOrOpenBlob(blob,fname);setStatus('Download started.');return;} var url=URL.createObjectURL(blob); var a=document.createElement('a'); a.href=url; a.download=fname; a.style.display='none'; document.body.appendChild(a); a.click(); setTimeout(function(){a.remove();URL.revokeObjectURL(url);},1500); setStatus('If nothing downloaded, this preview is blocking it \u2014 open the file in Chrome/Edge/Safari, then click Download.'); }catch(e){ try{ var w=window.open('','_blank'); w.document.write(html); w.document.close(); setStatus('Opened a copy in a new tab \u2014 use File > Save As to keep it.'); }catch(e2){ setStatus('Download is blocked in this preview. Open this file in Chrome/Edge/Safari, then click Download.'); } } }
+function save(){if(isEmbedded()){setStatus('Drafts are saved on the platform, not in this browser.');return;} const data={}; document.querySelectorAll('input,select,textarea').forEach((el,i)=>{if(!el.className.includes('phase')&&!el.className.includes('svc')) data[el.id||('field'+i)]=el.value;}); localStorage.setItem('proposalGeneratorV4',JSON.stringify(data)); setStatus('Saved in this browser.');}
+function load(){if(isEmbedded()){setStatus('This proposal is loaded from the platform.');return;} const data=JSON.parse(localStorage.getItem('proposalGeneratorV4')||'{}'); Object.entries(data).forEach(([k,v])=>{if($(k)) $(k).value=v}); update(); setStatus('Loaded saved data.');}
+function download(){if(isEmbedded()){setStatus('Use Print / Save PDF to produce the client copy.');return;} update(); var html='<!DOCTYPE html>\n'+document.documentElement.outerHTML; var fname=($('clientCompany').value||'proposal').replace(/[^a-z0-9]+/gi,'_')+'_pilot_proposal.html'; try{ var blob=new Blob([html],{type:'text/html'}); if(window.navigator&&window.navigator.msSaveOrOpenBlob){window.navigator.msSaveOrOpenBlob(blob,fname);setStatus('Download started.');return;} var url=URL.createObjectURL(blob); var a=document.createElement('a'); a.href=url; a.download=fname; a.style.display='none'; document.body.appendChild(a); a.click(); setTimeout(function(){a.remove();URL.revokeObjectURL(url);},1500); setStatus('If nothing downloaded, this preview is blocking it \u2014 open the file in Chrome/Edge/Safari, then click Download.'); }catch(e){ try{ var w=window.open('','_blank'); w.document.write(html); w.document.close(); setStatus('Opened a copy in a new tab \u2014 use File > Save As to keep it.'); }catch(e2){ setStatus('Download is blocked in this preview. Open this file in Chrome/Edge/Safari, then click Download.'); } } }
 document.addEventListener('click',e=>{const a=e.target.closest('[data-action]'); if(!a)return; const act=a.dataset.action; if(act==='print'){update(); setTimeout(()=>window.print(),50)} if(act==='refresh'){update(); setStatus('Preview refreshed.')} if(act==='download')download(); if(act==='save')save(); if(act==='load')load(); if(act==='addPhase')addPhase(); if(act==='addService')addService(); if(act==='addDoc')addDoc(); if(act==='removeItem'){a.closest('.item').remove(); update();}});
 document.addEventListener('input',e=>{update(); if(e.target&&e.target.closest&&e.target.closest('#docCalc')) computeDoc();}); document.addEventListener('change',e=>{if(e.target.id==='packageSelect'){packageChange();return;} if(e.target.closest&&e.target.closest('#docCalc')){computeDoc();return;} optionChange(e);});
 window.addEventListener('DOMContentLoaded',()=>{const today=new Date(); $('proposalDate').value=today.toISOString().slice(0,10); addPhase('discovery',1,0,'Kickoff, platform access setup, and configuration of the two pilot jobsites and user accounts \u2014 included in the pilot.'); addPhase('build',1,0,'Configure modules, templates, dashboards, and workflows for pilot use \u2014 included in the pilot.'); addPhase('launch',1,0,'User training, launch support, and check-ins across the 6-month pilot \u2014 included in the pilot.'); packageChange(); computeDoc(); update();});
+/* Anchor below: scripts/build-proposal-generator.mjs replaces that exact one-line comment with the platform postMessage bridge. Keep it verbatim, keep exactly one of it, and keep it inside this IIFE so the bridge can reach $, collectItems, addPhase, addService, update and setStatus. */
+/* BRIDGE_INJECTION_POINT */
 })();
 </script>
 </body>
