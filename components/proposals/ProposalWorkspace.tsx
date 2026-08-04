@@ -1,11 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+// Client-side pieces of the Proposal Builder.
+//
+//   ProposalWorkspace       — the generator editor, mounted ONLY on
+//                             /employee/proposals/[id]/edit
+//   ProposalControlPanel    — workflow + assignment + duplicate/delete sidebar
+//                             on the read-only document view
+//   ProposalRevisionHistory — revision table, "compare with current", restore
+//
+// The editor and the document view are deliberately separate routes: the edit
+// gate has to be decided BEFORE twenty minutes of work goes into an iframe that
+// will refuse to save.
+
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { RotateCcw, Trash2, Upload } from "lucide-react";
+import { Copy, Eye, FileClock, GitCompare, RotateCcw, Save, Trash2 } from "lucide-react";
 import {
   deleteProposal,
+  duplicateProposal,
   restoreProposalRevision,
+  saveProposalDraft,
   saveProposalRevision,
   setProposalStatus,
   updateProposalMeta,
@@ -15,8 +30,21 @@ import {
   deriveSummaryFromState,
   deriveTitleFromState,
   isGeneratorState,
+  type GeneratorState,
 } from "@/lib/proposals/generator-state";
-import { proposalStatusLabels, type ProposalRevisionRow, type ProposalStatus } from "@/lib/proposals/types";
+import {
+  canEditProposalContent,
+  canEditProposalMeta,
+  canTransitionProposal,
+} from "@/lib/proposals/policy";
+import { diffGeneratorState } from "@/lib/proposals/diff";
+import {
+  proposalStatusLabels,
+  proposalStatuses,
+  type ProposalRevisionRow,
+  type ProposalStatus,
+} from "@/lib/proposals/types";
+import { ProposalRevisionDiff } from "./ProposalRevisionDiff";
 import { ProposalStatusBadge } from "./ProposalStatusBadge";
 
 interface ClientOption {
@@ -44,62 +72,82 @@ export interface WorkspaceClientDetail {
   email: string | null;
 }
 
-const statusActions: Record<ProposalStatus, { to: ProposalStatus; label: string }[]> = {
-  draft: [
-    { to: "in_review", label: "Send for review" },
-    { to: "sent", label: "Mark as sent" },
-    { to: "archived", label: "Archive" },
-  ],
-  in_review: [
-    { to: "sent", label: "Mark as sent" },
-    { to: "draft", label: "Back to draft" },
-    { to: "archived", label: "Archive" },
-  ],
-  sent: [
-    { to: "accepted", label: "Mark accepted" },
-    { to: "declined", label: "Mark declined" },
-    { to: "draft", label: "Reopen for revision" },
-    { to: "archived", label: "Archive" },
-  ],
-  accepted: [{ to: "archived", label: "Archive" }],
-  declined: [
-    { to: "draft", label: "Reopen for revision" },
-    { to: "archived", label: "Archive" },
-  ],
-  archived: [{ to: "draft", label: "Restore to draft" }],
+interface SimpleResult {
+  ok: boolean;
+  error?: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Status transitions — SET derived from policy, only the copy lives here      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Which transitions exist is asked of lib/proposals/policy.ts on every render,
+ * so the buttons can never drift from what the server will actually accept.
+ * Only the wording and the display order are decided here.
+ */
+function availableTransitions(from: ProposalStatus): ProposalStatus[] {
+  return proposalStatuses
+    .filter((to) => canTransitionProposal(from, to).ok)
+    .sort((a, b) => transitionRank(a) - transitionRank(b));
+}
+
+/** Forward-moving actions first; "reopen" and "archive" last. */
+const transitionRankByStatus: Record<ProposalStatus, number> = {
+  in_review: 0,
+  sent: 1,
+  accepted: 2,
+  declined: 3,
+  draft: 4,
+  archived: 5,
 };
 
-export function ProposalWorkspace({
-  proposal,
-  revisions,
-  clients,
-  assignedClient,
-  isAdmin,
-}: {
-  proposal: WorkspaceProposal;
-  revisions: ProposalRevisionRow[];
-  clients: ClientOption[];
-  assignedClient: WorkspaceClientDetail | null;
-  isAdmin: boolean;
-}) {
+function transitionRank(status: ProposalStatus): number {
+  return transitionRankByStatus[status] ?? 99;
+}
+
+const transitionCopy: Record<string, string> = {
+  "draft->in_review": "Send for review",
+  "draft->sent": "Mark as sent",
+  "in_review->draft": "Back to draft",
+  "in_review->sent": "Mark as sent",
+  "sent->accepted": "Mark accepted",
+  "sent->declined": "Mark declined",
+  "sent->draft": "Reopen for revision",
+  "declined->draft": "Reopen for revision",
+  "archived->draft": "Restore to draft",
+};
+
+const fallbackCopyByTarget: Partial<Record<ProposalStatus, string>> = {
+  archived: "Archive",
+  draft: "Reopen as draft",
+};
+
+function transitionLabel(from: ProposalStatus, to: ProposalStatus): string {
+  return transitionCopy[`${from}->${to}`] ?? fallbackCopyByTarget[to] ?? `Move to ${proposalStatusLabels[to]}`;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Shared bits                                                                 */
+/* -------------------------------------------------------------------------- */
+
+function ActionAlerts({ error, notice }: { error: string; notice: string }) {
+  return (
+    <>
+      {error ? <div className="success-box portal-alert portal-alert-error">{error}</div> : null}
+      {notice ? <div className="success-box portal-alert">{notice}</div> : null}
+    </>
+  );
+}
+
+function useProposalAction() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [changeNote, setChangeNote] = useState("");
-  const [viewingRevision, setViewingRevision] = useState<ProposalRevisionRow | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const changeNoteRef = useRef(changeNote);
-  changeNoteRef.current = changeNote;
-
-  const editable = proposal.status === "draft" || proposal.status === "in_review";
-
-  const postToGenerator = useCallback((message: object) => {
-    iframeRef.current?.contentWindow?.postMessage(message, window.location.origin);
-  }, []);
 
   const run = useCallback(
-    (action: () => Promise<{ ok: boolean; error?: string }>, successMessage: string) => {
+    (action: () => Promise<SimpleResult>, successMessage: string) => {
       setError("");
       setNotice("");
       startTransition(async () => {
@@ -115,288 +163,711 @@ export function ProposalWorkspace({
     [router],
   );
 
-  // Bridge: the generator posts ready/save events; we answer with load/persist.
-  useEffect(() => {
-    function onMessage(event: MessageEvent) {
+  return { router, isPending, error, notice, setError, setNotice, run };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Editor                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/** How often the parent asks the iframe for its current state. */
+const POLL_INTERVAL_MS = 10_000;
+/** Minimum gap between autosaves of the working copy. */
+const AUTOSAVE_INTERVAL_MS = 30_000;
+/**
+ * Delay after hydration before the first "prime" collect. The generator's own
+ * collector reports every input on the page, which is a strictly larger object
+ * than a partially-prefilled saved state, so the baseline for dirty-checking has
+ * to be whatever the generator holds immediately AFTER the saved state landed —
+ * not the saved state itself, or every proposal would open dirty.
+ */
+const PRIME_DELAY_MS = 900;
+
+type CollectPurpose = "prime" | "poll" | "draft" | "revision";
+
+export function ProposalWorkspace({
+  proposal,
+  assignedClient,
+}: {
+  proposal: WorkspaceProposal;
+  assignedClient: WorkspaceClientDetail | null;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [changeNote, setChangeNote] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [baseRevision, setBaseRevision] = useState(proposal.current_revision);
+
+  const editGate = canEditProposalContent(proposal.status);
+
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  /** True once the saved state has been pushed into the current iframe document. */
+  const hydratedRef = useRef(false);
+  /** True while any save is in flight — the guard against double-submits. */
+  const busyRef = useRef(false);
+  /**
+   * FIFO of outstanding `proposal:collect` requests. The bridge's reply carries
+   * no correlation id, but postMessage preserves order, so the oldest pending
+   * purpose owns the next `proposal:state`. A single slot would let the 10s poll
+   * steal the reply meant for an explicit save.
+   */
+  const pendingCollectsRef = useRef<CollectPurpose[]>([]);
+  const savedHashRef = useRef<string | null>(null);
+  const savedAtRef = useRef<number>(Date.now());
+  const changeNoteRef = useRef(changeNote);
+  const baseRevisionRef = useRef(proposal.current_revision);
+  const proposalIdRef = useRef(proposal.id);
+  const proposalTitleRef = useRef(proposal.title);
+  const editableRef = useRef(editGate.ok);
+  const lockReasonRef = useRef(editGate.reason ?? "");
+
+  changeNoteRef.current = changeNote;
+  proposalIdRef.current = proposal.id;
+  proposalTitleRef.current = proposal.title;
+  editableRef.current = editGate.ok;
+  lockReasonRef.current = editGate.reason ?? "";
+
+  // Computed exactly once: `assignedClient` is a fresh object on every server
+  // render, and re-deriving it per render used to re-arm the bridge listener.
+  const initialStateRef = useRef<unknown>(undefined);
+  if (initialStateRef.current === undefined) {
+    initialStateRef.current = isGeneratorState(proposal.form_data)
+      ? proposal.form_data
+      : buildPrefillState(assignedClient);
+  }
+
+  const postToGenerator = useCallback((message: object) => {
+    iframeRef.current?.contentWindow?.postMessage(message, window.location.origin);
+  }, []);
+
+  const requestState = useCallback(
+    (purpose: CollectPurpose) => {
+      const queue = pendingCollectsRef.current;
+      // The iframe is not answering (never loaded, or navigated away): drop the
+      // stale backlog rather than letting it grow one entry per poll.
+      if (queue.length >= 6) queue.length = 0;
+      queue.push(purpose);
+      postToGenerator({ type: "proposal:collect" });
+    },
+    [postToGenerator],
+  );
+
+  const markSaved = useCallback((hash: string) => {
+    const now = Date.now();
+    savedHashRef.current = hash;
+    savedAtRef.current = now;
+    setLastSavedAt(now);
+    setDirty(false);
+  }, []);
+
+  /** Working-copy save: writes form_data only, never mints a revision. */
+  const saveDraft = useCallback(
+    async (state: GeneratorState, hash: string, explicit: boolean) => {
+      if (busyRef.current) {
+        if (explicit) setNotice("Still saving — try again in a moment.");
+        return;
+      }
+      busyRef.current = true;
+      setSaving(true);
+      try {
+        const result = await saveProposalDraft(proposalIdRef.current, state);
+        if (!result.ok) {
+          setError(result.error ?? (explicit ? "Failed to save the draft." : "Autosave failed."));
+          return;
+        }
+        setError("");
+        markSaved(hash);
+        if (explicit) setNotice("Draft saved. Use “Save revision” to add a checkpoint to the history.");
+      } finally {
+        busyRef.current = false;
+        setSaving(false);
+      }
+    },
+    [markSaved],
+  );
+
+  /** Explicit checkpoint: mints an immutable revision, guarded by the optimistic lock. */
+  const saveRevision = useCallback(
+    (state: GeneratorState, hash: string) => {
+      if (busyRef.current) {
+        setNotice("Still saving — try again in a moment.");
+        return;
+      }
+      busyRef.current = true;
+      setError("");
+      setNotice("");
+      setSaving(true);
+      startTransition(async () => {
+        try {
+          const result = await saveProposalRevision(proposalIdRef.current, {
+            title: deriveTitleFromState(state, proposalTitleRef.current),
+            summary: deriveSummaryFromState(state),
+            changeNote: changeNoteRef.current,
+            formData: state,
+            // Rejects the save when someone else already advanced the proposal,
+            // instead of silently overwriting their revision.
+            baseRevision: baseRevisionRef.current,
+          });
+          if (!result.ok) {
+            setError(result.error ?? "Failed to save the revision.");
+            return;
+          }
+          const revisionNumber = result.revisionNumber ?? baseRevisionRef.current + 1;
+          baseRevisionRef.current = revisionNumber;
+          setBaseRevision(revisionNumber);
+          // Only cleared on success — a failed save used to wipe the note too.
+          setChangeNote("");
+          markSaved(hash);
+          setNotice(`Saved as revision v${revisionNumber}.`);
+          router.refresh();
+        } finally {
+          busyRef.current = false;
+          setSaving(false);
+        }
+      });
+    },
+    [markSaved, router],
+  );
+
+  /**
+   * Pushes the saved state into the iframe. Idempotent for a given iframe
+   * document, so answering a late `proposal:ready` after the onLoad push cannot
+   * clobber edits — and a dropped `proposal:ready` no longer leaves the user
+   * staring at the default pilot template over a real proposal.
+   */
+  const deliverInitialState = useCallback(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+    const initial = initialStateRef.current;
+    if (initial) postToGenerator({ type: "proposal:load", state: initial });
+    window.setTimeout(() => requestState("prime"), PRIME_DELAY_MS);
+  }, [postToGenerator, requestState]);
+
+  const onMessage = useCallback(
+    (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
-      const msg = event.data;
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      const msg = event.data as { type?: unknown; state?: unknown } | null;
       if (!msg || typeof msg !== "object") return;
 
       if (msg.type === "proposal:ready") {
-        const initial = isGeneratorState(proposal.form_data) ? proposal.form_data : buildPrefillState(assignedClient);
-        if (initial) postToGenerator({ type: "proposal:load", state: initial });
+        deliverInitialState();
         return;
       }
 
+      if (msg.type === "proposal:state") {
+        const purpose: CollectPurpose = pendingCollectsRef.current.shift() ?? "poll";
+        const state = isGeneratorState(msg.state) ? msg.state : null;
+        if (!state) {
+          if (purpose === "revision" || purpose === "draft") {
+            setError("The generator sent malformed data — nothing was saved.");
+          }
+          return;
+        }
+        const hash = JSON.stringify(state);
+
+        if (purpose === "revision") {
+          saveRevision(state, hash);
+          return;
+        }
+        if (purpose === "draft") {
+          void saveDraft(state, hash, true);
+          return;
+        }
+        if (purpose === "prime" || savedHashRef.current === null) {
+          savedHashRef.current = hash;
+          setDirty(false);
+          return;
+        }
+
+        const changed = hash !== savedHashRef.current;
+        setDirty(changed);
+        if (
+          changed &&
+          editableRef.current &&
+          !busyRef.current &&
+          Date.now() - savedAtRef.current >= AUTOSAVE_INTERVAL_MS
+        ) {
+          void saveDraft(state, hash, false);
+        }
+        return;
+      }
+
+      // The generator's own "Save Draft" button. It saves the working copy —
+      // minting a revision is an explicit action in the panel above the iframe.
       if (msg.type === "proposal:save") {
-        if (!editable) {
-          setError(`This proposal is ${proposalStatusLabels[proposal.status].toLowerCase()} and locked. Reopen it as a draft to save a new revision.`);
+        if (!editableRef.current) {
+          setError(lockReasonRef.current || "This proposal is locked.");
+          return;
+        }
+        if (busyRef.current) {
+          setNotice("Still saving — give it a moment.");
           return;
         }
         const state = isGeneratorState(msg.state) ? msg.state : null;
         if (!state) {
-          setError("The generator sent malformed data — revision not saved.");
+          setError("The generator sent malformed data — nothing was saved.");
           return;
         }
-        run(
-          () =>
-            saveProposalRevision(proposal.id, {
-              title: deriveTitleFromState(state, proposal.title),
-              summary: deriveSummaryFromState(state),
-              changeNote: changeNoteRef.current,
-              formData: state,
-            }),
-          `Saved as revision v${proposal.current_revision + 1}.`,
-        );
-        setChangeNote("");
+        void saveDraft(state, JSON.stringify(state), true);
       }
-    }
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [proposal.id, proposal.title, proposal.status, proposal.current_revision, proposal.form_data, assignedClient, editable, postToGenerator, run]);
+    },
+    [deliverInitialState, saveDraft, saveRevision],
+  );
 
-  function loadRevisionIntoEditor(rev: ProposalRevisionRow) {
-    if (!isGeneratorState(rev.form_data)) return;
-    if (!window.confirm(`Load revision v${rev.revision_number} into the editor? Unsaved edits in the editor will be replaced (nothing is saved until you click Save Draft).`)) return;
-    postToGenerator({ type: "proposal:load", state: rev.form_data });
-    setNotice(`Revision v${rev.revision_number} loaded into the editor — click Save Draft in the generator to keep it as a new revision.`);
+  // The listener is registered ONCE for the component's lifetime and reads the
+  // latest handler through a ref. Re-subscribing on prop identity changes is
+  // what let a router.refresh() land between the iframe's one-shot ready ping
+  // and the parent's listener.
+  const onMessageRef = useRef(onMessage);
+  onMessageRef.current = onMessage;
+  useEffect(() => {
+    const listener = (event: MessageEvent) => onMessageRef.current(event);
+    window.addEventListener("message", listener);
+    return () => window.removeEventListener("message", listener);
+  }, []);
+
+  const requestStateRef = useRef(requestState);
+  requestStateRef.current = requestState;
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (busyRef.current) return;
+      requestStateRef.current("poll");
+    }, POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!dirty) return;
+    function warn(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  const busy = isPending || saving;
+
+  let saveStateLabel: string;
+  if (saving) saveStateLabel = "Saving…";
+  else if (dirty) saveStateLabel = "Unsaved changes";
+  else if (lastSavedAt) saveStateLabel = `All changes saved · ${new Date(lastSavedAt).toLocaleTimeString()}`;
+  else saveStateLabel = "No changes yet";
+
+  return (
+    <div>
+      <ActionAlerts error={error} notice={notice} />
+
+      <div className="form-panel">
+        <div className="form-title-row" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <h2 style={{ margin: 0 }}>Editing — working copy of v{baseRevision}</h2>
+          <ProposalStatusBadge status={proposal.status} />
+          <span className={`badge ${dirty ? "badge-yellow" : "badge-green"}`}>{saveStateLabel}</span>
+        </div>
+        <p style={{ color: "var(--portal-muted)", marginTop: 8, fontSize: "0.9rem" }}>
+          {editGate.ok
+            ? "Edits are kept on the working copy and autosaved every 30 seconds. Add a note and save a revision when you want a checkpoint in the history."
+            : editGate.reason}
+        </p>
+
+        <div className="field" style={{ marginTop: 12 }}>
+          <label htmlFor="proposal-change-note">What changed? (saved with the next revision)</label>
+          <input
+            id="proposal-change-note"
+            value={changeNote}
+            onChange={(event) => setChangeNote(event.target.value)}
+            placeholder="e.g. Updated pricing after site walk"
+            // Deliberately NOT disabled during a background autosave — that
+            // would blank the field's focus while the seller is mid-sentence.
+            disabled={isPending}
+          />
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+          <button
+            className="button button-primary"
+            type="button"
+            disabled={busy || !editGate.ok}
+            onClick={() => {
+              if (busyRef.current) return;
+              setError("");
+              setNotice("");
+              requestState("revision");
+            }}
+          >
+            <Save size={16} /> {saving ? "Saving…" : "Save revision"}
+          </button>
+          {/* The embedded generator hides its own Save Draft button, so the
+              working-copy save lives here. It writes form_data only. */}
+          <button
+            className="button button-light"
+            type="button"
+            disabled={busy || !editGate.ok}
+            onClick={() => {
+              if (busyRef.current) return;
+              setError("");
+              setNotice("");
+              requestState("draft");
+            }}
+          >
+            <FileClock size={16} /> Save draft now
+          </button>
+          {/* beforeunload does not fire on an App Router client navigation, so
+              the in-app exit gets its own guard. */}
+          <Link
+            className="button button-light"
+            href={`/employee/proposals/${proposal.id}`}
+            onClick={(event) => {
+              if (dirty && !window.confirm("You have unsaved changes that have not autosaved yet. Leave the editor?")) {
+                event.preventDefault();
+              }
+            }}
+          >
+            <Eye size={16} /> View document
+          </Link>
+        </div>
+      </div>
+
+      <iframe
+        ref={iframeRef}
+        src="/employee/proposals/generator"
+        title="Proposal & Billing Generator"
+        // Belt-and-braces against a dropped `proposal:ready`: whichever of the
+        // two arrives first delivers the state, the other is a no-op.
+        onLoad={deliverInitialState}
+        style={{
+          width: "100%",
+          height: "78vh",
+          minHeight: 720,
+          marginTop: 16,
+          border: "1px solid var(--portal-line, #dbe2e9)",
+          borderRadius: 8,
+          background: "#fff",
+        }}
+      />
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Document-view sidebar                                                       */
+/* -------------------------------------------------------------------------- */
+
+export function ProposalControlPanel({
+  proposal,
+  clients,
+  isAdmin,
+}: {
+  proposal: WorkspaceProposal;
+  clients: ClientOption[];
+  isAdmin: boolean;
+}) {
+  const { router, isPending, error, notice, setError, setNotice, run } = useProposalAction();
+  const [working, setWorking] = useState(false);
+  const busy = isPending || working;
+
+  const metaGate = canEditProposalMeta(proposal.status);
+  const transitions = useMemo(() => availableTransitions(proposal.status), [proposal.status]);
+
+  async function handleDuplicate() {
+    setError("");
+    setNotice("");
+    setWorking(true);
+    const result = await duplicateProposal(proposal.id);
+    if (!result.ok || !result.proposalId) {
+      setError(result.error ?? "Failed to duplicate this proposal.");
+      setWorking(false);
+      return;
+    }
+    router.push(`/employee/proposals/${result.proposalId}`);
+    router.refresh();
+  }
+
+  async function handleDelete() {
+    if (!window.confirm("Delete this proposal and its entire revision history? This cannot be undone.")) return;
+    setError("");
+    setNotice("");
+    setWorking(true);
+    const result = await deleteProposal(proposal.id);
+    if (!result.ok) {
+      setError(result.error ?? "Failed to delete.");
+      setWorking(false);
+      return;
+    }
+    router.push("/employee/proposals");
+    router.refresh();
   }
 
   return (
-    <div className="document-grid">
-      <section>
-        {error ? <div className="error-box" style={{ marginBottom: 12 }}>{error}</div> : null}
-        {notice ? (
-          <div style={{ marginBottom: 12, color: "var(--portal-gold)", fontSize: "0.9rem" }}>{notice}</div>
-        ) : null}
+    <aside>
+      <ActionAlerts error={error} notice={notice} />
 
-        <div className="form-panel">
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <h2 style={{ margin: 0 }}>Proposal editor — revision v{proposal.current_revision}</h2>
-            <ProposalStatusBadge status={proposal.status} />
+      <div className="form-panel">
+        <h2>Workflow</h2>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+          {transitions.length === 0 ? (
+            <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem", margin: 0 }}>
+              No status changes are available from {proposalStatusLabels[proposal.status]}.
+            </p>
+          ) : (
+            transitions.map((to) => (
+              <button
+                key={to}
+                className="button button-light"
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  run(() => setProposalStatus(proposal.id, to), `Moved to ${proposalStatusLabels[to]}.`)
+                }
+              >
+                {transitionLabel(proposal.status, to)}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="form-panel" style={{ marginTop: 20 }}>
+        <h2>Assignment</h2>
+        {!metaGate.ok ? (
+          <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem", marginTop: 8 }}>{metaGate.reason}</p>
+        ) : null}
+        <div className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 12 }}>
+          <div className="field">
+            <label htmlFor="proposal-client">Company</label>
+            <select
+              id="proposal-client"
+              value={proposal.client_id ?? ""}
+              disabled={busy || !metaGate.ok}
+              onChange={(event) =>
+                run(
+                  () => updateProposalMeta(proposal.id, { clientId: event.target.value || null }),
+                  "Company assignment updated.",
+                )
+              }
+            >
+              <option value="">Unassigned</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
+                </option>
+              ))}
+            </select>
           </div>
-          <p style={{ color: "var(--portal-muted)", marginTop: 8, fontSize: "0.9rem" }}>
-            {editable
-              ? "Edit below, then click Save Draft inside the generator — each save is stored as a new revision on this proposal."
-              : `This proposal is ${proposalStatusLabels[proposal.status].toLowerCase()} and locked. Reopen it as a draft to save changes.`}
-          </p>
-          <div className="field" style={{ marginTop: 12 }}>
-            <label htmlFor="proposal-change-note">What changed? (saved with the next revision)</label>
+          <div className="field">
+            {/* Owner is internal routing, not part of the offer — editable on any status. */}
+            <label htmlFor="proposal-owner">Owner</label>
             <input
-              id="proposal-change-note"
-              value={changeNote}
-              onChange={(e) => setChangeNote(e.target.value)}
-              placeholder="e.g. Updated pricing after site walk"
-              disabled={isPending}
+              id="proposal-owner"
+              defaultValue={proposal.owner ?? ""}
+              disabled={busy}
+              onBlur={(event) => {
+                if ((event.target.value.trim() || null) !== (proposal.owner ?? null)) {
+                  run(() => updateProposalMeta(proposal.id, { owner: event.target.value }), "Owner updated.");
+                }
+              }}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="proposal-value">Value (USD)</label>
+            <input
+              id="proposal-value"
+              inputMode="decimal"
+              defaultValue={proposal.proposal_value != null ? String(proposal.proposal_value) : ""}
+              disabled={busy || !metaGate.ok}
+              onBlur={(event) => {
+                const raw = event.target.value.trim();
+                const parsed = raw ? Number(raw) : null;
+                if (raw && Number.isNaN(parsed)) {
+                  setError("Proposal value must be a number.");
+                  return;
+                }
+                if (parsed !== (proposal.proposal_value ?? null)) {
+                  run(() => updateProposalMeta(proposal.id, { proposalValue: parsed }), "Value updated.");
+                }
+              }}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="proposal-valid-until">Valid until</label>
+            <input
+              id="proposal-valid-until"
+              type="date"
+              defaultValue={proposal.valid_until ?? ""}
+              disabled={busy || !metaGate.ok}
+              onChange={(event) =>
+                run(
+                  () => updateProposalMeta(proposal.id, { validUntil: event.target.value || null }),
+                  "Expiry updated.",
+                )
+              }
             />
           </div>
         </div>
+      </div>
 
-        <iframe
-          ref={iframeRef}
-          src="/employee/proposals/generator"
-          title="Proposal & Billing Generator"
-          style={{
-            width: "100%",
-            height: "78vh",
-            minHeight: 720,
-            marginTop: 16,
-            border: "1px solid var(--portal-line, #dbe2e9)",
-            borderRadius: 8,
-            background: "#fff",
-          }}
-        />
+      <div className="form-panel" style={{ marginTop: 20 }}>
+        <h2>Reuse</h2>
+        <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem", marginTop: 8 }}>
+          Copies the current content into a brand-new draft. Use this instead of reopening a closed proposal.
+        </p>
+        <button className="button button-light" type="button" disabled={busy} onClick={handleDuplicate}>
+          <Copy size={16} /> Duplicate as new proposal
+        </button>
+      </div>
 
+      {isAdmin ? (
         <div className="form-panel" style={{ marginTop: 20 }}>
-          <h2>Revision history</h2>
-          {revisions.length === 0 ? (
-            <div className="empty-state">No revisions recorded yet.</div>
-          ) : (
-            <table className="data-table" style={{ marginTop: 12 }}>
-              <thead>
-                <tr>
-                  <th>Rev</th>
-                  <th>Title</th>
-                  <th>Change note</th>
-                  <th>Saved</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {revisions.map((rev) => (
-                  <tr key={rev.id}>
-                    <td>v{rev.revision_number}</td>
-                    <td>{rev.title}</td>
-                    <td>{rev.change_note ?? "—"}</td>
-                    <td>{new Date(rev.created_at).toLocaleString()}</td>
+          <h2>Danger zone</h2>
+          <button
+            className="button button-light"
+            type="button"
+            style={{ marginTop: 12, color: "#ef4444" }}
+            disabled={busy}
+            onClick={handleDelete}
+          >
+            <Trash2 size={16} /> Delete proposal
+          </button>
+        </div>
+      ) : null}
+    </aside>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Revision history                                                            */
+/* -------------------------------------------------------------------------- */
+
+export function ProposalRevisionHistory({
+  proposalId,
+  status,
+  currentRevision,
+  currentState,
+  revisions,
+}: {
+  proposalId: string;
+  status: ProposalStatus;
+  currentRevision: number;
+  /** The proposal's live generator state, for "compare with current". */
+  currentState: GeneratorState | null;
+  revisions: ProposalRevisionRow[];
+}) {
+  const { isPending, error, notice, run } = useProposalAction();
+  const [compareId, setCompareId] = useState<string | null>(null);
+
+  const editGate = canEditProposalContent(status);
+
+  // Derived from props rather than held as a row snapshot, so a router.refresh()
+  // can never leave a deleted or superseded revision on screen.
+  const compareRow = revisions.find((revision) => revision.id === compareId) ?? null;
+  const compareState = compareRow && isGeneratorState(compareRow.form_data) ? compareRow.form_data : null;
+  const diff = useMemo(
+    () => (compareState && currentState ? diffGeneratorState(compareState, currentState) : null),
+    [compareState, currentState],
+  );
+
+  return (
+    <div className="form-panel">
+      <h2>Revision history</h2>
+      <ActionAlerts error={error} notice={notice} />
+
+      {revisions.length === 0 ? (
+        <div className="empty-state">No revisions recorded yet.</div>
+      ) : (
+        <div className="data-table-wrapper">
+          <table className="data-table" style={{ marginTop: 12 }}>
+            <thead>
+              <tr>
+                <th>Rev</th>
+                <th>Title</th>
+                <th>Change note</th>
+                <th>Saved</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {revisions.map((revision) => {
+                const isCurrent = revision.revision_number === currentRevision;
+                const comparable = isGeneratorState(revision.form_data) && currentState !== null && !isCurrent;
+                return (
+                  <tr key={revision.id}>
+                    <td>v{revision.revision_number}</td>
+                    <td>{revision.title}</td>
+                    <td>{revision.change_note ?? "—"}</td>
+                    <td>{new Date(revision.created_at).toLocaleString()}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
-                      {isGeneratorState(rev.form_data) ? (
-                        <button className="button button-light" onClick={() => loadRevisionIntoEditor(rev)}>
-                          <Upload size={14} /> Open in editor
-                        </button>
-                      ) : (
+                      <Link
+                        className="button button-light"
+                        href={`/employee/proposals/${proposalId}/revisions/${revision.id}`}
+                      >
+                        <Eye size={14} /> View
+                      </Link>{" "}
+                      {comparable ? (
                         <button
                           className="button button-light"
-                          onClick={() => setViewingRevision(viewingRevision?.id === rev.id ? null : rev)}
+                          type="button"
+                          onClick={() => setCompareId(compareId === revision.id ? null : revision.id)}
                         >
-                          {viewingRevision?.id === rev.id ? "Hide" : "View"}
+                          <GitCompare size={14} /> {compareId === revision.id ? "Hide diff" : "Compare with current"}
                         </button>
-                      )}{" "}
-                      {rev.revision_number !== proposal.current_revision ? (
+                      ) : null}{" "}
+                      {!isCurrent ? (
                         <button
                           className="button button-light"
-                          disabled={!editable || isPending}
-                          title={editable ? "Copy this revision forward as the newest revision" : "Reopen as draft to restore"}
-                          onClick={() =>
+                          type="button"
+                          disabled={!editGate.ok || isPending}
+                          title={editGate.ok ? "Copy this revision forward as the newest revision" : editGate.reason}
+                          onClick={() => {
+                            if (
+                              !window.confirm(
+                                `Restore v${revision.revision_number}?\n\nIts content is copied forward as a NEW revision (v${currentRevision + 1}). Nothing in the history is deleted, but the current working copy is replaced.`,
+                              )
+                            ) {
+                              return;
+                            }
                             run(
-                              () => restoreProposalRevision(proposal.id, rev.id),
-                              `Restored v${rev.revision_number} as a new revision.`,
-                            )
-                          }
+                              () => restoreProposalRevision(proposalId, revision.id),
+                              `Restored v${revision.revision_number} as a new revision.`,
+                            );
+                          }}
                         >
                           <RotateCcw size={14} /> Restore
                         </button>
                       ) : null}
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {compareRow ? (
+        <div className="form-panel" style={{ marginTop: 16 }}>
+          <h3 style={{ marginTop: 0 }}>
+            v{compareRow.revision_number} compared with the current document
+          </h3>
+          {diff ? (
+            <ProposalRevisionDiff
+              diff={diff}
+              beforeLabel={`v${compareRow.revision_number}`}
+              afterLabel={`v${currentRevision} (current)`}
+            />
+          ) : (
+            <div className="empty-state">
+              {compareState
+                ? "This proposal has no saved generator content yet, so there is nothing to compare against."
+                : `Revision v${compareRow.revision_number} stored no generator data, so it cannot be compared.`}
+            </div>
           )}
-
-          {viewingRevision ? (
-            <div className="form-panel" style={{ marginTop: 12 }}>
-              <h3 style={{ marginTop: 0 }}>
-                v{viewingRevision.revision_number} — {viewingRevision.title}
-              </h3>
-              {viewingRevision.summary ? (
-                <p style={{ color: "var(--portal-muted)" }}>{viewingRevision.summary}</p>
-              ) : null}
-              <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", margin: 0 }}>
-                {viewingRevision.body_markdown ?? "(empty)"}
-              </pre>
-            </div>
-          ) : null}
         </div>
-      </section>
-
-      <aside>
-        <div className="form-panel">
-          <h2>Workflow</h2>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-            {statusActions[proposal.status].map((action) => (
-              <button
-                key={action.to}
-                className="button button-light"
-                disabled={isPending}
-                onClick={() =>
-                  run(() => setProposalStatus(proposal.id, action.to), `Moved to ${proposalStatusLabels[action.to]}.`)
-                }
-              >
-                {action.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="form-panel" style={{ marginTop: 20 }}>
-          <h2>Assignment</h2>
-          <div className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 12 }}>
-            <div className="field">
-              <label htmlFor="proposal-client">Company</label>
-              <select
-                id="proposal-client"
-                value={proposal.client_id ?? ""}
-                disabled={isPending}
-                onChange={(e) =>
-                  run(
-                    () => updateProposalMeta(proposal.id, { clientId: e.target.value || null }),
-                    "Company assignment updated.",
-                  )
-                }
-              >
-                <option value="">Unassigned</option>
-                {clients.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="proposal-owner">Owner</label>
-              <input
-                id="proposal-owner"
-                defaultValue={proposal.owner ?? ""}
-                disabled={isPending}
-                onBlur={(e) => {
-                  if ((e.target.value.trim() || null) !== (proposal.owner ?? null)) {
-                    run(() => updateProposalMeta(proposal.id, { owner: e.target.value }), "Owner updated.");
-                  }
-                }}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="proposal-value">Value (USD)</label>
-              <input
-                id="proposal-value"
-                inputMode="decimal"
-                defaultValue={proposal.proposal_value != null ? String(proposal.proposal_value) : ""}
-                disabled={isPending}
-                onBlur={(e) => {
-                  const raw = e.target.value.trim();
-                  const parsed = raw ? Number(raw) : null;
-                  if (raw && Number.isNaN(parsed)) {
-                    setError("Proposal value must be a number.");
-                    return;
-                  }
-                  if (parsed !== (proposal.proposal_value ?? null)) {
-                    run(() => updateProposalMeta(proposal.id, { proposalValue: parsed }), "Value updated.");
-                  }
-                }}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="proposal-valid-until">Valid until</label>
-              <input
-                id="proposal-valid-until"
-                type="date"
-                defaultValue={proposal.valid_until ?? ""}
-                disabled={isPending}
-                onChange={(e) =>
-                  run(() => updateProposalMeta(proposal.id, { validUntil: e.target.value || null }), "Expiry updated.")
-                }
-              />
-            </div>
-          </div>
-        </div>
-
-        {isAdmin ? (
-          <div className="form-panel" style={{ marginTop: 20 }}>
-            <h2>Danger zone</h2>
-            <button
-              className="button button-light"
-              style={{ marginTop: 12, color: "#ef4444" }}
-              disabled={isPending}
-              onClick={() => {
-                if (!window.confirm("Delete this proposal and its entire revision history? This cannot be undone.")) return;
-                setError("");
-                startTransition(async () => {
-                  const result = await deleteProposal(proposal.id);
-                  if (!result.ok) {
-                    setError(result.error ?? "Failed to delete.");
-                    return;
-                  }
-                  router.push("/employee/proposals");
-                  router.refresh();
-                });
-              }}
-            >
-              <Trash2 size={16} /> Delete proposal
-            </button>
-          </div>
-        ) : null}
-      </aside>
+      ) : null}
     </div>
   );
 }

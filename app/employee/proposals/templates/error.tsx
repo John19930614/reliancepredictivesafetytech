@@ -2,11 +2,10 @@
 
 /**
  * A thrown error's `message` can carry query text, ids, or a raw Postgres
- * constraint string — none of which help the seller and some of which should
- * not be on screen. The user gets a plain explanation; the digest is what
+ * constraint string. The user gets a plain explanation; the digest is what
  * support needs to find the matching server log entry.
  */
-export default function ProposalsError({
+export default function ProposalTemplatesError({
   error,
   reset,
 }: {
@@ -15,7 +14,7 @@ export default function ProposalsError({
 }) {
   return (
     <div style={{ padding: "40px 24px", textAlign: "center" }}>
-      <h2 style={{ marginBottom: 12 }}>Failed to load Proposals</h2>
+      <h2 style={{ marginBottom: 12 }}>Failed to load Proposal Templates</h2>
       <p style={{ color: "var(--portal-muted)", marginBottom: 20 }}>
         Something went wrong while loading this page. Try again — if it keeps happening, send the reference below to
         support.
