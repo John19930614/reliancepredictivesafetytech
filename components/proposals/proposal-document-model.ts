@@ -14,7 +14,13 @@
 // Every number comes from computeProposalTotals(). Nothing here recomputes
 // pricing, and nothing trusts a persisted numeric value directly.
 
-import { lookupPackage, lookupService, packageData, defaultPackageKey } from "@/lib/proposals/catalog";
+import {
+  lookupPackage,
+  lookupService,
+  packageData,
+  defaultPackageKey,
+  stripPhaseOrdinal,
+} from "@/lib/proposals/catalog";
 import type { GeneratorState } from "@/lib/proposals/generator-state";
 import {
   computeProposalTotals,
@@ -22,6 +28,7 @@ import {
   type ProposalLineItem,
   type ProposalTotals,
 } from "@/lib/proposals/pricing";
+import { parseProposalTerm, type ProposalTerm } from "@/lib/proposals/term";
 import { proposalStatusLabels, type ProposalStatus } from "@/lib/proposals/types";
 
 /* -------------------------------------------------------------------------- */
@@ -145,7 +152,8 @@ export const documentTermDefaults = Object.freeze({
 /** Static document copy transcribed verbatim from the asset's markup. */
 export const documentCopy = Object.freeze({
   subtitle: "Safety Intelligence, Compliance Support, and Predictive Risk Platform Services",
-  docline: "6-Month Pilot & Platform Access Proposal",
+  /** Used only when the term dates are missing; otherwise the docline is derived. */
+  doclineFallback: "Pilot & Platform Access Proposal",
   purposeCallout:
     "This document establishes the proposed scope, pricing, payment structure, deliverables, assumptions, and commercial terms for platform billing and related safety technology support.",
   scopeIntro:
@@ -170,10 +178,20 @@ export const documentCopy = Object.freeze({
     "Review draft outputs in a timely manner and consolidate feedback when possible.",
     "Maintain responsibility for final operational decisions, employee discipline, regulatory filings, and site execution.",
   ]),
+  /**
+   * Deliverables that apply to every engagement.
+   *
+   * The per-phase and per-service deliverables that used to be appended here —
+   * one "<line name> deliverable package" bullet for every row — were a
+   * restatement of section 03, which already prints each line's name AND its
+   * full scope paragraph. On a proposal with a dozen lines that redundancy cost
+   * most of a page and told the client nothing new. Section 04 now names the
+   * covered lines in a single sentence instead; see buildProposalDocumentModel.
+   */
   baseDeliverables: Object.freeze([
     "Configured platform subscription and client account setup",
-    "Billing package selection and proposal fee schedule",
-    "User/jobsite structure based on selected package",
+    "Billing package selection and proposal pricing schedule",
+    "User and jobsite structure based on the selected package",
     "Management-ready scope, assumptions, and acceptance documentation",
   ]),
 });
@@ -214,6 +232,32 @@ export interface DocumentFeeRow extends ProposalLineItem {
   amountLabel: string;
 }
 
+/** One person whose bio appears in the document's team section. */
+export interface DocumentTeamMember {
+  id: string;
+  name: string;
+  /** Job title / role line under the name. "" when the profile has none. */
+  title: string;
+  /** Bio paragraphs, already split and de-blanked. */
+  paragraphs: string[];
+}
+
+/**
+ * A stored seller signature, resolved by the page from the signing employee's
+ * profile. `dataUrl` is a `data:image/...;base64,...` string so the document
+ * renders identically in the browser, in print, and in the generated PDF
+ * without a second authenticated fetch — the share route in particular is
+ * unauthenticated and could not re-fetch a private storage object.
+ */
+export interface DocumentSignature {
+  dataUrl: string;
+  /** Name printed under the signature line. */
+  name: string;
+  title: string;
+  /** ISO date the signature was applied to this proposal, or null. */
+  signedOn: string | null;
+}
+
 export interface DocumentFeeGroup {
   label: string;
   rows: DocumentFeeRow[];
@@ -245,20 +289,40 @@ export interface ProposalDocumentModel {
   proposalDate: string;
   proposalNumber: string;
   validity: string;
+  /** Parsed engagement term; every duration the document prints comes from here. */
+  term: ProposalTerm;
+  /** "March 2026 – August 2026 (6 months)", or null when no term was chosen. */
+  termLabel: string | null;
   summary: string;
   packageIntro: string;
   packagePills: DocumentPill[];
   phaseScope: DocumentScopeEntry[];
   serviceScope: DocumentScopeEntry[];
   deliverables: string[];
+  /** One sentence naming the phase/service lines section 04 also covers; "" when none. */
+  deliverablesCoverage: string;
   feeGroups: DocumentFeeGroup[];
   totalRows: DocumentTotalRow[];
   totals: ProposalTotals;
   schedule: string;
   exclusions: string;
   terms: DocumentTerm[];
+  team: DocumentTeamMember[];
   sellerSignature: string;
+  signature: DocumentSignature | null;
   legalNotice: string;
+  /**
+   * Static copy, carried ON the model rather than imported from documentCopy by
+   * each renderer. There are now three renderers — the React document, the print
+   * stylesheet's view of it, and the PDF — and a renderer that reaches past the
+   * model for its wording is exactly how the generator's preview drifted away
+   * from the platform's document.
+   */
+  purposeCallout: string;
+  scopeIntro: string;
+  scheduleSteps: readonly string[];
+  clientResponsibilities: readonly string[];
+  acceptance: string;
   /** "Revision 3" when a historical revision is being rendered, else null. */
   revisionLabel: string | null;
   /** True only when the rendered revision is NOT the proposal's current one. */
@@ -271,6 +335,14 @@ export interface ProposalDocumentModelInput {
   totals?: ProposalTotals;
   proposal: ProposalDocumentSubject;
   revisionNumber?: number;
+  /**
+   * Bios for the people the seller checked, already resolved from the database
+   * and ordered by the page. The model does no I/O; it only decides how they
+   * render. Omitted or empty means the team section is skipped entirely.
+   */
+  team?: DocumentTeamMember[];
+  /** Resolved seller signature image, or null to print an empty signature line. */
+  signature?: DocumentSignature | null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -283,14 +355,29 @@ const feeGroupLabels: Record<ProposalLineItem["source"], string> = {
   service: "Service Lines & Add-Ons",
 };
 
+/**
+ * Money as it appears in the pricing table, with zero rendered as "No cost".
+ *
+ * A line we are providing at no charge printed as "$0" reads like a pricing
+ * mistake — or worse, like a placeholder the client should expect a number in
+ * later. Saying so in words makes the concession explicit and deliberate, which
+ * is the point of putting the line on the proposal at all.
+ *
+ * Only exact zero qualifies. A negative amount is a real (if unusual) figure —
+ * a credit — and is printed as currency so it cannot be mistaken for free.
+ */
+export function formatLineAmount(value: number): string {
+  return value === 0 ? "No cost" : formatMoney(value);
+}
+
 function toFeeRow(row: ProposalLineItem): DocumentFeeRow {
   const unit = row.source === "service" ? (lookupService(row.key)?.unit ?? "") : "";
   return {
     ...row,
     unit,
     qtyLabel: unit ? `${row.qty} ${unit}` : String(row.qty),
-    priceLabel: formatMoney(row.price),
-    amountLabel: formatMoney(row.amount),
+    priceLabel: formatLineAmount(row.price),
+    amountLabel: formatLineAmount(row.amount),
   };
 }
 
@@ -304,15 +391,69 @@ function groupFeeRows(lineItems: ProposalLineItem[]): DocumentFeeGroup[] {
     .filter((group) => group.rows.length > 0);
 }
 
-/** A line item's display name, never blank — an unnamed row still needs a label. */
-function displayName(row: ProposalLineItem, index: number): string {
+/**
+ * A line item's display name, never blank — an unnamed row still needs a label.
+ *
+ * Phase names are run through stripPhaseOrdinal() because the document numbers
+ * phases by position. Without it, a phase carrying the old catalog name printed
+ * as "1. Phase 1 — Discovery & Intake", and a proposal that skipped a phase
+ * printed a heading whose two numbers disagreed.
+ */
+export function displayName(row: ProposalLineItem, index: number): string {
   const name = row.name.trim();
-  if (name) return name;
+  if (name) return row.source === "phase" ? stripPhaseOrdinal(name) : name;
   return row.source === "phase" ? `Untitled phase ${index + 1}` : `Untitled service line ${index + 1}`;
 }
 
 function buildParty(name: string, lines: string[]): DocumentPartyBlock {
   return { name: name.trim() === "" ? missingValue : name.trim(), lines };
+}
+
+function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : pluralForm}`;
+}
+
+/**
+ * The paragraph that opens section 02.
+ *
+ * Every number in it is an argument. The catalog description it wraps is
+ * deliberately free of counts and durations (see the COPY RULE on packageData),
+ * because a frozen sentence saying "up to 50 users across 2 jobsites" kept
+ * printing the catalog's numbers no matter what the seller entered — the report
+ * that the head count "is still there and I can't change it".
+ */
+export function buildPackageDescription(input: {
+  packageName: string;
+  packageDesc: string;
+  users: number;
+  sites: number;
+  term: ProposalTerm;
+}): string {
+  const termClause = input.term.rangeLabel ? ` for the term ${input.term.rangeLabel}` : "";
+  const durationClause = input.term.durationLabel ? ` for the full ${input.term.durationLabel} term` : "";
+  return (
+    `${input.packageName} is the proposed base subscription${termClause}. ${input.packageDesc} ` +
+    `Included limits are ${plural(input.users, "user")} across ` +
+    `${plural(input.sites, "jobsite")}${durationClause}.`
+  );
+}
+
+/**
+ * The line under the wordmark. Derived so a 3-month or 12-month engagement stops
+ * being announced as a "6-Month Pilot".
+ */
+export function buildDocline(packageName: string, isPilot: boolean, term: ProposalTerm): string {
+  const monthPrefix = term.months === null ? "" : `${term.months}-Month `;
+  if (isPilot) return monthPrefix ? `${monthPrefix}Pilot & Platform Access Proposal` : documentCopy.doclineFallback;
+  return monthPrefix ? `${packageName} — ${monthPrefix}Term` : `${packageName} Proposal`;
+}
+
+/** Splits a stored bio into paragraphs on blank lines, dropping empties. */
+export function splitBioParagraphs(bio: string): string[] {
+  return bio
+    .split(/\r?\n\s*\r?\n/)
+    .map((paragraph) => paragraph.replace(/\s*\r?\n\s*/g, " ").trim())
+    .filter((paragraph) => paragraph !== "");
 }
 
 /**
@@ -329,8 +470,11 @@ export function buildProposalDocumentModel({
   totals: providedTotals,
   proposal,
   revisionNumber,
+  team = [],
+  signature = null,
 }: ProposalDocumentModelInput): ProposalDocumentModel {
   const totals = providedTotals ?? computeProposalTotals(state);
+  const term = parseProposalTerm(state?.fields);
 
   const sellerName = fieldText(state, "sellerName", documentTermDefaults.sellerName);
   const preparedBy = fieldText(state, "preparedBy");
@@ -384,20 +528,27 @@ export function buildProposalDocumentModel({
     body: row.desc.trim(),
   }));
 
-  const deliverables = [
-    ...documentCopy.baseDeliverables,
-    ...phaseRows.map((row, index) => `${displayName(row, index)} deliverable package`),
-    ...serviceRows.map((row, index) => `${displayName(row, index)} deliverable package`),
+  // Section 04 lists what every engagement includes, then names the selected
+  // lines in ONE sentence. It used to append a "<name> deliverable package"
+  // bullet per line, restating section 03 in full.
+  const selectedLineNames = [
+    ...phaseRows.map((row, index) => displayName(row, index)),
+    ...serviceRows.map((row, index) => displayName(row, index)),
   ];
+  const deliverablesCoverage =
+    selectedLineNames.length > 0
+      ? `A deliverable package is produced for each selected line: ${selectedLineNames.join(", ")}. ` +
+        "Section 03 states the scope of each."
+      : "";
 
-  /* --- Fee schedule ----------------------------------------------------- */
+  /* --- Pricing schedule -------------------------------------------------- */
 
   const totalRows: DocumentTotalRow[] = [
-    { label: "Subtotal", value: formatMoney(totals.subtotal) },
-    { label: "Discount", value: `-${formatMoney(totals.discount)}` },
+    { label: "Subtotal", value: formatLineAmount(totals.subtotal) },
+    { label: "Discount", value: totals.discount === 0 ? formatMoney(0) : `-${formatMoney(totals.discount)}` },
     { label: "Tax", value: formatMoney(totals.tax) },
-    { label: "Total Proposed Fee", value: formatMoney(totals.total), emphasis: "total" },
-    { label: "Deposit Due at Acceptance", value: formatMoney(totals.deposit), emphasis: "deposit" },
+    { label: "Total", value: formatLineAmount(totals.total), emphasis: "total" },
+    { label: "Deposit Due at Acceptance", value: formatLineAmount(totals.deposit), emphasis: "deposit" },
   ];
 
   /* --- Validity --------------------------------------------------------- */
@@ -412,10 +563,19 @@ export function buildProposalDocumentModel({
   const hasRevision = typeof revisionNumber === "number" && Number.isFinite(revisionNumber);
   const currentRevision = Number.isFinite(proposal.currentRevision) ? proposal.currentRevision : 1;
 
+  // The pilot package is the only one whose document copy talks about a "pilot";
+  // an Enterprise or Black Label proposal headlined "Pilot Program Proposal" was
+  // simply wrong.
+  const isPilotPackage = (packageRow?.key ?? defaultPackageKey) === "custom";
+
+  const scheduleTermClause = term.rangeLabel
+    ? ` The engagement term runs ${term.rangeLabel}.`
+    : "";
+
   return {
-    headline: clientCompany ? `Pilot Program Proposal for ${clientCompany}` : proposal.title,
+    headline: clientCompany ? `Proposal for ${clientCompany}` : proposal.title,
     subtitle: documentCopy.subtitle,
-    docline: documentCopy.docline,
+    docline: buildDocline(packageOption.name, isPilotPackage, term),
     wordmark: sellerName,
     statusLabel: proposalStatusLabels[proposal.status] ?? String(proposal.status),
     preparedFor: buildParty(clientCompany, clientLines),
@@ -423,30 +583,51 @@ export function buildProposalDocumentModel({
     proposalDate: formatDocumentDate(fieldText(state, "proposalDate")),
     proposalNumber: fieldText(state, "proposalNo", missingValue),
     validity,
+    term,
+    termLabel: term.rangeLabel
+      ? term.months === null
+        ? term.rangeLabel
+        : `${term.rangeLabel} (${plural(term.months, "month")})`
+      : null,
     summary: fieldText(state, "customSummary", documentCopy.noSummary),
-    packageIntro: `${packageOption.name} is the proposed base subscription. ${packageOption.desc} Included limits are shown below.`,
+    packageIntro: buildPackageDescription({
+      packageName: packageOption.name,
+      packageDesc: packageOption.desc,
+      users: includedUsers,
+      sites: includedSites,
+      term,
+    }),
     packagePills: [
-      { label: "Pilot Fee", value: formatMoney(packageRow?.price ?? 0) },
+      { label: isPilotPackage ? "Pilot Price" : "Subscription Price", value: formatLineAmount(packageRow?.price ?? 0) },
+      { label: "Term", value: term.rangeLabel ?? missingValue },
       { label: "Included Users", value: String(includedUsers) },
       { label: "Included Jobsites", value: String(includedSites) },
       { label: "Billing", value: billingTerm },
     ],
     phaseScope,
     serviceScope,
-    deliverables,
+    deliverables: [...documentCopy.baseDeliverables],
+    deliverablesCoverage,
     feeGroups: groupFeeRows(totals.lineItems),
     totalRows,
     totals,
     schedule:
       "The schedule is coordinated after acceptance. Unless otherwise agreed, implementation follows the order shown " +
-      `in the scope. Billing follows the selected term (${billingTerm}), with ${paymentTerms}.`,
+      `in the scope.${scheduleTermClause} Billing follows the selected term (${billingTerm}), with ${paymentTerms}.`,
     exclusions: fieldText(state, "customExclusions", documentCopy.noExclusions),
     terms: buildDocumentTerms({ paymentTerms, lateFee, aiData, ipRights, liabilityCap, governingLaw, validDays }),
+    team,
     sellerSignature: preparedBy ? `${preparedBy} / Authorized Representative` : "Authorized Representative",
+    signature,
     legalNotice:
       `LEGAL NOTICE: This proposal is produced by ${sellerName}. It is not legal advice. Terms referencing CCPA, ` +
       "Wisconsin trade secret law, OSHA, E-SIGN, and other statutes are for commercial purposes. All proposals must " +
       "be reviewed by qualified legal counsel in the governing jurisdiction before execution.",
+    purposeCallout: documentCopy.purposeCallout,
+    scopeIntro: documentCopy.scopeIntro,
+    scheduleSteps: documentCopy.scheduleSteps,
+    clientResponsibilities: documentCopy.clientResponsibilities,
+    acceptance: documentCopy.acceptance,
     revisionLabel: hasRevision ? `Revision ${revisionNumber}` : null,
     isHistoricalRevision: hasRevision && revisionNumber !== currentRevision,
     currentRevisionLabel: `Revision ${currentRevision}`,

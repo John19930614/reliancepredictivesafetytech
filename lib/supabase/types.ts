@@ -613,13 +613,116 @@ export type Database = {
           },
         ]
       }
+      client_proposal_share_links: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          expires_at: string
+          first_viewed_at: string | null
+          id: string
+          last_viewed_at: string | null
+          proposal_id: string
+          revision_id: string
+          revoked_at: string | null
+          revoked_by: string | null
+          token_hash: string
+          updated_at: string
+          view_count: number
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          expires_at: string
+          first_viewed_at?: string | null
+          id?: string
+          last_viewed_at?: string | null
+          proposal_id: string
+          revision_id: string
+          revoked_at?: string | null
+          revoked_by?: string | null
+          token_hash: string
+          updated_at?: string
+          view_count?: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string
+          first_viewed_at?: string | null
+          id?: string
+          last_viewed_at?: string | null
+          proposal_id?: string
+          revision_id?: string
+          revoked_at?: string | null
+          revoked_by?: string | null
+          token_hash?: string
+          updated_at?: string
+          view_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_proposal_share_links_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "client_proposals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_proposal_share_links_revision_id_fkey"
+            columns: ["revision_id"]
+            isOneToOne: false
+            referencedRelation: "client_proposal_revisions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      client_proposal_templates: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          description: string | null
+          form_data: Json
+          id: string
+          is_archived: boolean
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          form_data: Json
+          id?: string
+          is_archived?: boolean
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          form_data?: Json
+          id?: string
+          is_archived?: boolean
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       client_proposals: {
         Row: {
+          acceptance_ip: string | null
+          accepted_at: string | null
+          accepted_by_email: string | null
+          accepted_by_name: string | null
+          accepted_revision_id: string | null
           body_markdown: string | null
           client_id: string | null
           created_at: string | null
           created_by: string | null
           current_revision: number
+          decline_reason: string | null
+          declined_at: string | null
           form_data: Json | null
           id: string
           owner: string | null
@@ -631,11 +734,18 @@ export type Database = {
           valid_until: string | null
         }
         Insert: {
+          acceptance_ip?: string | null
+          accepted_at?: string | null
+          accepted_by_email?: string | null
+          accepted_by_name?: string | null
+          accepted_revision_id?: string | null
           body_markdown?: string | null
           client_id?: string | null
           created_at?: string | null
           created_by?: string | null
           current_revision?: number
+          decline_reason?: string | null
+          declined_at?: string | null
           form_data?: Json | null
           id?: string
           owner?: string | null
@@ -647,11 +757,18 @@ export type Database = {
           valid_until?: string | null
         }
         Update: {
+          acceptance_ip?: string | null
+          accepted_at?: string | null
+          accepted_by_email?: string | null
+          accepted_by_name?: string | null
+          accepted_revision_id?: string | null
           body_markdown?: string | null
           client_id?: string | null
           created_at?: string | null
           created_by?: string | null
           current_revision?: number
+          decline_reason?: string | null
+          declined_at?: string | null
           form_data?: Json | null
           id?: string
           owner?: string | null
@@ -663,6 +780,13 @@ export type Database = {
           valid_until?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "client_proposals_accepted_revision_id_fkey"
+            columns: ["accepted_revision_id"]
+            isOneToOne: false
+            referencedRelation: "client_proposal_revisions"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "client_proposals_client_id_fkey"
             columns: ["client_id"]
@@ -6112,6 +6236,45 @@ export type Database = {
           granted_by?: string | null
           module_key?: string
           updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      proposal_team_bios: {
+        Row: {
+          bio: string
+          created_at: string
+          display_name: string
+          is_publishable: boolean
+          signature_bucket: string | null
+          signature_path: string | null
+          signature_updated_at: string | null
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          bio?: string
+          created_at?: string
+          display_name?: string
+          is_publishable?: boolean
+          signature_bucket?: string | null
+          signature_path?: string | null
+          signature_updated_at?: string | null
+          title?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          bio?: string
+          created_at?: string
+          display_name?: string
+          is_publishable?: boolean
+          signature_bucket?: string | null
+          signature_path?: string | null
+          signature_updated_at?: string | null
+          title?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []

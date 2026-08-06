@@ -39,6 +39,16 @@ import {
 } from "@/lib/proposals/policy";
 import { diffGeneratorState } from "@/lib/proposals/diff";
 import {
+  maxTeamMembers,
+  parseSignerId,
+  parseTeamMemberIds,
+  serializeTeamMemberIds,
+  teamFieldIds,
+  toggleTeamMember,
+  type TeamRosterEntry,
+} from "@/lib/proposals/team-selection";
+import { ProposalDocument } from "./ProposalDocument";
+import {
   proposalStatusLabels,
   proposalStatuses,
   type ProposalRevisionRow,
@@ -188,9 +198,12 @@ type CollectPurpose = "prime" | "poll" | "draft" | "revision";
 export function ProposalWorkspace({
   proposal,
   assignedClient,
+  roster = [],
 }: {
   proposal: WorkspaceProposal;
   assignedClient: WorkspaceClientDetail | null;
+  /** Colleagues who have published a bio, for the team checkboxes. */
+  roster?: TeamRosterEntry[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -203,6 +216,17 @@ export function ProposalWorkspace({
   const [baseRevision, setBaseRevision] = useState(proposal.current_revision);
 
   const editGate = canEditProposalContent(proposal.status);
+
+  /**
+   * The generator's live state, pushed by the bridge on every edit.
+   *
+   * This is what the preview renders. It is NOT the dirty-check baseline and
+   * never triggers a save — it arrives on its own `proposal:preview` channel so
+   * it cannot consume a pending collect reply.
+   */
+  const [previewState, setPreviewState] = useState<GeneratorState | null>(() =>
+    isGeneratorState(proposal.form_data) ? proposal.form_data : null,
+  );
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   /** True once the saved state has been pushed into the current iframe document. */
@@ -356,6 +380,13 @@ export function ProposalWorkspace({
 
       if (msg.type === "proposal:ready") {
         deliverInitialState();
+        return;
+      }
+
+      // Preview only. Deliberately does not touch the dirty flag, the autosave
+      // timer, or the collect queue — this fires on every keystroke.
+      if (msg.type === "proposal:preview") {
+        if (isGeneratorState(msg.state)) setPreviewState(msg.state);
         return;
       }
 
@@ -533,23 +564,205 @@ export function ProposalWorkspace({
         </div>
       </div>
 
-      <iframe
-        ref={iframeRef}
-        src="/employee/proposals/generator"
-        title="Proposal & Billing Generator"
-        // Belt-and-braces against a dropped `proposal:ready`: whichever of the
-        // two arrives first delivers the state, the other is a no-op.
-        onLoad={deliverInitialState}
-        style={{
-          width: "100%",
-          height: "78vh",
-          minHeight: 720,
-          marginTop: 16,
-          border: "1px solid var(--portal-line, #dbe2e9)",
-          borderRadius: 8,
-          background: "#fff",
-        }}
-      />
+      {/*
+        Controls left, the REAL document right.
+
+        The generator asset carries its own preview renderer, and for as long as
+        both were live they disagreed — the asset numbered phases one way and
+        the platform another, priced a package from a frozen sentence, and put
+        the executive summary in a different place. The embedded asset now hides
+        its preview (body.embedded .proposal) and the platform renders
+        <ProposalDocument> from the same view-model used for print, share links
+        and the PDF. One renderer, so left and right cannot drift again.
+      */}
+      <div className="proposal-editor-grid">
+        <div>
+          <iframe
+            ref={iframeRef}
+            src="/employee/proposals/generator"
+            title="Proposal controls"
+            // Belt-and-braces against a dropped `proposal:ready`: whichever of
+            // the two arrives first delivers the state, the other is a no-op.
+            onLoad={deliverInitialState}
+            style={{
+              width: "100%",
+              height: "78vh",
+              minHeight: 720,
+              border: "1px solid var(--portal-line, #dbe2e9)",
+              borderRadius: 8,
+              background: "#fff",
+            }}
+          />
+
+          <ProposalTeamPicker
+            roster={roster}
+            state={previewState}
+            disabled={!editGate.ok}
+            onChange={(fields) => postToGenerator({ type: "proposal:load", state: { v: 1, fields } })}
+          />
+        </div>
+
+        <div className="proposal-editor-preview">
+          <div className="rp-doc-noprint" style={{ marginBottom: 8 }}>
+            <span className="badge">Live preview — exactly what the client sees</span>
+          </div>
+          {previewState ? (
+            <ProposalDocument
+              state={previewState}
+              proposal={{
+                id: proposal.id,
+                title: proposal.title,
+                status: proposal.status,
+                currentRevision: baseRevision,
+                validUntil: proposal.valid_until,
+              }}
+            />
+          ) : (
+            <div className="empty-state">Waiting for the generator to load…</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Team & signature picker                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Chooses whose bios print on this proposal and whose signature signs it.
+ *
+ * Lives in the parent rather than in the generator iframe because the roster is
+ * database-backed and the iframe is a static asset with no Supabase access. The
+ * selection is written back through the SAME `proposal:load` bridge message the
+ * initial hydration uses, so it lands in `state.fields` and is saved, versioned
+ * and diffed exactly like any other generator field — no second storage path.
+ */
+function ProposalTeamPicker({
+  roster,
+  state,
+  disabled,
+  onChange,
+}: {
+  roster: TeamRosterEntry[];
+  state: GeneratorState | null;
+  disabled: boolean;
+  onChange: (fields: Record<string, string>) => void;
+}) {
+  // The selection round-trips through the iframe (parent -> proposal:load ->
+  // generator -> debounced proposal:preview -> parent), which takes ~250ms. A
+  // checkbox that takes a quarter second to tick feels broken, so the picker
+  // renders its own optimistic copy and re-syncs whenever the generator reports
+  // a value that differs from what we last sent.
+  const incomingMembers = useMemo(() => serializeTeamMemberIds(parseTeamMemberIds(state?.fields)), [state]);
+  const incomingSigner = useMemo(() => parseSignerId(state?.fields) ?? "", [state]);
+
+  const [members, setMembers] = useState(incomingMembers);
+  const [signer, setSigner] = useState(incomingSigner);
+  const lastSentRef = useRef({ members: incomingMembers, signer: incomingSigner });
+
+  useEffect(() => {
+    if (incomingMembers !== lastSentRef.current.members) {
+      lastSentRef.current.members = incomingMembers;
+      setMembers(incomingMembers);
+    }
+    if (incomingSigner !== lastSentRef.current.signer) {
+      lastSentRef.current.signer = incomingSigner;
+      setSigner(incomingSigner);
+    }
+  }, [incomingMembers, incomingSigner]);
+
+  const selected = useMemo(() => parseTeamMemberIds({ [teamFieldIds.members]: members }), [members]);
+
+  function push(next: { members?: string; signer?: string }) {
+    if (next.members !== undefined) {
+      setMembers(next.members);
+      lastSentRef.current.members = next.members;
+    }
+    if (next.signer !== undefined) {
+      setSigner(next.signer);
+      lastSentRef.current.signer = next.signer;
+    }
+    onChange({
+      [teamFieldIds.members]: next.members ?? members,
+      [teamFieldIds.signer]: next.signer ?? signer,
+    });
+  }
+
+  if (roster.length === 0) {
+    return (
+      <div className="form-panel" style={{ marginTop: 16 }}>
+        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Proposal team</h2>
+        <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem", margin: 0 }}>
+          No one has published a bio yet. Add yours on{" "}
+          <Link href="/employee/proposals/bio">My bio &amp; signature</Link> and it will appear here as a checkbox.
+        </p>
+      </div>
+    );
+  }
+
+  const atLimit = selected.length >= maxTeamMembers;
+
+  return (
+    <div className="form-panel" style={{ marginTop: 16 }}>
+      <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>10. Proposal team &amp; signature</h2>
+      <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem" }}>
+        Check the people who should appear in the document&apos;s Your Team section — usually just the main point of
+        contact. Up to {maxTeamMembers}.
+      </p>
+
+      <div style={{ display: "grid", gap: 6 }}>
+        {roster.map((person) => {
+          const checked = selected.includes(person.userId);
+          return (
+            <label
+              key={person.userId}
+              style={{ display: "flex", alignItems: "flex-start", gap: 8, opacity: !checked && atLimit ? 0.5 : 1 }}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={disabled || (!checked && atLimit)}
+                style={{ width: "auto", marginTop: 3 }}
+                onChange={(event) =>
+                  push({ members: toggleTeamMember(selected, person.userId, event.target.checked) })
+                }
+              />
+              <span>
+                <strong>{person.name}</strong>
+                {person.title ? <span style={{ color: "var(--portal-muted)" }}> — {person.title}</span> : null}
+                {!person.hasSignature ? (
+                  <span style={{ color: "var(--portal-muted)", fontSize: "0.8rem" }}> · no signature saved</span>
+                ) : null}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+
+      <div className="field" style={{ marginTop: 14 }}>
+        <label htmlFor="proposal-signer">Signed by</label>
+        <select
+          id="proposal-signer"
+          value={signer}
+          disabled={disabled}
+          onChange={(event) => push({ signer: event.target.value })}
+        >
+          <option value="">No signature — print a blank line</option>
+          {roster
+            .filter((person) => person.hasSignature)
+            .map((person) => (
+              <option key={person.userId} value={person.userId}>
+                {person.name}
+              </option>
+            ))}
+        </select>
+        <p style={{ color: "var(--portal-muted)", fontSize: "0.8rem", marginTop: 4 }}>
+          The saved signature image is placed in the seller acceptance block. Only people who have uploaded one are
+          listed.
+        </p>
+      </div>
     </div>
   );
 }

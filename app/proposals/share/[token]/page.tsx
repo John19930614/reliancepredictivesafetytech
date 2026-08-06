@@ -3,6 +3,7 @@ import { ProposalDocument } from "@/components/proposals/ProposalDocument";
 import { formatDocumentDate } from "@/components/proposals/proposal-document-model";
 import { isGeneratorState } from "@/lib/proposals/generator-state";
 import { computeProposalTotals } from "@/lib/proposals/pricing";
+import { resolveDocumentExtras } from "@/lib/proposals/team-server";
 import { recordShareLinkView, resolveShareLink } from "@/app/employee/proposals/share-link-server";
 import { ProposalAcceptanceForm } from "./ProposalAcceptanceForm";
 
@@ -85,6 +86,10 @@ export default async function ProposalSharePage({ params }: { params: Promise<{ 
 
   const totals = computeProposalTotals(state);
 
+  // Resolved server-side and inlined as a data: URI — this reader is
+  // unauthenticated and cannot fetch the private signature object itself.
+  const { team, signature } = await resolveDocumentExtras(state, view.acceptedAt ?? null);
+
   const openForAcceptance = view.status === "sent" && !view.acceptedAt && !view.declinedAt;
 
   return (
@@ -107,6 +112,8 @@ export default async function ProposalSharePage({ params }: { params: Promise<{ 
       <ProposalDocument
         state={state}
         totals={totals}
+        team={team}
+        signature={signature}
         proposal={{
           id: view.proposalId,
           title: view.title,

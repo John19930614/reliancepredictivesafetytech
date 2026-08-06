@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { UserPen } from "lucide-react";
 import { getProposalAccess } from "@/lib/proposals/access";
 import { isProposalUuid } from "@/lib/proposals/policy";
 import { proposalStatusLabels, proposalStatuses, type ProposalStatus } from "@/lib/proposals/types";
@@ -121,7 +122,12 @@ export default async function ProposalsPage({
           <h1>Client proposals</h1>
           <p>Draft proposals, assign them to a company, and track every revision from first draft to signature.</p>
         </div>
-        <span className="badge">{totalCount} total</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <Link className="button button-light" href="/employee/proposals/bio">
+            <UserPen size={16} /> My bio &amp; signature
+          </Link>
+          <span className="badge">{totalCount} total</span>
+        </div>
       </div>
 
       <div className="document-grid">

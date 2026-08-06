@@ -8,6 +8,7 @@ import {
   type WorkspaceClientDetail,
   type WorkspaceProposal,
 } from "@/components/proposals/ProposalWorkspace";
+import { loadTeamRoster } from "@/lib/proposals/team-server";
 import type { ProposalStatus } from "@/lib/proposals/types";
 
 /**
@@ -54,6 +55,11 @@ export default async function ProposalEditPage({ params }: { params: Promise<{ i
     }
   }
 
+  // Read with the caller's own client so the roster obeys the bios table's RLS.
+  // Returns [] if the 20260806 migration has not been applied here yet, and the
+  // picker then explains how to publish a bio rather than erroring.
+  const roster = await loadTeamRoster(supabase);
+
   const normalized: WorkspaceProposal = {
     id: proposal.id as string,
     client_id: (proposal.client_id ?? null) as string | null,
@@ -81,7 +87,7 @@ export default async function ProposalEditPage({ params }: { params: Promise<{ i
         </div>
       </div>
 
-      <ProposalWorkspace proposal={normalized} assignedClient={assignedClient} />
+      <ProposalWorkspace proposal={normalized} assignedClient={assignedClient} roster={roster} />
     </>
   );
 }

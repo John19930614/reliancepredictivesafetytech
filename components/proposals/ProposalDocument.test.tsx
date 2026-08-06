@@ -167,18 +167,18 @@ describe("ProposalDocument — well-formed proposal", () => {
     expect(totalsRow(container, "Subtotal").cells[1].textContent).toBe("$15,750");
     expect(totalsRow(container, "Discount").cells[1].textContent).toBe("-$1,575");
     expect(totalsRow(container, "Tax").cells[1].textContent).toBe("$708.75");
-    expect(totalsRow(container, "Total Proposed Fee").cells[1].textContent).toBe("$14,883.75");
+    expect(totalsRow(container, "Total").cells[1].textContent).toBe("$14,883.75");
     expect(totalsRow(container, "Deposit Due at Acceptance").cells[1].textContent).toBe("$3,720.94");
 
     // The two figures a client acts on must stay visually distinguishable.
-    expect(totalsRow(container, "Total Proposed Fee")).toHaveClass("rp-doc-fee-total");
+    expect(totalsRow(container, "Total")).toHaveClass("rp-doc-fee-total");
     expect(totalsRow(container, "Deposit Due at Acceptance")).toHaveClass("rp-doc-fee-deposit");
   });
 
   it("renders both party blocks, the proposal metadata, and the validity sentence", () => {
     const { container, getByText } = renderDocument();
 
-    expect(getByText("Pilot Program Proposal for Northwind Construction")).toBeInTheDocument();
+    expect(getByText("Proposal for Northwind Construction")).toBeInTheDocument();
 
     const meta = container.querySelector(".rp-doc-meta") as HTMLElement;
     const preparedFor = within(meta).getByText("Prepared For").parentElement as HTMLTableRowElement;
@@ -208,7 +208,13 @@ describe("ProposalDocument — well-formed proposal", () => {
   it("renders the package pills from the saved package selection", () => {
     const { container } = renderDocument();
     const pills = Array.from(container.querySelectorAll(".rp-doc-pill")).map((pill) => pill.textContent);
-    expect(pills).toEqual(["Pilot Fee: $12,000", "Included Users: 40", "Included Jobsites: 3", "Billing: Annual"]);
+    expect(pills).toEqual([
+      "Subscription Price: $12,000",
+      "Term: —",
+      "Included Users: 40",
+      "Included Jobsites: 3",
+      "Billing: Annual",
+    ]);
   });
 
   it("renders each selected phase and service as a numbered scope entry", () => {
@@ -239,11 +245,13 @@ describe("ProposalDocument — degenerate state", () => {
 
     // With nothing selected, the fee table falls back to the generator's own
     // preselected pilot package rather than rendering an empty table.
-    expect(feeRowByName(container, "Basic Pilot Program — Platform Access (6-Month)").cells[4].textContent).toBe(
+    expect(feeRowByName(container, "Pilot Program — Platform Access").cells[4].textContent).toBe(
       "$5,000",
     );
-    expect(totalsRow(container, "Total Proposed Fee").cells[1].textContent).toBe("$5,000");
-    expect(totalsRow(container, "Deposit Due at Acceptance").cells[1].textContent).toBe("$0");
+    expect(totalsRow(container, "Total").cells[1].textContent).toBe("$5,000");
+    // A 0% deposit is a real commercial position ("nothing due at signing"), so
+    // it says so in words rather than printing "$0".
+    expect(totalsRow(container, "Deposit Due at Acceptance").cells[1].textContent).toBe("No cost");
 
     // Honest empty states rather than fabricated content.
     expect(getByText("No implementation phases selected.")).toBeInTheDocument();
@@ -286,13 +294,15 @@ describe("ProposalDocument — degenerate state", () => {
     expect(text).not.toMatch(/-\$-/);
 
     // A clamped discount cannot invert the total into a negative number.
-    expect(totalsRow(container, "Total Proposed Fee").cells[1].textContent).toBe("$0");
+    // Zero prints as "No cost" rather than "$0" so a free line does not read
+    // like a pricing mistake — see formatLineAmount().
+    expect(totalsRow(container, "Total").cells[1].textContent).toBe("No cost");
 
     // Unnamed rows still carry a placeholder rather than a blank cell. NOTE the
     // fee table and the scope section label them differently: the table prints a
     // dash, sections 03/04 print "Untitled phase 1". Both are honest, so this
     // pins the current behaviour rather than asserting one is correct.
-    expect(feeRowByName(container, "—").cells[4].textContent).toBe("$0");
+    expect(feeRowByName(container, "—").cells[4].textContent).toBe("No cost");
     expect(getByText("1. Untitled phase 1")).toBeInTheDocument();
     expect(getByText("Service Line 1: Untitled service line 1")).toBeInTheDocument();
   });

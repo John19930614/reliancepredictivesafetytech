@@ -1,3 +1,22 @@
+/**
+ * Version of the proposal FORM — the template every proposal is built on, not
+ * any one proposal's revision number.
+ *
+ * Printed in the document footer so a client and a seller looking at two
+ * printouts can tell whether they are reading the same form. Bump this whenever
+ * assets/proposal-generator-v15.html is replaced with a newer generator, and
+ * rename the asset to match.
+ */
+export const proposalFormRevision = 15;
+
+/** Footer wordmark. Kept beside the revision because they print together. */
+export const proposalFooterCompany = "Reliance Predictive Safety Technologies";
+
+/** "Reliance Predictive Safety Technologies · Proposal Form Rev. 15" */
+export function proposalFooterText(): string {
+  return `${proposalFooterCompany} · Proposal Form Rev. ${proposalFormRevision}`;
+}
+
 export const proposalStatuses = ["draft", "in_review", "sent", "accepted", "declined", "archived"] as const;
 export type ProposalStatus = (typeof proposalStatuses)[number];
 

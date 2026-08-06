@@ -126,3 +126,14 @@ drop trigger if exists client_proposal_revisions_no_truncate
 create trigger client_proposal_revisions_no_truncate
   before truncate on public.client_proposal_revisions
   for each statement execute function public.block_client_proposal_revision_truncate();
+
+-- ============================================================================
+-- Keep both functions off the REST surface
+-- ============================================================================
+-- PostgREST exposes every executable function in `public` as /rpc/<name>. A
+-- trigger function called that way errors out rather than doing anything, but
+-- there is no reason for it to be reachable — and the security linter rightly
+-- flags a SECURITY DEFINER function that anon can invoke. Triggers are unaffected:
+-- the trigger executor does not consult these grants.
+revoke execute on function public.enforce_client_proposal_revision_immutability() from anon, authenticated;
+revoke execute on function public.block_client_proposal_revision_truncate() from anon, authenticated;
