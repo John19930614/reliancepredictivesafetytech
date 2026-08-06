@@ -1534,6 +1534,26 @@ a.platform-card:hover {
   gap: 18px;
 }
 
+/* Proposal editor: generator controls on the left, the live document on the
+   right. The controls pane is a fixed width because the embedded generator
+   renders a single 520px column; the document takes whatever is left. */
+.proposal-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 560px) minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 16px;
+  align-items: start;
+}
+
+/* The document is taller than the viewport, so it scrolls independently rather
+   than pushing the controls off screen. */
+.proposal-editor-preview {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+
 .required-documents-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5714,6 +5734,7 @@ a.platform-card:hover {
   .hero-grid,
   .contact-layout,
   .document-grid,
+  .proposal-editor-grid,
   .required-documents-grid,
   .hr-onboarding-layout,
   .hr-template-layout,
@@ -5733,6 +5754,13 @@ a.platform-card:hover {
   .org-node-facts,
   .position-contact-grid {
     grid-template-columns: 1fr;
+  }
+
+  /* Stacked: pinning the document would trap the controls above a scroll box. */
+  .proposal-editor-preview {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
   }
 
   .user-row {

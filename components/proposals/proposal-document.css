@@ -421,11 +421,69 @@
   line-height: 1.42;
 }
 
+/* ---------- Your Team (bios) ---------- */
+
+.rp-doc-team {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.rp-doc-bio {
+  padding: 10px 12px;
+  border: 1px solid var(--rp-doc-line);
+  border-left: 3px solid var(--rp-doc-accent);
+  border-radius: 9px;
+  background: var(--rp-doc-panel);
+}
+
+.rp-doc-bio h4 {
+  margin: 0;
+  color: var(--rp-doc-navy);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.rp-doc-bio-title {
+  margin: 1px 0 5px !important;
+  color: var(--rp-doc-accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.rp-doc-bio p {
+  margin: 0 0 5px;
+  color: #3a4c5e;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.rp-doc-bio p:last-child {
+  margin-bottom: 0;
+}
+
 .rp-doc-sign {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 18px;
   margin-top: 16px;
+}
+
+/* A stored signature image sits where the blank rule would otherwise be, so the
+   two signature boxes keep the same height whether or not one is signed. */
+.rp-doc-sigimage {
+  display: block;
+  max-width: 260px;
+  max-height: 54px;
+  margin: 18px 0 0;
+  object-fit: contain;
+}
+
+.rp-doc-sigline-signed {
+  margin-top: 4px;
+  color: var(--rp-doc-ink);
 }
 
 .rp-doc-sigbox {
@@ -455,6 +513,12 @@
   font-size: 12px;
 }
 
+/* Print-only: the repeating page footer. On screen the same information is
+   already in the masthead, so it would just be a duplicate line. */
+.rp-doc-printfoot {
+  display: none;
+}
+
 /* ---------- Narrow viewports ---------- */
 
 @media (max-width: 900px) {
@@ -482,6 +546,10 @@
   .rp-doc-title {
     font-size: 22px;
   }
+
+  .rp-doc-team {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Wide content must scroll inside its own container, never the page body. */
@@ -495,12 +563,31 @@
  * routes that render a proposal document, so hiding the portal shell chrome here
  * cannot affect any other page. Anything the app adds around the document —
  * back links, toolbars, page headers — carries .rp-doc-noprint.
+ *
+ * TWO THINGS THIS BLOCK IS DOING DELIBERATELY
+ *
+ * 1. `@page { margin: 0 }` with the page margin moved onto .rp-doc as padding.
+ *    Browsers draw their own header/footer (document title, the file:// or
+ *    https:// URL, date, page number) INTO the page margin. With no margin
+ *    there is nowhere to draw them, so Chrome and Edge drop them — which is
+ *    what removes the file route that was printing on every page. CSS cannot
+ *    turn that setting off any other way. Firefox and Safari still honor their
+ *    own preference, so the authoritative fix is the generated PDF at
+ *    /employee/proposals/[id]/pdf, which no browser decorates.
+ *
+ * 2. The document's own repeating footer. `position: fixed` inside a print
+ *    context repeats the element on every sheet, giving us the company name and
+ *    the form revision the browser footer used to occupy.
+ *
+ * Density is tuned here rather than in the screen rules: the same document was
+ * running 12-13 sheets, most of it the 28 commercial terms.
  */
 
 @media print {
   @page {
     size: letter;
-    margin: 0.45in;
+    /* See note 1 above. Margins live on .rp-doc instead. */
+    margin: 0;
   }
 
   html,
@@ -527,13 +614,16 @@
   .rp-doc {
     max-width: none;
     margin: 0;
-    padding: 0;
+    /* The page margin, moved off @page so the browser has no gutter to print
+       its own header/footer into. Bottom is deeper to clear the fixed footer. */
+    padding: 0.45in 0.45in 0.6in;
     border: 0;
     border-radius: 0;
     box-shadow: none;
     background: #fff;
     color: #000;
-    font-size: 11.5px;
+    font-size: 10.5px;
+    line-height: 1.4;
   }
 
   .rp-doc-scroll {
@@ -542,23 +632,100 @@
 
   .rp-doc-lead,
   .rp-doc-term p,
+  .rp-doc-bio p,
   .rp-doc-h3 {
     color: #000;
   }
 
   .rp-doc-terms,
+  .rp-doc-team,
   .rp-doc-sign {
     grid-template-columns: 1fr 1fr;
   }
 
-  /* Keep a heading with its section, and never split a fee row or a term. */
+  /* ---- Density ----
+     The commercial terms are the bulk of the document: 28 sections that the
+     client's counsel reads once and the signer skims. Two tight columns at 9px
+     keeps them legible and complete while reclaiming roughly three sheets. */
+
+  .rp-doc-terms {
+    gap: 5px;
+  }
+
+  .rp-doc-term {
+    padding: 4px 7px;
+    border-radius: 5px;
+  }
+
+  .rp-doc-term h4 {
+    margin-bottom: 1px;
+    font-size: 9.5px;
+  }
+
+  .rp-doc-term p {
+    font-size: 8.6px;
+    line-height: 1.32;
+  }
+
+  .rp-doc-bio p,
+  .rp-doc-bio-title {
+    font-size: 9.5px;
+  }
+
+  .rp-doc-h2 {
+    margin-top: 14px;
+    margin-bottom: 5px;
+  }
+
+  .rp-doc-h3 {
+    margin-top: 7px;
+    margin-bottom: 2px;
+  }
+
+  .rp-doc p,
+  .rp-doc-list {
+    margin-top: 3px;
+    margin-bottom: 5px;
+  }
+
+  .rp-doc-list li {
+    margin-bottom: 1px;
+  }
+
+  .rp-doc-fee th,
+  .rp-doc-fee td {
+    padding: 3px 6px;
+    font-size: 9.5px;
+  }
+
+  .rp-doc-sigbox {
+    min-height: 96px;
+  }
+
+  /* Keep a heading with its section, and never split a fee row, term or bio. */
   .rp-doc-h2,
   .rp-doc-term,
+  .rp-doc-bio,
   .rp-doc-sigbox,
   .rp-doc-fee tr,
   .rp-doc-banner {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  /* The document's own repeating footer — see note 2 at the top of this block.
+     Fixed positioning makes the browser paint it once per sheet. */
+  .rp-doc-printfoot {
+    display: block;
+    position: fixed;
+    right: 0.45in;
+    bottom: 0.2in;
+    left: 0.45in;
+    padding-top: 3px;
+    border-top: 1px solid #c6d0da;
+    color: #55636f;
+    font-size: 8px;
+    letter-spacing: 0.02em;
   }
 
   .rp-doc-h2 {

@@ -238,7 +238,7 @@ describe("computeProposalTotals — line items", () => {
     );
     expect(totals.lineItems.map((row) => row.source)).toEqual(["package", "phase", "service"]);
     expect(totals.lineItems[0]).toMatchObject({ key: "professional", name: "Professional Safety Intelligence", qty: 1, price: 65000, amount: 65000 });
-    expect(totals.lineItems[1]).toMatchObject({ key: "discovery", name: "Phase 1 — Discovery & Intake", amount: 3500 });
+    expect(totals.lineItems[1]).toMatchObject({ key: "discovery", name: "Discovery & Intake", amount: 3500 });
     expect(totals.lineItems[2]).toMatchObject({ key: "osha10", name: "OSHA 10 Training", qty: 10, amount: 1750 });
     expect(totals.subtotal).toBe(70250);
   });
@@ -266,7 +266,8 @@ describe("computeProposalTotals — line items", () => {
     );
     expect(totals.lineItems[1]).toMatchObject({
       name: "Field Support Day",
-      desc: "Daily on-site field safety support (Qty = days).",
+      desc:
+        "A day of on-site safety support: pre-task briefings, field observations, corrective coaching, and a written end-of-day summary for management.",
       amount: 2500,
     });
   });

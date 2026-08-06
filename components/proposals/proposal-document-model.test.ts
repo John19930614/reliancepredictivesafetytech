@@ -148,8 +148,10 @@ describe("buildProposalDocumentModel — well-formed state", () => {
 
   const model = buildProposalDocumentModel({ state: wellFormed, proposal: subject({ validUntil: "2026-06-02" }) });
 
-  it("headlines with the client company, as the generator does", () => {
-    expect(model.headline).toBe("Pilot Program Proposal for Acme Construction");
+  it("headlines with the client company, without claiming the package is a pilot", () => {
+    // Was "Pilot Program Proposal for ..." for every package, including
+    // Enterprise and Black Label. The package is named in the docline instead.
+    expect(model.headline).toBe("Proposal for Acme Construction");
     expect(model.subtitle).toBe(documentCopy.subtitle);
   });
 
@@ -173,8 +175,11 @@ describe("buildProposalDocumentModel — well-formed state", () => {
   it("describes the selected package from the catalog with the saved limits", () => {
     expect(model.packageIntro).toContain(packageData.professional.name);
     expect(model.packageIntro).toContain(packageData.professional.desc);
+    // The counts are read from the state, never from a frozen catalog sentence.
+    expect(model.packageIntro).toContain("50 users across 5 jobsites");
     expect(model.packagePills).toEqual([
-      { label: "Pilot Fee", value: "$65,000" },
+      { label: "Subscription Price", value: "$65,000" },
+      { label: "Term", value: "—" },
       { label: "Included Users", value: "50" },
       { label: "Included Jobsites", value: "5" },
       { label: "Billing", value: "Annual upfront" },
@@ -188,10 +193,12 @@ describe("buildProposalDocumentModel — well-formed state", () => {
     ]);
   });
 
-  it("lists the base deliverables plus one per phase and service", () => {
-    expect(model.deliverables).toHaveLength(documentCopy.baseDeliverables.length + 2);
-    expect(model.deliverables).toContain(`${phaseOptions.discovery.name} deliverable package`);
-    expect(model.deliverables).toContain(`${serviceOptions.osha10.name} deliverable package`);
+  it("lists only the base deliverables, naming the selected lines in one sentence", () => {
+    // Section 04 used to append a "<name> deliverable package" bullet per line,
+    // restating section 03 in full and costing most of a page.
+    expect(model.deliverables).toEqual([...documentCopy.baseDeliverables]);
+    expect(model.deliverablesCoverage).toContain(phaseOptions.discovery.name);
+    expect(model.deliverablesCoverage).toContain(serviceOptions.osha10.name);
   });
 
   it("groups the fee table and shows the service billing unit", () => {
@@ -217,7 +224,7 @@ describe("buildProposalDocumentModel — well-formed state", () => {
       { label: "Subtotal", value: "$70,600" },
       { label: "Discount", value: "-$7,060" },
       { label: "Tax", value: "$3,177" },
-      { label: "Total Proposed Fee", value: "$66,717", emphasis: "total" },
+      { label: "Total", value: "$66,717", emphasis: "total" },
       { label: "Deposit Due at Acceptance", value: "$16,679.25", emphasis: "deposit" },
     ]);
   });
@@ -292,7 +299,7 @@ describe("buildProposalDocumentModel — empty and malformed state", () => {
     expect(model.feeGroups[0].label).toBe("Base Subscription");
     expect(model.feeGroups[0].rows[0].name).toBe(packageData.custom.name);
     expect(model.totalRows[3]).toEqual({
-      label: "Total Proposed Fee",
+      label: "Total",
       value: "$5,000",
       emphasis: "total",
     });
@@ -316,7 +323,7 @@ describe("buildProposalDocumentModel — empty and malformed state", () => {
     expect(unnamed.phaseScope[0].heading).toBe("1. Untitled phase 1");
     expect(unnamed.phaseScope[0].body).toBe("");
     expect(unnamed.serviceScope[0].heading).toBe("Service Line 1: Untitled service line 1");
-    expect(unnamed.deliverables).toContain("Untitled phase 1 deliverable package");
+    expect(unnamed.deliverablesCoverage).toContain("Untitled phase 1");
     expect(unnamed.feeGroups[2].rows[0].qtyLabel).toBe("2");
   });
 });

@@ -6,6 +6,7 @@ import { formatDocumentDate } from "@/components/proposals/proposal-document-mod
 import { getProposalAccess } from "@/lib/proposals/access";
 import { isGeneratorState } from "@/lib/proposals/generator-state";
 import { isProposalUuid } from "@/lib/proposals/policy";
+import { resolveDocumentExtras } from "@/lib/proposals/team-server";
 import type { ProposalStatus } from "@/lib/proposals/types";
 
 /**
@@ -56,6 +57,10 @@ export default async function ProposalRevisionPage({
   };
 
   const state = isGeneratorState(revision.form_data) ? revision.form_data : null;
+  // Bios and the signature are resolved live rather than snapshotted into the
+  // revision: they are profile data, and a stale headshot-era bio on an old
+  // revision would be a worse record than the current one.
+  const { team, signature } = await resolveDocumentExtras(state);
 
   return (
     <>
@@ -79,7 +84,13 @@ export default async function ProposalRevisionPage({
       </div>
 
       {state ? (
-        <ProposalDocument state={state} proposal={subject} revisionNumber={revisionNumber} />
+        <ProposalDocument
+          state={state}
+          proposal={subject}
+          revisionNumber={revisionNumber}
+          team={team}
+          signature={signature}
+        />
       ) : (
         <div className="empty-state">
           This revision has no saved document state, so there is nothing to render. It was saved before the generator

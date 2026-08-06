@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, PencilLine } from "lucide-react";
+import { ChevronLeft, Download, PencilLine } from "lucide-react";
 import { getProposalAccess } from "@/lib/proposals/access";
 import { canEditProposalContent, isProposalUuid } from "@/lib/proposals/policy";
 import { isGeneratorState, type GeneratorState } from "@/lib/proposals/generator-state";
@@ -22,6 +22,7 @@ import {
   type TimelineAcceptance,
   type TimelineShareLink,
 } from "@/components/proposals/ProposalTimeline";
+import { resolveDocumentExtras } from "@/lib/proposals/team-server";
 import { canShareProposal } from "@/app/employee/proposals/share-link-policy";
 import type { ProposalRevisionRow, ProposalStatus } from "@/lib/proposals/types";
 
@@ -127,6 +128,14 @@ export default async function ProposalDetailPage({
   const documentState: GeneratorState | null = isGeneratorState(normalized.form_data) ? normalized.form_data : null;
   const totals = documentState ? computeProposalTotals(documentState) : null;
 
+  // Bios and the seller signature live outside form_data (they are profile data
+  // that must stay current), so they are resolved per render. Both degrade to
+  // empty if the 20260806 migration has not landed yet.
+  const { team, signature } = await resolveDocumentExtras(
+    documentState,
+    (acceptanceRow?.accepted_at ?? null) as string | null,
+  );
+
   const editGate = canEditProposalContent(normalized.status);
   const canEdit = canManage && editGate.ok;
 
@@ -197,11 +206,18 @@ export default async function ProposalDetailPage({
             Revision v{normalized.current_revision} · <ProposalStatusBadge status={normalized.status} />
           </p>
         </div>
-        {canEdit ? (
-          <Link className="button button-primary" href={`/employee/proposals/${normalized.id}/edit`}>
-            <PencilLine size={16} /> Edit in generator
-          </Link>
-        ) : null}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {/* Not the browser's Print dialog: that stamps the page URL into every
+              page margin. This route generates the file itself. */}
+          <a className="button button-light" href={`/employee/proposals/${normalized.id}/pdf`} download>
+            <Download size={16} /> Download PDF
+          </a>
+          {canEdit ? (
+            <Link className="button button-primary" href={`/employee/proposals/${normalized.id}/edit`}>
+              <PencilLine size={16} /> Edit in generator
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       {lockedMessage ? <div className="success-box portal-alert portal-alert-error">{lockedMessage}</div> : null}
@@ -215,6 +231,8 @@ export default async function ProposalDetailPage({
             <ProposalDocument
               state={documentState}
               totals={totals ?? undefined}
+              team={team}
+              signature={signature}
               proposal={{
                 id: normalized.id,
                 title: normalized.title,

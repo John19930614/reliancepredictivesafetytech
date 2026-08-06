@@ -20,8 +20,14 @@ import { Fragment } from "react";
 import Image from "next/image";
 import type { GeneratorState } from "@/lib/proposals/generator-state";
 import type { ProposalTotals } from "@/lib/proposals/pricing";
-import type { ProposalStatus } from "@/lib/proposals/types";
-import { buildProposalDocumentModel, documentCopy } from "./proposal-document-model";
+import { proposalFooterText, type ProposalStatus } from "@/lib/proposals/types";
+import {
+  buildProposalDocumentModel,
+  documentCopy,
+  formatDocumentDate,
+  type DocumentSignature,
+  type DocumentTeamMember,
+} from "./proposal-document-model";
 import "./proposal-document.css";
 
 export interface ProposalDocumentProps {
@@ -37,6 +43,10 @@ export interface ProposalDocumentProps {
   };
   /** Set when rendering a historical revision rather than the live proposal. */
   revisionNumber?: number;
+  /** Bios the page resolved for the people the seller checked on this proposal. */
+  team?: DocumentTeamMember[];
+  /** Stored seller signature, resolved by the page; null prints a blank line. */
+  signature?: DocumentSignature | null;
   className?: string;
 }
 
@@ -67,9 +77,11 @@ export function ProposalDocument({
   totals,
   proposal,
   revisionNumber,
+  team,
+  signature,
   className,
 }: ProposalDocumentProps): React.ReactElement {
-  const model = buildProposalDocumentModel({ state, totals, proposal, revisionNumber });
+  const model = buildProposalDocumentModel({ state, totals, proposal, revisionNumber, team, signature });
   const rootClassName = className ? `rp-doc ${className}` : "rp-doc";
 
   return (
@@ -135,6 +147,12 @@ export function ProposalDocument({
             <td>Proposal Number</td>
             <td>{model.proposalNumber}</td>
           </tr>
+          {model.termLabel ? (
+            <tr>
+              <td>Engagement Term</td>
+              <td>{model.termLabel}</td>
+            </tr>
+          ) : null}
           <tr>
             <td>Validity</td>
             <td>{model.validity}</td>
@@ -145,7 +163,7 @@ export function ProposalDocument({
       <SectionHeading number="01">Executive Summary</SectionHeading>
       <p className="rp-doc-lead">{model.summary}</p>
       <div className="rp-doc-callout">
-        <strong>Proposal Purpose:</strong> {documentCopy.purposeCallout}
+        <strong>Proposal Purpose:</strong> {model.purposeCallout}
       </div>
 
       <SectionHeading number="02">Selected Platform Package</SectionHeading>
@@ -159,7 +177,7 @@ export function ProposalDocument({
       </ul>
 
       <SectionHeading number="03">Detailed Scope of Work</SectionHeading>
-      <p>{documentCopy.scopeIntro}</p>
+      <p>{model.scopeIntro}</p>
       {model.phaseScope.length > 0 ? (
         model.phaseScope.map((entry) => (
           <div key={entry.heading}>
@@ -187,8 +205,9 @@ export function ProposalDocument({
           <li key={`${index}-${deliverable}`}>{deliverable}</li>
         ))}
       </ul>
+      {model.deliverablesCoverage ? <p>{model.deliverablesCoverage}</p> : null}
 
-      <SectionHeading number="05">Fee Schedule</SectionHeading>
+      <SectionHeading number="05">Pricing Schedule</SectionHeading>
       <div className="rp-doc-scroll">
         <table className="rp-doc-fee">
           <thead>
@@ -199,10 +218,10 @@ export function ProposalDocument({
                 Qty
               </th>
               <th scope="col" className="rp-doc-right">
-                Unit Fee
+                Unit Price
               </th>
               <th scope="col" className="rp-doc-right">
-                Extended Fee
+                Amount
               </th>
             </tr>
           </thead>
@@ -251,14 +270,14 @@ export function ProposalDocument({
       <SectionHeading number="06">Schedule and Implementation Approach</SectionHeading>
       <p>{model.schedule}</p>
       <ul className="rp-doc-list">
-        {documentCopy.scheduleSteps.map((step) => (
+        {model.scheduleSteps.map((step) => (
           <li key={step}>{step}</li>
         ))}
       </ul>
 
       <SectionHeading number="07">Client Responsibilities</SectionHeading>
       <ul className="rp-doc-list">
-        {documentCopy.clientResponsibilities.map((item) => (
+        {model.clientResponsibilities.map((item) => (
           <li key={item}>{item}</li>
         ))}
       </ul>
@@ -266,7 +285,24 @@ export function ProposalDocument({
       <SectionHeading number="08">Assumptions and Exclusions</SectionHeading>
       <p className="rp-doc-prewrap">{model.exclusions}</p>
 
-      <SectionHeading number="09">Commercial and Legal Terms</SectionHeading>
+      {model.team.length > 0 ? (
+        <>
+          <SectionHeading number="09">Your Team</SectionHeading>
+          <div className="rp-doc-team">
+            {model.team.map((member) => (
+              <section className="rp-doc-bio" key={member.id}>
+                <h4>{member.name}</h4>
+                {member.title ? <p className="rp-doc-bio-title">{member.title}</p> : null}
+                {member.paragraphs.map((paragraph, index) => (
+                  <p key={`${index}-${paragraph.slice(0, 24)}`}>{paragraph}</p>
+                ))}
+              </section>
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      <SectionHeading number={model.team.length > 0 ? "10" : "09"}>Commercial and Legal Terms</SectionHeading>
       <div className="rp-doc-terms">
         {model.terms.map((term) => (
           <section className="rp-doc-term" key={term.heading}>
@@ -276,8 +312,8 @@ export function ProposalDocument({
         ))}
       </div>
 
-      <SectionHeading number="10">Acceptance Statement</SectionHeading>
-      <p>{documentCopy.acceptance}</p>
+      <SectionHeading number={model.team.length > 0 ? "11" : "10"}>Acceptance Statement</SectionHeading>
+      <p>{model.acceptance}</p>
       <div className="rp-doc-sign">
         <div className="rp-doc-sigbox">
           <strong>Client Acceptance</strong>
@@ -287,12 +323,39 @@ export function ProposalDocument({
         </div>
         <div className="rp-doc-sigbox">
           <strong>Seller Acceptance</strong>
-          <div className="rp-doc-sigline">Authorized Signature / Date</div>
-          <div className="rp-doc-sigline">{model.sellerSignature}</div>
+          {model.signature ? (
+            <>
+              {/* Deliberately a plain <img>: the source is a data: URI resolved
+                  from private storage, which next/image cannot optimize, and the
+                  same markup has to survive the unauthenticated share route. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                className="rp-doc-sigimage"
+                src={model.signature.dataUrl}
+                alt={`Signature of ${model.signature.name}`}
+              />
+              <div className="rp-doc-sigline rp-doc-sigline-signed">
+                {model.signature.name}
+                {model.signature.title ? ` / ${model.signature.title}` : ""}
+                {model.signature.signedOn ? ` · ${formatDocumentDate(model.signature.signedOn)}` : ""}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="rp-doc-sigline">Authorized Signature / Date</div>
+              <div className="rp-doc-sigline">{model.sellerSignature}</div>
+            </>
+          )}
         </div>
       </div>
 
       <p className="rp-doc-legal">{model.legalNotice}</p>
+
+      {/* Print-only, repeated on every sheet. See the @media print block in
+          proposal-document.css for why this replaces the browser's own footer. */}
+      <footer className="rp-doc-printfoot" aria-hidden="true">
+        {proposalFooterText()}
+      </footer>
     </article>
   );
 }
