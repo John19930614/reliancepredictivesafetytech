@@ -23,6 +23,7 @@ import {
   Gauge,
   Globe2,
   GraduationCap,
+  HandCoins,
   Inbox,
   KanbanSquare,
   LayoutDashboard,
@@ -78,6 +79,7 @@ const navGroups = [
       // Same module key as Proposals (client_proposals resolves by path prefix),
       // so this widens nothing — it only surfaces the templates manager.
       { href: "/employee/proposals/templates", label: "Proposal Templates", icon: LayoutTemplate },
+      { href: "/employee/talent-engine", label: "Talent Engine", icon: HandCoins },
       { href: "/employee/active-companies", label: "Active Companies", icon: Gauge },
       { href: "/employee/mail", label: "Employee Mail", icon: Mail },
     ],

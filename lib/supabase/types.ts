@@ -6638,6 +6638,479 @@ export type Database = {
         }
         Relationships: []
       }
+      talent_activity_log: {
+        Row: {
+          action: string
+          actor_id: string | null
+          actor_type: string
+          agent_name: string | null
+          candidate_id: string | null
+          created_at: string | null
+          id: string
+          job_order_id: string | null
+          match_id: string | null
+          summary: string
+          tier: number | null
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          actor_type: string
+          agent_name?: string | null
+          candidate_id?: string | null
+          created_at?: string | null
+          id?: string
+          job_order_id?: string | null
+          match_id?: string | null
+          summary: string
+          tier?: number | null
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          actor_type?: string
+          agent_name?: string | null
+          candidate_id?: string | null
+          created_at?: string | null
+          id?: string
+          job_order_id?: string | null
+          match_id?: string | null
+          summary?: string
+          tier?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "talent_activity_log_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "talent_candidates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "talent_activity_log_job_order_id_fkey"
+            columns: ["job_order_id"]
+            isOneToOne: false
+            referencedRelation: "talent_job_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "talent_activity_log_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "talent_matches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      talent_candidates: {
+        Row: {
+          availability_date: string | null
+          cert_expiry_date: string | null
+          certifications: string[]
+          created_at: string | null
+          created_by: string | null
+          email: string | null
+          full_name: string
+          id: string
+          location: string | null
+          notes: string | null
+          pay_expectation: number | null
+          phone: string | null
+          status: string
+          updated_at: string | null
+          verified_certifications: string[]
+          verticals: string[]
+          willing_to_relocate: boolean
+          years_experience: number | null
+        }
+        Insert: {
+          availability_date?: string | null
+          cert_expiry_date?: string | null
+          certifications?: string[]
+          created_at?: string | null
+          created_by?: string | null
+          email?: string | null
+          full_name: string
+          id?: string
+          location?: string | null
+          notes?: string | null
+          pay_expectation?: number | null
+          phone?: string | null
+          status?: string
+          updated_at?: string | null
+          verified_certifications?: string[]
+          verticals?: string[]
+          willing_to_relocate?: boolean
+          years_experience?: number | null
+        }
+        Update: {
+          availability_date?: string | null
+          cert_expiry_date?: string | null
+          certifications?: string[]
+          created_at?: string | null
+          created_by?: string | null
+          email?: string | null
+          full_name?: string
+          id?: string
+          location?: string | null
+          notes?: string | null
+          pay_expectation?: number | null
+          phone?: string | null
+          status?: string
+          updated_at?: string | null
+          verified_certifications?: string[]
+          verticals?: string[]
+          willing_to_relocate?: boolean
+          years_experience?: number | null
+        }
+        Relationships: []
+      }
+      talent_job_orders: {
+        Row: {
+          bill_rate: number | null
+          cert_requirements: string[]
+          client_id: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          location: string | null
+          min_spread: number | null
+          notes: string | null
+          openings: number
+          priority: string
+          start_date: string | null
+          status: string
+          title: string
+          updated_at: string | null
+          vertical: string | null
+        }
+        Insert: {
+          bill_rate?: number | null
+          cert_requirements?: string[]
+          client_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          location?: string | null
+          min_spread?: number | null
+          notes?: string | null
+          openings?: number
+          priority?: string
+          start_date?: string | null
+          status?: string
+          title: string
+          updated_at?: string | null
+          vertical?: string | null
+        }
+        Update: {
+          bill_rate?: number | null
+          cert_requirements?: string[]
+          client_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          location?: string | null
+          min_spread?: number | null
+          notes?: string | null
+          openings?: number
+          priority?: string
+          start_date?: string | null
+          status?: string
+          title?: string
+          updated_at?: string | null
+          vertical?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "talent_job_orders_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "company_clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      talent_match_approvals: {
+        Row: {
+          bill_rate_after: number | null
+          bill_rate_before: number | null
+          decided_at: string
+          decision: string
+          id: string
+          match_id: string
+          note: string | null
+          pay_rate_after: number | null
+          pay_rate_before: number | null
+          reviewer_id: string | null
+          reviewer_role: string | null
+        }
+        Insert: {
+          bill_rate_after?: number | null
+          bill_rate_before?: number | null
+          decided_at?: string
+          decision: string
+          id?: string
+          match_id: string
+          note?: string | null
+          pay_rate_after?: number | null
+          pay_rate_before?: number | null
+          reviewer_id?: string | null
+          reviewer_role?: string | null
+        }
+        Update: {
+          bill_rate_after?: number | null
+          bill_rate_before?: number | null
+          decided_at?: string
+          decision?: string
+          id?: string
+          match_id?: string
+          note?: string | null
+          pay_rate_after?: number | null
+          pay_rate_before?: number | null
+          reviewer_id?: string | null
+          reviewer_role?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "talent_match_approvals_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "talent_matches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      talent_matches: {
+        Row: {
+          ai_confidence: number | null
+          ai_recommendation: string | null
+          bill_rate: number
+          candidate_id: string
+          created_at: string | null
+          created_by: string | null
+          decided_at: string | null
+          fit_score: number
+          floor_ok: boolean
+          id: string
+          job_order_id: string
+          markup_pct: number
+          pay_rate: number
+          proposed_pay_rate: number | null
+          requires_human_review: boolean
+          spread: number
+          status: string
+          updated_at: string | null
+        }
+        Insert: {
+          ai_confidence?: number | null
+          ai_recommendation?: string | null
+          bill_rate?: number
+          candidate_id: string
+          created_at?: string | null
+          created_by?: string | null
+          decided_at?: string | null
+          fit_score?: number
+          floor_ok?: boolean
+          id?: string
+          job_order_id: string
+          markup_pct?: number
+          pay_rate?: number
+          proposed_pay_rate?: number | null
+          requires_human_review?: boolean
+          spread?: number
+          status?: string
+          updated_at?: string | null
+        }
+        Update: {
+          ai_confidence?: number | null
+          ai_recommendation?: string | null
+          bill_rate?: number
+          candidate_id?: string
+          created_at?: string | null
+          created_by?: string | null
+          decided_at?: string | null
+          fit_score?: number
+          floor_ok?: boolean
+          id?: string
+          job_order_id?: string
+          markup_pct?: number
+          pay_rate?: number
+          proposed_pay_rate?: number | null
+          requires_human_review?: boolean
+          spread?: number
+          status?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "talent_matches_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "talent_candidates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "talent_matches_job_order_id_fkey"
+            columns: ["job_order_id"]
+            isOneToOne: false
+            referencedRelation: "talent_job_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      talent_placements: {
+        Row: {
+          bill_rate: number
+          candidate_id: string
+          created_at: string | null
+          created_by: string | null
+          end_date: string | null
+          id: string
+          job_order_id: string
+          match_id: string
+          pay_rate: number
+          start_date: string
+          status: string
+          updated_at: string | null
+        }
+        Insert: {
+          bill_rate: number
+          candidate_id: string
+          created_at?: string | null
+          created_by?: string | null
+          end_date?: string | null
+          id?: string
+          job_order_id: string
+          match_id: string
+          pay_rate: number
+          start_date: string
+          status?: string
+          updated_at?: string | null
+        }
+        Update: {
+          bill_rate?: number
+          candidate_id?: string
+          created_at?: string | null
+          created_by?: string | null
+          end_date?: string | null
+          id?: string
+          job_order_id?: string
+          match_id?: string
+          pay_rate?: number
+          start_date?: string
+          status?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "talent_placements_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "talent_candidates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "talent_placements_job_order_id_fkey"
+            columns: ["job_order_id"]
+            isOneToOne: false
+            referencedRelation: "talent_job_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "talent_placements_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: true
+            referencedRelation: "talent_matches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      talent_settings: {
+        Row: {
+          created_at: string | null
+          default_hours_per_week: number
+          id: string
+          min_spread_per_hour: number
+          pay_rate_autonomy_tier: number
+          target_markup_pct: number
+          updated_at: string | null
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          default_hours_per_week?: number
+          id?: string
+          min_spread_per_hour?: number
+          pay_rate_autonomy_tier?: number
+          target_markup_pct?: number
+          updated_at?: string | null
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          default_hours_per_week?: number
+          id?: string
+          min_spread_per_hour?: number
+          pay_rate_autonomy_tier?: number
+          target_markup_pct?: number
+          updated_at?: string | null
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
+      talent_timesheets: {
+        Row: {
+          amount_billed: number
+          amount_paid: number
+          bill_rate: number
+          created_at: string | null
+          created_by: string | null
+          hours: number
+          id: string
+          pay_rate: number
+          placement_id: string
+          status: string
+          updated_at: string | null
+          week_starting: string
+        }
+        Insert: {
+          amount_billed?: number
+          amount_paid?: number
+          bill_rate?: number
+          created_at?: string | null
+          created_by?: string | null
+          hours?: number
+          id?: string
+          pay_rate?: number
+          placement_id: string
+          status?: string
+          updated_at?: string | null
+          week_starting: string
+        }
+        Update: {
+          amount_billed?: number
+          amount_paid?: number
+          bill_rate?: number
+          created_at?: string | null
+          created_by?: string | null
+          hours?: number
+          id?: string
+          pay_rate?: number
+          placement_id?: string
+          status?: string
+          updated_at?: string | null
+          week_starting?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "talent_timesheets_placement_id_fkey"
+            columns: ["placement_id"]
+            isOneToOne: false
+            referencedRelation: "talent_placements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       time_card_categories: {
         Row: {
           created_at: string | null
