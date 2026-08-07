@@ -248,8 +248,46 @@ describe("computeProposalTotals — line items", () => {
       state({ fields: { packageSelect: "enterprise", annualPrice: "8000", includedUsers: "12", includedSites: "3" } }),
     );
     expect(totals.lineItems[0].price).toBe(8000);
-    expect(totals.lineItems[0].desc).toBe("Platform access for the pilot term — includes 12 users and 3 sites.");
+    expect(totals.lineItems[0].desc).toBe("Platform access for the term — includes 12 users and 3 sites.");
     expect(totals.total).toBe(8000);
+  });
+
+  it("states the engagement term chosen on the left in the base subscription row", () => {
+    const totals = computeProposalTotals(
+      state({
+        fields: {
+          packageSelect: "enterprise",
+          includedUsers: "40",
+          includedSites: "5",
+          termStartMonth: "3",
+          termStartYear: "2026",
+          termEndMonth: "8",
+          termEndYear: "2026",
+        },
+      }),
+    );
+    expect(totals.lineItems[0].desc).toBe("Platform access for the 6-month term — includes 40 users and 5 sites.");
+  });
+
+  it("omits the duration rather than guessing when the term is reversed or half-filled", () => {
+    const halfFilled = computeProposalTotals(
+      state({ fields: { includedUsers: "1", includedSites: "1", termStartMonth: "3", termStartYear: "2026" } }),
+    );
+    expect(halfFilled.lineItems[0].desc).toBe("Platform access for the term — includes 1 users and 1 sites.");
+
+    const reversed = computeProposalTotals(
+      state({
+        fields: {
+          includedUsers: "1",
+          includedSites: "1",
+          termStartMonth: "9",
+          termStartYear: "2026",
+          termEndMonth: "3",
+          termEndYear: "2026",
+        },
+      }),
+    );
+    expect(reversed.lineItems[0].desc).toBe("Platform access for the term — includes 1 users and 1 sites.");
   });
 
   it("keeps a deliberate zero package price instead of falling back to the catalog", () => {
@@ -382,7 +420,7 @@ describe("computeProposalTotals — malformed and hostile input", () => {
       }),
     );
     expect(totals.lineItems[0].price).toBe(0);
-    expect(totals.lineItems[0].desc).toBe("Platform access for the pilot term — includes 0 users and 0 sites.");
+    expect(totals.lineItems[0].desc).toBe("Platform access for the term — includes 0 users and 0 sites.");
     expect(totals.lineItems[1].qty).toBe(0);
     expect(totals.lineItems[2].price).toBe(0);
     expect(totals.subtotal).toBe(0);

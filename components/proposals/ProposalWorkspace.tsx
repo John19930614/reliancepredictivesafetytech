@@ -19,6 +19,7 @@ import { Copy, Eye, FileClock, GitCompare, RotateCcw, Save, Trash2 } from "lucid
 import {
   deleteProposal,
   duplicateProposal,
+  loadProposalDocumentExtras,
   restoreProposalRevision,
   saveProposalDraft,
   saveProposalRevision,
@@ -48,6 +49,7 @@ import {
   type TeamRosterEntry,
 } from "@/lib/proposals/team-selection";
 import { ProposalDocument } from "./ProposalDocument";
+import { documentLimits, type DocumentSignature, type DocumentTeamMember } from "./proposal-document-model";
 import {
   proposalStatusLabels,
   proposalStatuses,
@@ -195,6 +197,57 @@ const PRIME_DELAY_MS = 900;
 
 type CollectPurpose = "prime" | "poll" | "draft" | "revision";
 
+const noDocumentExtras: { team: DocumentTeamMember[]; signature: DocumentSignature | null } = Object.freeze({
+  team: [],
+  signature: null,
+});
+
+/**
+ * Bios + signature image for whoever is currently ticked in the team picker.
+ *
+ * Everything else the preview renders comes out of the generator state the
+ * iframe posts up, but bios and signatures are database-backed profile data
+ * that state deliberately does not carry (it stores ids only, so a bio edited
+ * later shows through on every proposal). They are therefore fetched, and the
+ * fetch is keyed on the SELECTION rather than on `previewState` — that state
+ * object is replaced on every keystroke, and keying on it would re-query the
+ * bios table roughly four times a second while someone types a summary.
+ */
+function useDocumentExtras(state: GeneratorState | null) {
+  const memberIds = useMemo(() => parseTeamMemberIds(state?.fields), [state]);
+  const signerId = useMemo(() => parseSignerId(state?.fields), [state]);
+  // A primitive key: the arrays above are fresh objects each render.
+  const selectionKey = `${serializeTeamMemberIds(memberIds)}|${signerId ?? ""}`;
+
+  const [extras, setExtras] = useState(noDocumentExtras);
+
+  useEffect(() => {
+    const [members, signer] = selectionKey.split("|");
+    const ids = members === "" ? [] : members.split(",");
+    if (ids.length === 0 && signer === "") {
+      setExtras(noDocumentExtras);
+      return;
+    }
+    // Guards against an out-of-order reply: untick-then-retick fires two
+    // requests, and the slower one must not repaint the document.
+    let current = true;
+    void loadProposalDocumentExtras(ids, signer === "" ? null : signer)
+      .then((result) => {
+        if (current) setExtras(result);
+      })
+      .catch(() => {
+        // The preview simply omits the team section; the editor is unaffected
+        // and the document view resolves these server-side regardless.
+        if (current) setExtras(noDocumentExtras);
+      });
+    return () => {
+      current = false;
+    };
+  }, [selectionKey]);
+
+  return extras;
+}
+
 export function ProposalWorkspace({
   proposal,
   assignedClient,
@@ -227,6 +280,8 @@ export function ProposalWorkspace({
   const [previewState, setPreviewState] = useState<GeneratorState | null>(() =>
     isGeneratorState(proposal.form_data) ? proposal.form_data : null,
   );
+
+  const documentExtras = useDocumentExtras(previewState);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   /** True once the saved state has been pushed into the current iframe document. */
@@ -609,6 +664,11 @@ export function ProposalWorkspace({
           {previewState ? (
             <ProposalDocument
               state={previewState}
+              // Resolved from the picker's selection, so section 09 and the
+              // seller signature block appear here exactly as they do on the
+              // document view — the claim the badge above makes.
+              team={documentExtras.team}
+              signature={documentExtras.signature}
               proposal={{
                 id: proposal.id,
                 title: proposal.title,
@@ -707,9 +767,23 @@ function ProposalTeamPicker({
   return (
     <div className="form-panel" style={{ marginTop: 16 }}>
       <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>10. Proposal team &amp; signature</h2>
+      {/* The one card whose position in this panel does NOT match its position
+          in the document: it is last on the left because the picker cannot be
+          rendered inside the static iframe, but it prints as section 09, above
+          the commercial terms. Say so rather than let the numbers disagree. */}
       <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem" }}>
-        Check the people who should appear in the document&apos;s Your Team section — usually just the main point of
-        contact. Up to {maxTeamMembers}.
+        Prints as <strong>section 09, Your Team</strong> — above the commercial terms, not after them. Check the people
+        who should appear there, usually just the main point of contact. Up to {maxTeamMembers}. Selecting nobody omits
+        the section entirely and the later sections renumber.
+      </p>
+      {/* The document is held to eight pages, and six full-length bios alone
+          used to take it to nine. The budget is shared, so say so here — the
+          preview on the right shows the trimmed text, and a seller who does not
+          know why would read it as data loss. */}
+      <p style={{ color: "var(--portal-muted)", fontSize: "0.8rem", marginTop: -6 }}>
+        Bios share a fixed space so the proposal stays inside eight pages: one person prints in full, {maxTeamMembers}{" "}
+        are trimmed to roughly {Math.floor(documentLimits.teamBioChars / maxTeamMembers)} characters each. The preview
+        shows exactly what will print.
       </p>
 
       <div style={{ display: "grid", gap: 6 }}>

@@ -14,6 +14,7 @@
 
 import type { GeneratorItem, GeneratorState } from "./generator-state";
 import { defaultPackageKey, lookupPackage, lookupPhase, lookupService, packageData } from "./catalog";
+import { parseProposalTerm } from "./term";
 
 /* -------------------------------------------------------------------------- */
 /* Coercion helpers                                                            */
@@ -329,6 +330,14 @@ export function computeProposalTotals(state: GeneratorState | null | undefined):
  * throws on an unknown key; here an unknown or missing key falls back to the
  * generator's preselected package. The annualPrice / includedUsers /
  * includedSites fields override the catalog values whenever they are set.
+ *
+ * The description is derived from the Engagement Term selects, matching the
+ * asset's own row (`'Platform access for the '+(term.months?…)+'term — …'`). It
+ * used to be the frozen phrase "for the pilot term", which meant the one row
+ * every proposal prints announced a pilot on a twelve-month Enterprise deal and
+ * ignored the term the seller had just chosen on the left. Users and sites come
+ * from the seller's Included Users / Included Jobsites fields rather than the
+ * catalog defaults the asset reads, so the row states what was actually quoted.
  */
 function buildPackageLine(state: GeneratorState | null | undefined): ProposalLineItem {
   const rawKey = toText(readField(state, "packageSelect")).trim();
@@ -340,11 +349,14 @@ function buildPackageLine(state: GeneratorState | null | undefined): ProposalLin
   const sites = clamp(fieldNumber(state, "includedSites", base.sites), 0);
   const qty = 1;
 
+  const term = parseProposalTerm(state?.fields);
+  const termPrefix = term.durationLabel ? `${term.durationLabel} ` : "";
+
   return {
     source: "package",
     key: resolvedKey,
     name: base.name,
-    desc: `Platform access for the pilot term — includes ${users} users and ${sites} sites.`,
+    desc: `Platform access for the ${termPrefix}term — includes ${users} users and ${sites} sites.`,
     qty,
     price,
     amount: roundCents(qty * price),

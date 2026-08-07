@@ -14,11 +14,15 @@ import type { ProposalStatus } from "@/lib/proposals/types";
 import {
   buildProposalDocumentModel,
   documentCopy,
+  documentLimits,
   fieldCount,
   fieldLines,
   fieldText,
+  fitTeamBios,
   formatDocumentDate,
   missingValue,
+  truncateAtWord,
+  type DocumentTeamMember,
   type ProposalDocumentModel,
   type ProposalDocumentSubject,
 } from "./proposal-document-model";
@@ -369,5 +373,113 @@ describe("buildProposalDocumentModel — revision markers", () => {
     });
     expect(model.currentRevisionLabel).toBe("Revision 1");
     expect(model.isHistoricalRevision).toBe(false);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Page budget                                                                 */
+/*                                                                             */
+/* The eight-page ceiling itself is asserted against the real paginator in     */
+/* lib/proposals/pdf.test.ts. What is checked here is the trimming behaviour   */
+/* that ceiling depends on — and, just as importantly, that the CONTRACTUAL    */
+/* regions are left alone by it.                                               */
+/* -------------------------------------------------------------------------- */
+
+const bio = (paragraphs: string[]): DocumentTeamMember => ({
+  id: "44444444-4444-4444-8444-444444444444",
+  name: "Dana Reyes",
+  title: "Head of Safety",
+  paragraphs,
+});
+
+describe("truncateAtWord", () => {
+  it("returns short text byte-for-byte, with nothing appended", () => {
+    expect(truncateAtWord("Short enough.", 100)).toBe("Short enough.");
+    expect(truncateAtWord("", 100)).toBe("");
+  });
+
+  it("cuts on a word boundary and marks the cut", () => {
+    const trimmed = truncateAtWord("alpha bravo charlie delta echo", 18);
+    expect(trimmed).toBe("alpha bravo…");
+    expect(trimmed.length).toBeLessThanOrEqual(19);
+  });
+
+  it("drops a trailing separator so the ellipsis does not read as a typo", () => {
+    expect(truncateAtWord("alpha bravo, charlie delta", 13)).toBe("alpha bravo…");
+  });
+
+  it("hard-clips a single token with no word boundary to cut on", () => {
+    expect(truncateAtWord("x".repeat(50), 10)).toBe(`${"x".repeat(10)}…`);
+  });
+});
+
+describe("fitTeamBios", () => {
+  it("leaves a team that already fits completely untouched", () => {
+    const team = [bio(["First paragraph.", "Second paragraph."])];
+    expect(fitTeamBios(team)).toEqual(team);
+  });
+
+  it("splits the budget evenly, so one long bio survives where six cannot", () => {
+    const long = "word ".repeat(800); // 4,000 chars — the profile's own limit
+    const alone = fitTeamBios([bio([long])], 6000);
+    expect(alone[0].paragraphs[0]).toBe(long);
+
+    const six = fitTeamBios(
+      Array.from({ length: 6 }, () => bio([long])),
+      6000,
+    );
+    for (const member of six) {
+      expect(member.paragraphs.join("").length).toBeLessThanOrEqual(1001);
+    }
+  });
+
+  it("keeps earlier paragraphs whole and trims only where the budget runs out", () => {
+    const [member] = fitTeamBios([bio(["alpha bravo charlie", "delta echo foxtrot golf"])], 30);
+    expect(member.paragraphs[0]).toBe("alpha bravo charlie");
+    expect(member.paragraphs[1]).toMatch(/…$/);
+  });
+
+  it("handles an empty team and a zero budget without producing empty prose", () => {
+    expect(fitTeamBios([])).toEqual([]);
+    expect(fitTeamBios([bio(["anything"])], 0)[0].paragraphs).toEqual([]);
+  });
+});
+
+describe("buildProposalDocumentModel — page budget", () => {
+  it("caps the executive summary", () => {
+    const model = buildProposalDocumentModel({
+      state: state({ fields: { customSummary: "word ".repeat(2000) } }),
+      proposal: subject(),
+    });
+    expect(model.summary.length).toBeLessThanOrEqual(documentLimits.summaryChars + 1);
+    expect(model.summary.endsWith("…")).toBe(true);
+  });
+
+  it("applies the team budget without the caller having to remember to", () => {
+    const model = buildProposalDocumentModel({
+      state: state(),
+      proposal: subject(),
+      team: Array.from({ length: 6 }, () => bio(["word ".repeat(800)])),
+    });
+    const printed = model.team.reduce((sum, member) => sum + member.paragraphs.join("").length, 0);
+    expect(printed).toBeLessThanOrEqual(documentLimits.teamBioChars + 6);
+  });
+
+  it("never trims the assumptions, the scope paragraphs, or the fee table", () => {
+    // These are the offer. Losing the tail of an exclusion to save a sheet is a
+    // worse defect than a long document, so the budget deliberately skips them.
+    const exclusions = "word ".repeat(4000);
+    const scope = "scope ".repeat(400);
+    const model = buildProposalDocumentModel({
+      state: state({
+        fields: { customExclusions: exclusions },
+        services: [item({ key: "custom", name: "Bespoke line", desc: scope, qty: 1, price: 100 })],
+      }),
+      proposal: subject(),
+    });
+
+    expect(model.exclusions).toBe(exclusions.trim());
+    expect(model.serviceScope[0].body).toBe(scope.trim());
+    expect(model.feeGroups.flatMap((group) => group.rows)).toHaveLength(2);
   });
 });
