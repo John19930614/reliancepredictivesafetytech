@@ -85,6 +85,22 @@ describe("ehs_talent_engine is wired into both halves of the platform", () => {
     expect(talentHrefs).toEqual(["/employee/talent-engine"]);
   });
 
+  it("adds no module key and no nav row for the web-sourcing review queue", () => {
+    // /employee/talent-engine/leads is a sub-path reached from the console and
+    // the framework reference, not a sidebar row. Both halves of the parity
+    // check are load-bearing here and fail in opposite directions:
+    //   - a second module key would mean a second grant, so the people already
+    //     trusted with bill/pay/spread would land on the queue locked out;
+    //   - a second sidebar row would satisfy the platform-wide checks above
+    //     while only duplicating an entry that widens nobody's access.
+    const talentModules = portalModuleCatalog.filter((entry) =>
+      entry.pathPrefixes.some((prefix) => prefix.startsWith("/employee/talent-engine")),
+    );
+    expect(talentModules.map((entry) => entry.key)).toEqual(["ehs_talent_engine"]);
+    expect(getPortalModuleForPath("/employee/talent-engine/leads")?.key).toBe("ehs_talent_engine");
+    expect(sidebarHrefs()).not.toContain("/employee/talent-engine/leads");
+  });
+
   it("is not handed out by default — the module shows bill rates, pay rates and margin", () => {
     expect(sidebarSource).toContain('label: "Talent Engine"');
     // Belt and braces alongside lib/user-management.test.ts: the grant has to be

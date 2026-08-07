@@ -369,3 +369,72 @@ export interface CertificationCoverage {
 
 /** Certifications expiring inside this window are surfaced as a warning. */
 export const certExpiryWarningDays = 60;
+
+// ============================================================================
+// Web sourcing — the daily Sourcing Agent sweep (Tier 1 gathers, Tier 2 gate
+// admits). Leads NEVER auto-promote into talent_candidates / talent_job_orders:
+// a human accepts or dismisses every one (Human Authority Rule, CLAUDE.md).
+// ============================================================================
+
+export const sourcingRunTypes = ["candidates", "job_orders"] as const;
+export type SourcingRunType = (typeof sourcingRunTypes)[number];
+
+export const sourcingRunStatuses = ["running", "completed", "failed"] as const;
+export type SourcingRunStatus = (typeof sourcingRunStatuses)[number];
+
+export interface SourcingRunRow {
+  id: string;
+  run_type: SourcingRunType;
+  status: SourcingRunStatus;
+  /** Human-readable description of what was searched, for the review UI. */
+  query_summary: string | null;
+  leads_found: number;
+  leads_inserted: number;
+  /** Populated when status = 'failed'. */
+  error: string | null;
+  /** 'cron' for the scheduled sweep, or the triggering user's id. */
+  triggered_by: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export const sourcingLeadStatuses = ["new", "accepted", "dismissed"] as const;
+export type SourcingLeadStatus = (typeof sourcingLeadStatuses)[number];
+
+/**
+ * One web-sourced lead awaiting human review.
+ *
+ * PRIVACY / EEO CONTRACT: candidate leads carry only public professional
+ * information — name or handle as published, title, claimed certifications,
+ * vertical, location, pay signal, and the public source URL. Protected
+ * attributes are never requested, extracted, or stored, and the scoring
+ * surface in scoring.ts cannot receive them.
+ */
+export interface SourcingLeadRow {
+  id: string;
+  run_id: string | null;
+  lead_type: SourcingRunType;
+  /** Candidate: person's published name. Job order: the role title. */
+  title: string;
+  /** Candidate: current employer/affiliation if published. Job order: hiring company. */
+  organization: string | null;
+  location: string | null;
+  vertical: string | null;
+  certifications: string[];
+  /** Candidate: published pay ask $/hr if any. Job order: published bill/contract rate $/hr if any. */
+  rate_signal: number | null;
+  source_url: string;
+  /** Short gateway-validated summary of why the agent surfaced this lead. */
+  summary: string | null;
+  status: SourcingLeadStatus;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  /** Set when an accepted lead created a row, for the audit trail. */
+  created_record_id: string | null;
+  created_at: string;
+}
+
+/** Caps per run, so a runaway search cannot flood the review queue. */
+export const sourcingMaxLeadsPerRun = 25;
+/** Leads older than this in `new` status are surfaced as stale in the UI. */
+export const sourcingLeadStaleDays = 14;

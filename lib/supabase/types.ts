@@ -7058,6 +7058,110 @@ export type Database = {
         }
         Relationships: []
       }
+      talent_sourcing_leads: {
+        Row: {
+          certifications: string[]
+          created_at: string | null
+          created_record_id: string | null
+          id: string
+          lead_type: string
+          location: string | null
+          organization: string | null
+          rate_signal: number | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          run_id: string | null
+          source_url: string
+          status: string
+          summary: string | null
+          title: string
+          vertical: string | null
+        }
+        Insert: {
+          certifications?: string[]
+          created_at?: string | null
+          created_record_id?: string | null
+          id?: string
+          lead_type: string
+          location?: string | null
+          organization?: string | null
+          rate_signal?: number | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          run_id?: string | null
+          source_url: string
+          status?: string
+          summary?: string | null
+          title: string
+          vertical?: string | null
+        }
+        Update: {
+          certifications?: string[]
+          created_at?: string | null
+          created_record_id?: string | null
+          id?: string
+          lead_type?: string
+          location?: string | null
+          organization?: string | null
+          rate_signal?: number | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          run_id?: string | null
+          source_url?: string
+          status?: string
+          summary?: string | null
+          title?: string
+          vertical?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "talent_sourcing_leads_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "talent_sourcing_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      talent_sourcing_runs: {
+        Row: {
+          error: string | null
+          finished_at: string | null
+          id: string
+          leads_found: number
+          leads_inserted: number
+          query_summary: string | null
+          run_type: string
+          started_at: string
+          status: string
+          triggered_by: string | null
+        }
+        Insert: {
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          leads_found?: number
+          leads_inserted?: number
+          query_summary?: string | null
+          run_type: string
+          started_at?: string
+          status?: string
+          triggered_by?: string | null
+        }
+        Update: {
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          leads_found?: number
+          leads_inserted?: number
+          query_summary?: string | null
+          run_type?: string
+          started_at?: string
+          status?: string
+          triggered_by?: string | null
+        }
+        Relationships: []
+      }
       talent_timesheets: {
         Row: {
           amount_billed: number

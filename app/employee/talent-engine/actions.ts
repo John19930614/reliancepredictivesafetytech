@@ -41,17 +41,22 @@ import {
 } from "@/lib/talent-engine/pricing";
 import { scoreMatch, toScoringInput } from "@/lib/talent-engine/scoring";
 import { buildActivityEntry, buildMatchRecommendation } from "@/lib/talent-engine/ai";
+import { canTransitionLead } from "@/lib/talent-engine/sourcing-policy";
+import { runSourcingSweep } from "@/app/api/cron/talent-sourcing/orchestrate";
 import {
   candidateStatuses,
   defaultTalentSettings,
   jobOrderPriorities,
   jobOrderStatuses,
   maxHourlyRate,
+  sourcingRunTypes,
   talentAutonomyTiers,
   type CandidateStatus,
   type JobOrderPriority,
   type JobOrderStatus,
   type MatchStatus,
+  type SourcingLeadStatus,
+  type SourcingRunType,
   type TalentAutonomyTier,
 } from "@/lib/talent-engine/types";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
@@ -1695,4 +1700,378 @@ export async function updateTalentSettings(patch: TalentSettingsPatch): Promise<
 
   revalidateTalent();
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Web sourcing — the human review gate on every lead
+//
+// The Sourcing Agent sweeps the public web and files what it finds in
+// `talent_sourcing_leads` with status 'new'. NOTHING it finds becomes a
+// candidate, a job order or a match on its own: the four actions below are the
+// only door out of that queue, and every one of them needs a signed-in human
+// with `canPropose` (the manual sweep needs `canApprove`).
+//
+// This is the Human Authority Rule applied to sourcing (CLAUDE.md). The AI may
+// gather and summarise; a person admits.
+//
+// PRIVACY / EEO: a lead carries only published professional information. When
+// one is accepted, the fields copied across are exactly the ones a recruiter
+// would have typed by hand — name/title, claimed certifications, vertical,
+// location, a rate signal and the public source URL. Nothing else is copied,
+// and `verified_certifications` is NEVER seeded from a lead.
+// ---------------------------------------------------------------------------
+
+const sourcingTables = {
+  runs: "talent_sourcing_runs",
+  leads: "talent_sourcing_leads",
+} as const;
+
+const talentLeadsPath = "/employee/talent-engine/leads";
+
+/** The console and the review queue both change when a lead is decided. */
+function revalidateSourcing(): void {
+  revalidatePath(talentPath);
+  revalidatePath(talentLeadsPath);
+}
+
+const sourcingLeadColumns =
+  "id, run_id, lead_type, title, organization, location, vertical, certifications, rate_signal, " +
+  "source_url, summary, status, reviewed_by, reviewed_at, created_record_id";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function loadSourcingLead(supabase: any, leadId: string) {
+  const { data } = await supabase
+    .from(sourcingTables.leads)
+    .select(sourcingLeadColumns)
+    .eq("id", leadId)
+    .maybeSingle();
+  return data ?? null;
+}
+
+const leadTypeLabels: Record<SourcingRunType, string> = {
+  candidates: "candidate",
+  job_orders: "job order",
+};
+
+/**
+ * The provenance note written onto the record an accepted lead creates.
+ *
+ * The source URL is kept verbatim so a reviewer can always go back to what the
+ * agent actually read — an accepted lead must never become an unattributable
+ * row that nobody can audit.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildLeadProvenance(lead: any): string | null {
+  const summary = cleanText(lead?.summary, notesMaxLength);
+  const sourceUrl = cleanText(lead?.source_url, notesMaxLength);
+  const organization = cleanText(lead?.organization, nameMaxLength);
+  const parts = [
+    summary,
+    organization ? `Organisation: ${organization}` : null,
+    sourceUrl ? `Web-sourced lead: ${sourceUrl}` : null,
+  ].filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join("\n\n").slice(0, notesMaxLength) : null;
+}
+
+/**
+ * A scraped rate is a SIGNAL, not a quote. It is re-validated through the same
+ * bounds a typed rate goes through, and a malformed one is simply dropped
+ * rather than blocking the human's decision.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function leadRateSignal(lead: any): number | null {
+  const errors: Record<string, string> = {};
+  const rate = toNullableRate(lead?.rate_signal, "rateSignal", errors);
+  return firstError(errors) ? null : rate;
+}
+
+/**
+ * Admits one lead into the pipeline.
+ *
+ * `canPropose`, not `canApprove`: accepting a lead is the same act as typing a
+ * candidate or a job order in by hand, and it lands in exactly the same
+ * unapproved state (`sourced` / `open`). What it may NOT do is skip a gate the
+ * manual path enforces — so no verified certifications are seeded, and a
+ * reviewer without `canSetRate` cannot use a lead to put a client price on a
+ * job order.
+ */
+export async function acceptSourcingLead(leadId: string): Promise<ActionResult & { createdId?: string }> {
+  const { supabase, userId, canRead, canPropose, canSetRate, role } = await getTalentAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT_MESSAGE };
+  if (!canRead) return { ok: false, error: "You do not have access to the Talent Engine." };
+  if (!canPropose) return { ok: false, error: "You do not have permission to review sourcing leads." };
+  if (!isTalentUuid(leadId)) return { ok: false, error: "Missing or invalid lead id." };
+
+  const lead = await loadSourcingLead(supabase, leadId);
+  if (!lead) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  const gate = canTransitionLead(lead.status as SourcingLeadStatus, "accepted");
+  if (!gate.ok) return { ok: false, error: gate.reason };
+
+  const title = cleanText(lead.title, nameMaxLength);
+  if (!title) return { ok: false, error: "That lead has nothing to create a record from." };
+
+  const certifications = cleanStringList(lead.certifications);
+  const vertical = cleanText(lead.vertical, nameMaxLength);
+  const location = cleanText(lead.location, nameMaxLength);
+  const notes = buildLeadProvenance(lead);
+  const rate = leadRateSignal(lead);
+
+  const leadType: SourcingRunType = lead.lead_type === "job_orders" ? "job_orders" : "candidates";
+  const resourceType = leadType === "job_orders" ? "talent_job_order" : "talent_candidate";
+
+  let created: { id: string } | null = null;
+  let insertError: { message?: string } | null = null;
+  let auditAfter: Record<string, unknown>;
+
+  if (leadType === "job_orders") {
+    // The bill rate is the CLIENT PRICE. A reviewer who cannot set rates may
+    // admit the order but not price it — the scraped signal is dropped, not
+    // smuggled in through the back door.
+    const billRate = canSetRate ? rate : null;
+    const result = await supabase
+      .from(tables.jobOrders)
+      .insert({
+        title,
+        vertical,
+        location,
+        cert_requirements: certifications,
+        bill_rate: billRate,
+        status: "open",
+        notes,
+        created_by: userId,
+      })
+      .select("id")
+      .single();
+    created = result.data ?? null;
+    insertError = result.error ?? null;
+    auditAfter = { title, vertical, cert_requirements: certifications, bill_rate: billRate };
+  } else {
+    const result = await supabase
+      .from(tables.candidates)
+      .insert({
+        full_name: title,
+        certifications,
+        // NEVER from a lead. Only verifyCandidateCertification() writes this
+        // list, and that needs `canApprove` — a sourced claim is not a
+        // verification, and treating it as one would unblock a submittal.
+        verified_certifications: [],
+        verticals: vertical ? [vertical] : [],
+        location,
+        pay_expectation: rate,
+        status: "sourced",
+        notes,
+        created_by: userId,
+      })
+      .select("id")
+      .single();
+    created = result.data ?? null;
+    insertError = result.error ?? null;
+    auditAfter = { full_name: title, certifications, verified_certifications: [], pay_expectation: rate };
+  }
+
+  if (insertError || !created?.id) {
+    return { ok: false, error: insertError?.message ?? `Failed to create the ${leadTypeLabels[leadType]}.` };
+  }
+
+  const reviewedAt = new Date().toISOString();
+  const { data: reviewed, error: reviewError } = await supabase
+    .from(sourcingTables.leads)
+    .update({
+      status: "accepted",
+      reviewed_by: userId,
+      reviewed_at: reviewedAt,
+      created_record_id: created.id,
+    })
+    .eq("id", leadId)
+    .select("id");
+  if (reviewError || !reviewed || reviewed.length === 0) {
+    return {
+      ok: false,
+      error: `The ${leadTypeLabels[leadType]} was created but the lead could not be marked accepted: ${
+        reviewError?.message ?? NO_ROWS_MESSAGE
+      }`,
+    };
+  }
+
+  await recordTalentAudit(
+    role,
+    "create",
+    resourceType,
+    created.id,
+    userId,
+    `Accepted a web-sourced ${leadTypeLabels[leadType]} lead: "${title}"`,
+    { lead_id: leadId, lead_status: lead.status, source_url: lead.source_url ?? null },
+    auditAfter,
+  );
+  await logActivity(
+    supabase,
+    buildActivityEntry(null, "sourcing_lead_accepted", 2, `Accepted the sourced ${leadTypeLabels[leadType]} "${title}"`, {
+      actorType: "human",
+      actorId: userId,
+      jobOrderId: leadType === "job_orders" ? created.id : null,
+      candidateId: leadType === "candidates" ? created.id : null,
+    }),
+  );
+
+  revalidateSourcing();
+  return { ok: true, createdId: created.id };
+}
+
+/** Turns a lead down. Nothing is deleted — the row stays for the audit trail. */
+export async function dismissSourcingLead(leadId: string, note?: string): Promise<ActionResult> {
+  const { supabase, userId, canRead, canPropose, role } = await getTalentAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT_MESSAGE };
+  if (!canRead) return { ok: false, error: "You do not have access to the Talent Engine." };
+  if (!canPropose) return { ok: false, error: "You do not have permission to review sourcing leads." };
+  if (!isTalentUuid(leadId)) return { ok: false, error: "Missing or invalid lead id." };
+
+  const lead = await loadSourcingLead(supabase, leadId);
+  if (!lead) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  const gate = canTransitionLead(lead.status as SourcingLeadStatus, "dismissed");
+  if (!gate.ok) return { ok: false, error: gate.reason };
+
+  const cleanNote = cleanText(note, notesMaxLength);
+  const title = cleanText(lead.title, nameMaxLength) ?? "an untitled lead";
+  const reviewedAt = new Date().toISOString();
+
+  const { data: updated, error } = await supabase
+    .from(sourcingTables.leads)
+    .update({ status: "dismissed", reviewed_by: userId, reviewed_at: reviewedAt })
+    .eq("id", leadId)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!updated || updated.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  await recordTalentAudit(
+    role,
+    "update",
+    "talent_sourcing_lead",
+    leadId,
+    userId,
+    `Dismissed the web-sourced lead "${title}"`,
+    { status: lead.status },
+    { status: "dismissed", reviewed_by: userId, note: cleanNote },
+  );
+  await logActivity(
+    supabase,
+    buildActivityEntry(null, "sourcing_lead_dismissed", 2, cleanNote ?? `Dismissed the sourced lead "${title}"`, {
+      actorType: "human",
+      actorId: userId,
+    }),
+  );
+
+  revalidateSourcing();
+  return { ok: true };
+}
+
+/**
+ * Puts a dismissed lead back in the queue.
+ *
+ * The reviewer stamp is cleared with it: `new` means "awaiting review", and
+ * leaving a reviewer's name on a row nobody has decided yet would misreport who
+ * looked at it. Who restored it is recorded in the audit event and the feed.
+ */
+export async function restoreSourcingLead(leadId: string): Promise<ActionResult> {
+  const { supabase, userId, canRead, canPropose, role } = await getTalentAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT_MESSAGE };
+  if (!canRead) return { ok: false, error: "You do not have access to the Talent Engine." };
+  if (!canPropose) return { ok: false, error: "You do not have permission to review sourcing leads." };
+  if (!isTalentUuid(leadId)) return { ok: false, error: "Missing or invalid lead id." };
+
+  const lead = await loadSourcingLead(supabase, leadId);
+  if (!lead) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  const gate = canTransitionLead(lead.status as SourcingLeadStatus, "new");
+  if (!gate.ok) return { ok: false, error: gate.reason };
+
+  const title = cleanText(lead.title, nameMaxLength) ?? "an untitled lead";
+
+  const { data: updated, error } = await supabase
+    .from(sourcingTables.leads)
+    .update({ status: "new", reviewed_by: null, reviewed_at: null })
+    .eq("id", leadId)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!updated || updated.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  await recordTalentAudit(
+    role,
+    "update",
+    "talent_sourcing_lead",
+    leadId,
+    userId,
+    `Restored the web-sourced lead "${title}" to the review queue`,
+    { status: lead.status, reviewed_by: lead.reviewed_by ?? null },
+    { status: "new", reviewed_by: null },
+  );
+  await logActivity(
+    supabase,
+    buildActivityEntry(null, "sourcing_lead_restored", 2, `Restored the sourced lead "${title}"`, {
+      actorType: "human",
+      actorId: userId,
+    }),
+  );
+
+  revalidateSourcing();
+  return { ok: true };
+}
+
+/**
+ * Runs the sourcing sweep by hand, outside the twice-weekly schedule.
+ *
+ * `canApprove`, not `canPropose`: this spends the search budget, writes to the
+ * queue every reviewer works from, and is the oversight lever on an autonomous
+ * agent — so it sits with the same people who hold the approval gate. It runs
+ * on the CALLER's client, so RLS applies exactly as it would to any other write
+ * they make; the cron path is the only one that uses the service role.
+ */
+export async function runSourcingNow(runType: SourcingRunType): Promise<ActionResult & { inserted?: number }> {
+  const { supabase, userId, canRead, canApprove, role } = await getTalentAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT_MESSAGE };
+  if (!canRead) return { ok: false, error: "You do not have access to the Talent Engine." };
+  if (!canApprove) return { ok: false, error: "You do not have permission to run the sourcing agent." };
+  if (!sourcingRunTypes.includes(runType)) return { ok: false, error: "Unknown sourcing run type." };
+
+  const sweep = await runSourcingSweep(supabase, {
+    runTypes: [runType],
+    triggeredBy: userId,
+    actorId: userId,
+  });
+
+  if (sweep.skipped) {
+    return { ok: false, error: sweep.message ?? "Talent Engine web sourcing is not set up yet." };
+  }
+
+  const run = sweep.runs[0];
+  if (!run) return { ok: false, error: "The sourcing run did not start." };
+
+  if (run.runId) {
+    await recordTalentAudit(
+      role,
+      "create",
+      "talent_sourcing_run",
+      run.runId,
+      userId,
+      `Ran a ${leadTypeLabels[runType]} web sourcing sweep by hand`,
+      null,
+      {
+        run_type: runType,
+        status: run.status,
+        leads_found: run.leadsFound,
+        leads_inserted: run.leadsInserted,
+        error: run.error ?? null,
+      },
+    );
+  }
+
+  // The sweep writes its own activity-feed line (one per run, from the Sourcing
+  // Agent), so nothing is logged twice here.
+  revalidateSourcing();
+
+  if (run.status === "failed") {
+    return { ok: false, error: run.error ?? "The sourcing run failed.", inserted: 0 };
+  }
+  return { ok: true, inserted: run.leadsInserted };
 }

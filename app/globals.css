@@ -7815,4 +7815,438 @@ a.platform-card:hover {
   }
 }
 
+/* ---- Web sourcing: the review queue at /talent-engine/leads -------------- */
+/* No new palette. Everything below reuses the tokens declared on
+   .talent-console: `ai` for what an agent did unattended, `flag` for a lead
+   that has gone stale, `money` for a published rate signal. Lead status is
+   always ALSO spelled out in text — a badge's tint is never the only signal. */
+
+/* Back to the console, sitting on the dark header gradient. */
+.talent-backlink {
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: #eef4fa;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 700;
+  gap: 7px;
+  padding: 8px 14px;
+  text-decoration: none;
+  transition: background-color 150ms ease;
+}
+
+.talent-backlink:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Intro band: what the loop is, plus the manual sweep triggers. */
+.talent-lead-intro {
+  border: 1px solid var(--talent-line);
+  border-left: 3px solid var(--talent-ai);
+  border-radius: var(--talent-radius);
+  background: var(--talent-card);
+  box-shadow: var(--talent-shadow);
+  display: grid;
+  gap: 11px;
+  padding: 14px 16px;
+}
+
+.talent-lead-lede {
+  color: var(--talent-slate);
+  font-size: 0.83rem;
+  line-height: 1.55;
+}
+
+.talent-sweep {
+  display: grid;
+  gap: 8px;
+}
+
+.talent-sweep-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* The lead cards and the sweep buttons carry icons; the console's own buttons
+   do not, so the flex alignment is scoped here rather than added to .talent-btn. */
+.talent-lead .talent-btn,
+.talent-sweep .talent-btn {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+/* Two review columns — candidate leads and job-order leads. */
+.talent-lead-columns {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.talent-lead-list {
+  display: grid;
+  gap: 13px;
+}
+
+/* ── One lead ───────────────────────────────────────────────────────────── */
+
+.talent-lead {
+  border: 1px solid var(--talent-line);
+  border-radius: 11px;
+  background: #fcfdff;
+  padding: 13px;
+}
+
+/* Unreviewed past sourcingLeadStaleDays. The tint only reinforces the badge
+   text, which names the window. */
+.talent-lead-stale {
+  border-color: var(--talent-flag-line);
+  background: #fffdf5;
+}
+
+.talent-lead-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.talent-lead-id {
+  min-width: 0;
+  flex: 1;
+}
+
+.talent-lead-title {
+  color: var(--talent-navy);
+  font-size: 0.87rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.talent-lead-meta {
+  color: var(--portal-muted);
+  font-size: 0.74rem;
+  margin-top: 2px;
+}
+
+.talent-lead-rate {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.talent-lead-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 9px;
+}
+
+.talent-lead-badge {
+  border: 1px solid var(--talent-line);
+  border-radius: 999px;
+  background: var(--talent-paper);
+  color: var(--portal-muted);
+  font-size: 0.63rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+
+.talent-lead-badge-status {
+  border-color: var(--portal-gold);
+  background: var(--talent-gate-soft);
+  color: var(--talent-gate-ink);
+}
+
+.talent-lead-badge-stale {
+  border-color: var(--talent-flag-line);
+  background: var(--talent-flag-soft);
+  color: var(--talent-flag);
+  white-space: normal;
+}
+
+.talent-lead-certs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 9px;
+}
+
+.talent-lead-cert {
+  border: 1px solid var(--talent-ai-line);
+  border-radius: 5px;
+  background: var(--talent-ai-soft);
+  color: #0c4b52;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  padding: 2px 7px;
+}
+
+/* The public URL the claim came from — the reviewer's way of disbelieving the
+   agent. Truncated for layout; the full URL is in the title attribute. */
+.talent-lead-source {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.talent-lead-source-key {
+  color: var(--portal-muted);
+  flex: 0 0 auto;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.talent-lead-source-link {
+  align-items: center;
+  color: var(--talent-slate);
+  display: inline-flex;
+  font-size: 0.74rem;
+  font-weight: 700;
+  gap: 5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-decoration: underline;
+}
+
+.talent-lead-source-link:hover {
+  color: var(--talent-navy);
+}
+
+/* Rendered when source_url is not plain http(s) — shown, never linked. */
+.talent-lead-source-plain {
+  color: var(--portal-muted);
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+}
+
+/* ── Recent sweeps strip ────────────────────────────────────────────────── */
+
+.talent-runs {
+  display: grid;
+  gap: 11px;
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+}
+
+.talent-run {
+  border: 1px solid var(--talent-line);
+  border-radius: 9px;
+  background: var(--talent-paper);
+  padding: 9px 11px;
+}
+
+.talent-run-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.talent-run-type {
+  color: var(--talent-navy);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.talent-run-status {
+  border-radius: 4px;
+  font-size: 0.57rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.talent-run-status-done {
+  background: var(--talent-money-soft);
+  color: var(--talent-money);
+}
+
+.talent-run-status-running {
+  background: var(--talent-ai-soft);
+  color: var(--talent-ai);
+}
+
+.talent-run-status-failed {
+  background: var(--talent-danger-soft);
+  color: var(--talent-danger);
+}
+
+.talent-run-counts {
+  color: var(--talent-slate);
+  font-size: 0.73rem;
+  margin-top: 5px;
+}
+
+.talent-run-counts strong {
+  color: var(--talent-navy);
+  font-weight: 800;
+}
+
+.talent-run-meta,
+.talent-run-query {
+  color: var(--portal-muted);
+  font-size: 0.68rem;
+  margin-top: 3px;
+}
+
+.talent-run-query {
+  overflow-wrap: anywhere;
+}
+
+.talent-run-error {
+  border-radius: 6px;
+  background: #fff0f0;
+  color: #5e1111;
+  font-size: 0.68rem;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  padding: 5px 7px;
+}
+
+/* ── Dismissed leads (collapsed, restorable) ────────────────────────────── */
+
+.talent-dismissed {
+  border: 1px solid var(--talent-line);
+  border-radius: var(--talent-radius);
+  background: var(--talent-card);
+  box-shadow: var(--talent-shadow);
+  overflow: hidden;
+}
+
+.talent-dismissed-summary {
+  align-items: center;
+  color: var(--talent-navy);
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  font-weight: 800;
+  gap: 10px;
+  list-style: none;
+  padding: 13px 16px;
+}
+
+.talent-dismissed-summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Text affordance rather than a bare chevron — the open/closed state has to be
+   readable, not inferred from an arrow's rotation. */
+.talent-dismissed-summary::after {
+  border: 1px solid var(--talent-line);
+  border-radius: 999px;
+  color: var(--portal-muted);
+  content: "Show";
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  margin-left: auto;
+  padding: 2px 10px;
+  text-transform: uppercase;
+}
+
+.talent-dismissed[open] .talent-dismissed-summary::after {
+  content: "Hide";
+}
+
+.talent-dismissed-hint {
+  color: var(--portal-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.talent-dismissed-list {
+  border-top: 1px solid var(--talent-line);
+  padding: 14px 16px;
+}
+
+/* ── Console link-card into the queue ───────────────────────────────────── */
+
+.talent-leadlink {
+  align-items: center;
+  border: 1px solid var(--talent-line);
+  border-left: 3px solid var(--talent-ai);
+  border-radius: var(--talent-radius);
+  background: var(--talent-card);
+  box-shadow: var(--talent-shadow);
+  color: inherit;
+  display: flex;
+  gap: 11px;
+  padding: 12px 14px;
+  text-decoration: none;
+  transition: border-color 150ms ease;
+}
+
+.talent-leadlink:hover {
+  border-color: var(--talent-ai);
+}
+
+.talent-leadlink-mark {
+  align-items: center;
+  border-radius: 8px;
+  background: var(--talent-ai-soft);
+  color: var(--talent-ai);
+  display: flex;
+  flex: 0 0 32px;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+
+.talent-leadlink-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.talent-leadlink-title {
+  color: var(--talent-navy);
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.talent-leadlink-sub {
+  color: var(--portal-muted);
+  display: block;
+  font-size: 0.71rem;
+  line-height: 1.4;
+}
+
+.talent-leadlink-count {
+  border: 1px solid var(--talent-line);
+  border-radius: 999px;
+  background: var(--talent-paper);
+  color: var(--talent-slate);
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+@container talent (max-width: 1040px) {
+  .talent-lead-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1100px) {
+  .talent-lead-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* ===== End EHS Talent Engine ============================================= */

@@ -6,21 +6,29 @@ vi.mock("@/lib/audit/events", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/audit/events")>();
   return { ...actual, recordAuditEvent: vi.fn(async () => {}) };
 });
+// The sweep is exercised directly in app/api/cron/talent-sourcing/route.test.ts;
+// here we only care that runSourcingNow gates it and reports what it returns.
+vi.mock("@/app/api/cron/talent-sourcing/orchestrate", () => ({ runSourcingSweep: vi.fn() }));
 
 import { revalidatePath } from "next/cache";
 import { getTalentAccess } from "@/lib/talent-engine/access";
 import { recordAuditEvent } from "@/lib/audit/events";
 import { resolveTalentRoleFlags } from "@/lib/talent-engine/policy";
+import { runSourcingSweep } from "@/app/api/cron/talent-sourcing/orchestrate";
 import {
+  acceptSourcingLead,
   approveMatch,
   counterMatch,
   createCandidate,
   createJobOrder,
   createMatch,
   createPlacement,
+  dismissSourcingLead,
   holdMatch,
   logTimesheet,
   rejectMatch,
+  restoreSourcingLead,
+  runSourcingNow,
   setJobOrderStatus,
   submitMatch,
   updateCandidate,
@@ -32,6 +40,7 @@ import {
 const getAccessMock = vi.mocked(getTalentAccess);
 const auditMock = vi.mocked(recordAuditEvent);
 const revalidateMock = vi.mocked(revalidatePath);
+const sweepMock = vi.mocked(runSourcingSweep);
 
 const JOB_ORDER_ID = "11111111-1111-4111-8111-111111111111";
 const CANDIDATE_ID = "22222222-2222-4222-8222-222222222222";
@@ -39,6 +48,7 @@ const MATCH_ID = "33333333-3333-4333-8333-333333333333";
 const PLACEMENT_ID = "44444444-4444-4444-8444-444444444444";
 const SETTINGS_ID = "55555555-5555-4555-8555-555555555555";
 const CLIENT_ID = "66666666-6666-4666-8666-666666666666";
+const LEAD_ID = "77777777-7777-4777-8777-777777777777";
 
 // ---------------------------------------------------------------------------
 // Minimal chainable stand-in for the Supabase PostgREST client, matching the
@@ -1249,5 +1259,410 @@ describe("audit events", () => {
     expect(event.resource_type).toBe("talent_match");
     expect(event.resource_id).toBe(MATCH_ID);
     expect(event.after_state).toMatchObject({ status: "approved" });
+  });
+});
+
+// ===========================================================================
+// WEB SOURCING — the human review gate on every lead
+// ===========================================================================
+
+const LEADS_TABLE = "talent_sourcing_leads";
+const LEADS_PATH = "/employee/talent-engine/leads";
+const NEW_JOB_ORDER_ID = "88888888-8888-4888-8888-888888888888";
+
+function sourcingLead(overrides: Record<string, unknown> = {}) {
+  return {
+    id: LEAD_ID,
+    run_id: "run-1",
+    lead_type: "candidates",
+    title: "Dana Reyes",
+    organization: "Gulf Coast Industrial",
+    location: "Houston, TX",
+    vertical: "Construction",
+    certifications: ["CSP", "OSHA 30"],
+    rate_signal: 68,
+    source_url: "https://example.com/profiles/dana-reyes",
+    summary: "Published CSP holder listing construction site safety experience.",
+    status: "new",
+    reviewed_by: null,
+    reviewed_at: null,
+    created_record_id: null,
+    ...overrides,
+  };
+}
+
+const leadUpdated = { data: [{ id: LEAD_ID }] };
+
+describe("permission matrix — sourcing lead review", () => {
+  it("lets a recruiter (canPropose) accept a candidate lead and stamps the review", async () => {
+    const supabase = createSupabaseMock({
+      [`${LEADS_TABLE}:select`]: { data: sourcingLead() },
+      [`${LEADS_TABLE}:update`]: leadUpdated,
+      "talent_candidates:insert": { data: { id: CANDIDATE_ID } },
+      "talent_activity_log:insert": {},
+    });
+    signIn("employee", supabase);
+
+    const result = await acceptSourcingLead(LEAD_ID);
+
+    expect(result).toEqual({ ok: true, createdId: CANDIDATE_ID });
+    expect(findCall(supabase, "talent_candidates", "insert")?.payload).toMatchObject({
+      full_name: "Dana Reyes",
+      certifications: ["CSP", "OSHA 30"],
+      status: "sourced",
+      created_by: "user-1",
+    });
+
+    const review = findCall(supabase, LEADS_TABLE, "update");
+    expect(review?.payload).toMatchObject({
+      status: "accepted",
+      reviewed_by: "user-1",
+      created_record_id: CANDIDATE_ID,
+    });
+    expect(review?.payload?.reviewed_at).toBeTruthy();
+    expect(review?.filters).toContainEqual(["id", LEAD_ID]);
+
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(findCall(supabase, "talent_activity_log", "insert")?.payload).toMatchObject({
+      actor_type: "human",
+      action: "sourcing_lead_accepted",
+      tier: 2,
+      actor_id: "user-1",
+    });
+    expect(revalidateMock).toHaveBeenCalledWith("/employee/talent-engine");
+    expect(revalidateMock).toHaveBeenCalledWith(LEADS_PATH);
+  });
+
+  it("DENIES every review action to the read-only account manager", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("marketing", supabase);
+
+    expect((await acceptSourcingLead(LEAD_ID)).ok).toBe(false);
+    expect((await dismissSourcingLead(LEAD_ID)).ok).toBe(false);
+    expect((await restoreSourcingLead(LEAD_ID)).ok).toBe(false);
+    expect((await runSourcingNow("candidates")).ok).toBe(false);
+
+    expect(supabase.calls).toHaveLength(0);
+    expect(auditMock).not.toHaveBeenCalled();
+    expect(sweepMock).not.toHaveBeenCalled();
+  });
+
+  it("DENIES every review action to a role outside the portal whitelist", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("client_user", supabase);
+
+    expect((await acceptSourcingLead(LEAD_ID)).error).toContain("access to the Talent Engine");
+    expect((await dismissSourcingLead(LEAD_ID)).error).toContain("access to the Talent Engine");
+    expect((await restoreSourcingLead(LEAD_ID)).error).toContain("access to the Talent Engine");
+    expect((await runSourcingNow("job_orders")).error).toContain("access to the Talent Engine");
+    expect(supabase.calls).toHaveLength(0);
+  });
+
+  it("denies a signed-out caller before any query", async () => {
+    getAccessMock.mockResolvedValue({
+      supabase: null, userId: null, role: null, canRead: false, canPropose: false, canSetRate: false,
+      canApprove: false, canManagePlacements: false, isAdmin: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    expect(await acceptSourcingLead(LEAD_ID)).toEqual({ ok: false, error: "You must be signed in." });
+    expect(await dismissSourcingLead(LEAD_ID)).toEqual({ ok: false, error: "You must be signed in." });
+    expect(await restoreSourcingLead(LEAD_ID)).toEqual({ ok: false, error: "You must be signed in." });
+    expect(await runSourcingNow("candidates")).toEqual({ ok: false, error: "You must be signed in." });
+  });
+
+  it("rejects a malformed lead id before it reaches a filter", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("company_admin", supabase);
+
+    for (const bad of ["", "not-a-uuid", "'; drop table talent_sourcing_leads; --"]) {
+      expect((await acceptSourcingLead(bad)).ok).toBe(false);
+      expect((await dismissSourcingLead(bad)).ok).toBe(false);
+      expect((await restoreSourcingLead(bad)).ok).toBe(false);
+    }
+    expect(supabase.calls).toHaveLength(0);
+  });
+});
+
+describe("acceptSourcingLead never launders a lead past a gate", () => {
+  it("refuses a lead that has already been accepted", async () => {
+    const supabase = createSupabaseMock({
+      [`${LEADS_TABLE}:select`]: { data: sourcingLead({ status: "accepted", created_record_id: CANDIDATE_ID }) },
+      [`${LEADS_TABLE}:update`]: leadUpdated,
+      "talent_candidates:insert": { data: { id: CANDIDATE_ID } },
+    });
+    signIn("employee", supabase);
+
+    const result = await acceptSourcingLead(LEAD_ID);
+
+    expect(result.ok).toBe(false);
+    // Nothing was created and the lead was not re-stamped.
+    expect(supabase.calls.some((c) => c.op === "insert")).toBe(false);
+    expect(supabase.calls.some((c) => c.op === "update")).toBe(false);
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a lead that has been dismissed, until it is restored first", async () => {
+    const supabase = createSupabaseMock({
+      [`${LEADS_TABLE}:select`]: { data: sourcingLead({ status: "dismissed" }) },
+      "talent_candidates:insert": { data: { id: CANDIDATE_ID } },
+    });
+    signIn("employee", supabase);
+
+    expect((await acceptSourcingLead(LEAD_ID)).ok).toBe(false);
+    expect(supabase.calls.some((c) => c.op === "insert")).toBe(false);
+  });
+
+  it("NEVER carries a verification across from a scraped claim", async () => {
+    const supabase = createSupabaseMock({
+      [`${LEADS_TABLE}:select`]: {
+        // A hostile / over-eager row claiming its certs are already verified.
+        data: sourcingLead({ verified_certifications: ["CSP", "OSHA 30"] }),
+      },
+      [`${LEADS_TABLE}:update`]: leadUpdated,
+      "talent_candidates:insert": { data: { id: CANDIDATE_ID } },
+      "talent_activity_log:insert": {},
+    });
+    signIn("employee", supabase);
+
+    expect((await acceptSourcingLead(LEAD_ID)).ok).toBe(true);
+
+    const payload = findCall(supabase, "talent_candidates", "insert")?.payload ?? {};
+    // A claim is not a verification: only verifyCandidateCertification(), which
+    // needs canApprove, may ever write this list.
+    expect(payload.verified_certifications).toEqual([]);
+    expect(payload.certifications).toEqual(["CSP", "OSHA 30"]);
+  });
+
+  it("drops the scraped bill rate for a reviewer who cannot set rates", async () => {
+    const jobOrderLead = sourcingLead({
+      lead_type: "job_orders",
+      title: "Contract Safety Manager",
+      rate_signal: 140,
+      certifications: ["CSP"],
+    });
+
+    const recruiter = createSupabaseMock({
+      [`${LEADS_TABLE}:select`]: { data: jobOrderLead },
+      [`${LEADS_TABLE}:update`]: leadUpdated,
+      "talent_job_orders:insert": { data: { id: NEW_JOB_ORDER_ID } },
+      "talent_activity_log:insert": {},
+    });
+    signIn("employee", recruiter);
+
+    expect(await acceptSourcingLead(LEAD_ID)).toEqual({ ok: true, createdId: NEW_JOB_ORDER_ID });
+    const recruiterPayload = findCall(recruiter, "talent_job_orders", "insert")?.payload ?? {};
+    expect(recruiterPayload).toMatchObject({
+      title: "Contract Safety Manager",
+      cert_requirements: ["CSP"],
+      status: "open",
+      bill_rate: null,
+    });
+    expect(JSON.stringify(recruiterPayload)).not.toContain("140");
+
+    // The same lead, accepted by someone who may price it, keeps the signal.
+    const manager = createSupabaseMock({
+      [`${LEADS_TABLE}:select`]: { data: jobOrderLead },
+      [`${LEADS_TABLE}:update`]: leadUpdated,
+      "talent_job_orders:insert": { data: { id: NEW_JOB_ORDER_ID } },
+      "talent_activity_log:insert": {},
+    });
+    signIn("company_admin", manager);
+
+    expect((await acceptSourcingLead(LEAD_ID)).ok).toBe(true);
+    expect(findCall(manager, "talent_job_orders", "insert")?.payload).toMatchObject({ bill_rate: 140 });
+  });
+
+  it("drops an out-of-bounds rate signal rather than writing it to a money column", async () => {
+    const supabase = createSupabaseMock({
+      [`${LEADS_TABLE}:select`]: { data: sourcingLead({ rate_signal: 9_999_999 }) },
+      [`${LEADS_TABLE}:update`]: leadUpdated,
+      "talent_candidates:insert": { data: { id: CANDIDATE_ID } },
+      "talent_activity_log:insert": {},
+    });
+    signIn("company_admin", supabase);
+
+    expect((await acceptSourcingLead(LEAD_ID)).ok).toBe(true);
+    expect(findCall(supabase, "talent_candidates", "insert")?.payload?.pay_expectation).toBeNull();
+  });
+
+  it("reports failure when the lead stamp affects zero rows", async () => {
+    const supabase = createSupabaseMock({
+      [`${LEADS_TABLE}:select`]: { data: sourcingLead() },
+      [`${LEADS_TABLE}:update`]: { data: [] },
+      "talent_candidates:insert": { data: { id: CANDIDATE_ID } },
+    });
+    signIn("employee", supabase);
+
+    const result = await acceptSourcingLead(LEAD_ID);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("could not be marked accepted");
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("reports failure for a lead id that does not exist", async () => {
+    const supabase = createSupabaseMock({ [`${LEADS_TABLE}:select`]: { data: null } });
+    signIn("employee", supabase);
+
+    expect((await acceptSourcingLead(LEAD_ID)).ok).toBe(false);
+    expect(supabase.calls.some((c) => c.op === "insert")).toBe(false);
+  });
+});
+
+describe("dismissSourcingLead / restoreSourcingLead", () => {
+  it("dismisses a new lead, stamps the reviewer and keeps the row", async () => {
+    const supabase = createSupabaseMock({
+      [`${LEADS_TABLE}:select`]: { data: sourcingLead() },
+      [`${LEADS_TABLE}:update`]: leadUpdated,
+      "talent_activity_log:insert": {},
+    });
+    signIn("employee", supabase);
+
+    expect(await dismissSourcingLead(LEAD_ID, "Out of market")).toEqual({ ok: true });
+
+    const update = findCall(supabase, LEADS_TABLE, "update");
+    expect(update?.payload).toMatchObject({ status: "dismissed", reviewed_by: "user-1" });
+    expect(update?.payload?.reviewed_at).toBeTruthy();
+    // Nothing is deleted — the row stays for the audit trail.
+    expect(supabase.calls.some((c) => c.op === "delete")).toBe(false);
+    expect(findCall(supabase, "talent_activity_log", "insert")?.payload).toMatchObject({
+      actor_type: "human",
+      action: "sourcing_lead_dismissed",
+      tier: 2,
+    });
+    expect(revalidateMock).toHaveBeenCalledWith(LEADS_PATH);
+  });
+
+  it("refuses to dismiss a lead that has already been accepted", async () => {
+    const supabase = createSupabaseMock({
+      [`${LEADS_TABLE}:select`]: { data: sourcingLead({ status: "accepted" }) },
+      [`${LEADS_TABLE}:update`]: leadUpdated,
+    });
+    signIn("employee", supabase);
+
+    expect((await dismissSourcingLead(LEAD_ID)).ok).toBe(false);
+    expect(supabase.calls.some((c) => c.op === "update")).toBe(false);
+  });
+
+  it("restores a dismissed lead and clears the stale reviewer stamp", async () => {
+    const supabase = createSupabaseMock({
+      [`${LEADS_TABLE}:select`]: { data: sourcingLead({ status: "dismissed", reviewed_by: "user-9" }) },
+      [`${LEADS_TABLE}:update`]: leadUpdated,
+      "talent_activity_log:insert": {},
+    });
+    signIn("employee", supabase);
+
+    expect(await restoreSourcingLead(LEAD_ID)).toEqual({ ok: true });
+    expect(findCall(supabase, LEADS_TABLE, "update")?.payload).toEqual({
+      status: "new",
+      reviewed_by: null,
+      reviewed_at: null,
+    });
+  });
+
+  it("refuses to restore a lead that is already in the queue", async () => {
+    const supabase = createSupabaseMock({
+      [`${LEADS_TABLE}:select`]: { data: sourcingLead({ status: "new" }) },
+      [`${LEADS_TABLE}:update`]: leadUpdated,
+    });
+    signIn("employee", supabase);
+
+    expect((await restoreSourcingLead(LEAD_ID)).ok).toBe(false);
+    expect(supabase.calls.some((c) => c.op === "update")).toBe(false);
+  });
+
+  it("reports failure when a dismissal affects zero rows", async () => {
+    const supabase = createSupabaseMock({
+      [`${LEADS_TABLE}:select`]: { data: sourcingLead() },
+      [`${LEADS_TABLE}:update`]: { data: [] },
+    });
+    signIn("employee", supabase);
+
+    expect((await dismissSourcingLead(LEAD_ID)).ok).toBe(false);
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("runSourcingNow is an oversight action", () => {
+  it("DENIES the manual sweep to a recruiter who may propose but not approve", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("employee", supabase);
+
+    const result = await runSourcingNow("candidates");
+
+    expect(result).toEqual({ ok: false, error: "You do not have permission to run the sourcing agent." });
+    expect(sweepMock).not.toHaveBeenCalled();
+    expect(supabase.calls).toHaveLength(0);
+  });
+
+  it("runs the sweep on the CALLER's client, attributed to them, and reports the count", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("company_admin", supabase);
+    sweepMock.mockResolvedValue({
+      ok: true,
+      skipped: false,
+      runs: [{ runType: "candidates", runId: "run-1", status: "completed", leadsFound: 12, leadsInserted: 5 }],
+    });
+
+    const result = await runSourcingNow("candidates");
+
+    expect(result).toEqual({ ok: true, inserted: 5 });
+    // The user's own client — not the service role — so RLS still applies.
+    expect(sweepMock).toHaveBeenCalledWith(supabase, {
+      runTypes: ["candidates"],
+      triggeredBy: "user-1",
+      actorId: "user-1",
+    });
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock.mock.calls[0][0].resource_type).toBe("talent_sourcing_run");
+    expect(revalidateMock).toHaveBeenCalledWith(LEADS_PATH);
+  });
+
+  it("reports a failed run as a failure rather than a silent success", async () => {
+    signIn("company_admin", createSupabaseMock({}));
+    sweepMock.mockResolvedValue({
+      ok: true,
+      skipped: false,
+      runs: [
+        {
+          runType: "job_orders",
+          runId: "run-2",
+          status: "failed",
+          leadsFound: 0,
+          leadsInserted: 0,
+          error: "The sourcing provider is not configured.",
+        },
+      ],
+    });
+
+    const result = await runSourcingNow("job_orders");
+
+    expect(result).toEqual({ ok: false, error: "The sourcing provider is not configured.", inserted: 0 });
+  });
+
+  it("says so when the sourcing migration has not been applied", async () => {
+    signIn("platform_admin", createSupabaseMock({}));
+    sweepMock.mockResolvedValue({
+      ok: true,
+      skipped: true,
+      message: "Talent Engine web sourcing is not set up in Supabase yet. Apply the latest database migrations and try again.",
+      runs: [],
+    });
+
+    const result = await runSourcingNow("candidates");
+
+    expect(result.ok).toBe(false);
+    expect(String(result.error)).toContain("migrations");
+  });
+
+  it("rejects an unknown run type before the sweep is reached", async () => {
+    signIn("company_admin", createSupabaseMock({}));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await runSourcingNow("everything" as any);
+
+    expect(result).toEqual({ ok: false, error: "Unknown sourcing run type." });
+    expect(sweepMock).not.toHaveBeenCalled();
   });
 });

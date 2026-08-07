@@ -16,6 +16,8 @@
  * with each other or with what a Server Action wrote.
  */
 
+import Link from "next/link";
+import { Radar } from "lucide-react";
 import { buildConsoleSummary, computeSpread, computeWeeklyMargin, summariseLedger } from "@/lib/talent-engine/pricing";
 import { getTalentAccess, type TalentAccess } from "@/lib/talent-engine/access";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
@@ -220,6 +222,7 @@ export default async function TalentEnginePage() {
     activityResult,
     certScanResult,
     poolCountResult,
+    newLeadsResult,
   ] = await Promise.all([
     readList<{
       min_spread_per_hour: number | null;
@@ -297,6 +300,12 @@ export default async function TalentEnginePage() {
     readList<{ id: string }>(
       db.from("talent_candidates").select("id", { count: "exact", head: true }).in("status", activePoolStatuses),
     ),
+
+    // Web-sourced leads still waiting on a human. Counted, never listed here:
+    // the console is the money surface, and the review gate has its own page.
+    readList<{ id: string }>(
+      db.from("talent_sourcing_leads").select("id", { count: "exact", head: true }).eq("status", "new"),
+    ),
   ]);
 
   // Options for the intake forms, fetched only when the viewer can use them.
@@ -340,6 +349,7 @@ export default async function TalentEnginePage() {
     activityResult,
     certScanResult,
     poolCountResult,
+    newLeadsResult,
     clientOptionsResult,
     orderOptionsResult,
     candidateOptionsResult,
@@ -481,6 +491,20 @@ export default async function TalentEnginePage() {
             orders={jobOrdersResult.rows}
           />
           <TalentPoolCard activeCount={poolCountResult.count} canPropose={canPropose} candidates={candidatesResult.rows} />
+          <Link className="talent-leadlink" href="/employee/talent-engine/leads">
+            <span aria-hidden="true" className="talent-leadlink-mark">
+              <Radar size={16} />
+            </span>
+            <span className="talent-leadlink-main">
+              <span className="talent-leadlink-title">Sourcing leads</span>
+              <span className="talent-leadlink-sub">
+                What the agent found on the public web, waiting on a human. Nothing joins the pool on its own.
+              </span>
+            </span>
+            <span className="talent-leadlink-count">
+              {newLeadsResult.count === 0 ? "None new" : `${newLeadsResult.count} new`}
+            </span>
+          </Link>
         </div>
 
         <div className="talent-col">

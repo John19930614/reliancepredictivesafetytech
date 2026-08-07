@@ -10,6 +10,7 @@ import {
   computeWeeklyMargin,
 } from "@/lib/talent-engine/pricing";
 import { scoringSignals, talentScoringWeights, type ScoringSignal } from "@/lib/talent-engine/scoring";
+import { sourcingLeadTransitions } from "@/lib/talent-engine/sourcing-policy";
 import {
   approvalDecisions,
   candidateStatuses,
@@ -21,11 +22,17 @@ import {
   jobOrderStatuses,
   matchStatuses,
   placementStatuses,
+  sourcingLeadStaleDays,
+  sourcingLeadStatuses,
+  sourcingMaxLeadsPerRun,
+  sourcingRunStatuses,
+  sourcingRunTypes,
   talentActorTypes,
   talentAutonomyTierLabels,
   talentAutonomyTiers,
   timesheetStatuses,
   type MatchStatus,
+  type SourcingLeadStatus,
   type TalentAutonomyTier,
 } from "@/lib/talent-engine/types";
 
@@ -38,17 +45,22 @@ import {
 //
 //   the money band            lib/talent-engine/pricing.ts + types.ts
 //   the status graph          talentMatchTransitions (policy.ts)
+//   the lead review graph     sourcingLeadTransitions (sourcing-policy.ts)
 //   the roles matrix          resolveTalentRoleFlags() (policy.ts)
 //   the autonomy tier labels  talentAutonomyTierLabels (types.ts)
 //   the data model's enums    the status/decision tuples in types.ts
+//   the table count           dataModel.length, in §5 and §6 alike
+//   the sourcing caps         sourcingMaxLeadsPerRun / sourcingLeadStaleDays
 //   the scoring weights       talentScoringWeights (scoring.ts)
 //
 // What remains hand-written is prose that has no code to drift from: the
-// explanatory copy, the six workflow step descriptions, the table/column list
-// (mirrored from supabase/migrations/20260806140000_ehs_talent_engine.sql, which
-// is the only place those column names exist as data), and the guardrail list.
-// Those are marked in the page itself where a reader could otherwise mistake a
-// sentence for an enforced rule.
+// explanatory copy, the workflow step descriptions, the table/column list
+// (mirrored from supabase/migrations/20260806140000_ehs_talent_engine.sql and
+// 20260807120000_talent_sourcing.sql, which are the only places those column
+// names exist as data), the cron schedule literal (which lives in vercel.json,
+// not in a module this page can import), and the guardrail list. Those are
+// marked in the page itself where a reader could otherwise mistake a sentence
+// for an enforced rule.
 //
 // Access: the module key `ehs_talent_engine` covers this path via prefix match,
 // and lib/supabase/middleware.ts rejects a user without the grant before this
@@ -58,7 +70,7 @@ import {
 export const metadata: Metadata = {
   title: "Talent Engine — Framework & Architecture",
   description:
-    "Blueprint for the EHS Talent Engine: the markup-staffing money model, the approval-gated workflow, the permissions matrix, AI autonomy tiers, the talent_* data model, and match scoring.",
+    "Blueprint for the EHS Talent Engine: the markup-staffing money model, the approval-gated workflow, the permissions matrix, AI autonomy tiers, the talent_* data model, match scoring, and the twice-weekly web sourcing sweep with its human review queue.",
 };
 
 /* -------------------------------------------------------------------------- */
@@ -244,9 +256,10 @@ const autonomyTierDetail: Record<TalentAutonomyTier, { tone: string; body: strin
 type Column = { name: string; money?: boolean; note?: string };
 
 // Column names mirror supabase/migrations/20260806140000_ehs_talent_engine.sql
-// and the row interfaces in lib/talent-engine/types.ts. The `enum` line under
-// each table IS read from those types, so a new status cannot appear in the code
-// without appearing here.
+// (the eight original tables) and 20260807120000_talent_sourcing.sql (the two
+// sourcing tables), plus the row interfaces in lib/talent-engine/types.ts. The
+// `enum` line under each table IS read from those types, so a new status cannot
+// appear in the code without appearing here.
 const dataModel: {
   table: string;
   purpose: string;
@@ -423,7 +436,70 @@ const dataModel: {
       { name: "updated_at" },
     ],
   },
+  {
+    table: "talent_sourcing_runs",
+    purpose: "One row per web sweep. Opened as running, then finalised exactly once — see §8.",
+    access:
+      "Read / insert / update: any active portal employee. Delete: admin. No updated_at column, because started_at and finished_at already bracket the row's whole life.",
+    columns: [
+      { name: "id" },
+      { name: "run_type", note: "which of the two searches this pass was" },
+      { name: "status" },
+      { name: "query_summary", note: "what was actually searched, so a reviewer can judge the leads against it" },
+      { name: "leads_found", note: "what the agent returned" },
+      { name: "leads_inserted", note: "what survived validation and dedup — a wide gap means the query needs rewriting" },
+      { name: "error", note: "populated when status = failed" },
+      { name: "triggered_by", note: "'cron' for the schedule, or the triggering user's id" },
+      { name: "started_at" },
+      { name: "finished_at" },
+    ],
+    enums: [
+      { column: "run_type", values: sourcingRunTypes },
+      { column: "status", values: sourcingRunStatuses },
+    ],
+  },
+  {
+    table: "talent_sourcing_leads",
+    purpose:
+      "The human review queue. Public professional information only — there is deliberately no contact-details column, because outreach begins after a human accepts.",
+    access:
+      "Read / insert / update: any active portal employee — reviewing a lead IS the update. Delete: admin. Unique on (lead_type, source_url): the dedup guarantee.",
+    columns: [
+      { name: "id" },
+      { name: "run_id", note: "→ talent_sourcing_runs, ON DELETE SET NULL — purging runs must not delete unreviewed leads" },
+      { name: "lead_type" },
+      { name: "title", note: "candidate: the published name. job order: the role title" },
+      { name: "organization", note: "candidate: employer/affiliation. job order: the hiring company" },
+      { name: "location" },
+      { name: "vertical" },
+      { name: "certifications[]", note: "as CLAIMED by the source — nothing here is verified" },
+      { name: "rate_signal", money: true, note: "published $/hr signal, bounded by the same rate limits as the rest of the money layer" },
+      { name: "source_url", note: "normalised before insert; half of the dedup key" },
+      { name: "summary", note: "short gateway-validated note on why the agent surfaced it" },
+      { name: "status" },
+      { name: "reviewed_by" },
+      { name: "reviewed_at" },
+      { name: "created_record_id", note: "the row an accepted lead created — not a FK, because which table depends on lead_type" },
+      { name: "created_at" },
+    ],
+    enums: [
+      { column: "lead_type", values: sourcingRunTypes },
+      { column: "status", values: sourcingLeadStatuses },
+    ],
+  },
 ];
+
+/* -------------------------------------------------------------------------- */
+/* The cron contract — read by §6's stack list and by §8                      */
+/* -------------------------------------------------------------------------- */
+
+// The two hand-written strings in the web-sourcing story. They live in
+// vercel.json and in the route folder name, neither of which is a module this
+// page can import, so unlike everything else on the page they are transcribed.
+// `0 12 * * 1,4` is Monday and Thursday at 12:00 UTC.
+const sourcingCronSchedule = "0 12 * * 1,4";
+const sourcingCronPath = "/api/cron/talent-sourcing";
+const sourcingCronDays = "Mon + Thu, 12:00 UTC";
 
 /* -------------------------------------------------------------------------- */
 /* 6. Architecture & guardrails                                               */
@@ -432,13 +508,28 @@ const dataModel: {
 // The blueprint HTML listed Supabase Edge Functions and pgvector. This platform
 // uses neither, and printing them would describe a system that does not exist —
 // so they are moved into `plannedStack` and labelled.
+//
+// The OpenAI Responses entry is the one thing on this list that changed
+// category. The module as first built made NO network call and held NO model
+// key: lib/talent-engine/ai.ts is a deterministic rules engine, and the
+// "AI recommends:" line on a match card is composed locally. Web sourcing (§8)
+// is the first and only place the module reaches outside the building, so the
+// dependency is real now and belongs here rather than in `plannedStack`.
 const liveStack = [
   { name: "Next.js App Router", detail: "Server Components render the console and this page" },
   { name: "Server Actions", detail: "every mutation; no client-side writes" },
   { name: "Supabase Postgres", detail: "the talent_* tables above" },
-  { name: "Row Level Security", detail: "enabled on all eight tables" },
+  { name: "Row Level Security", detail: `enabled on all ${dataModel.length} tables` },
   { name: "validateAIOutput()", detail: "lib/ai/gateway.ts — every AI string passes through it" },
-  { name: "Vitest", detail: "unit + RBAC suites for policy, pricing and scoring" },
+  {
+    name: "OpenAI Responses API + web search",
+    detail: "the §8 sourcing sweep only — server-side, keyed by OPENAI_API_KEY and OPENAI_RESEARCH_MODEL",
+  },
+  {
+    name: "Vercel Cron",
+    detail: `${sourcingCronSchedule} → ${sourcingCronPath}, authorised by CRON_SECRET`,
+  },
+  { name: "Vitest", detail: "unit + RBAC suites for policy, pricing, scoring and sourcing" },
   { name: "Vercel", detail: "hosting and the server runtime" },
 ];
 
@@ -459,6 +550,11 @@ const guardrails = [
   "EEO guardrail — the scorer's entire input surface is an allow-list of job-relevant attributes. Name, contact details, age, gender, race, national origin, marital status, disability and veteran status never reach it, and a compile-time assertion plus a unit test fail if the allow-list drifts.",
   "AI is reached only from the server. No model key is ever shipped to the browser, and no AI text is displayed without clearing validateAIOutput() first.",
   "Rate and hours inputs are validated before they are written, so a NaN can never reach a spread calculation or a floor check.",
+  "A web-sourced lead never promotes itself. The sweep writes one status, new, and both edges out of it are human decisions; the only code path that turns a lead into a candidate or a job order is the accept action, which requires a human with canPropose.",
+  `The sweep is authenticated twice. ${sourcingCronPath} rejects any request without a Bearer CRON_SECRET, and on Vercel additionally requires the scheduler's own x-vercel-cron header — so a leaked token cannot be replayed from outside.`,
+  `A run may add at most ${sourcingMaxLeadsPerRun} leads (capLeads()), and talent_sourcing_leads is UNIQUE on (lead_type, source_url) over a normalised URL. A queue nobody can finish is a queue nobody reads, and a dismissed lead must stay dismissed rather than reappear every sweep.`,
+  "Every field on a model-emitted lead is re-checked rather than coerced: validateLeadCandidate() rejects a quoted number, an over-long field, a non-http(s) source, or a lead with no title outright. No public source URL, no lead.",
+  "Lead privacy is enforced by the schema, not by the prompt: talent_sourcing_leads has no contact-details column and no field a protected attribute would fit in, and the scorer's allow-list is unchanged by any of this.",
 ];
 
 /* -------------------------------------------------------------------------- */
@@ -474,6 +570,93 @@ const signalCopy: Record<ScoringSignal, { label: string; measures: string }> = {
 };
 
 const weightTotal = scoringSignals.reduce((sum, signal) => sum + talentScoringWeights[signal], 0);
+
+/* -------------------------------------------------------------------------- */
+/* 8. Web sourcing pipeline                                                   */
+/* -------------------------------------------------------------------------- */
+
+// The six stages of one sweep. Same shape as `workflowSteps` in §2 — the review
+// stage is the `gate` kind for the same reason step 4 is up there: it is the one
+// stage the platform cannot do on its own. Bodies are nodes rather than strings
+// so the review stage can link to the queue it describes.
+const sourcingSteps: { kind: "ai" | "gate" | "done"; title: string; body: ReactNode }[] = [
+  {
+    kind: "ai",
+    title: "Schedule",
+    body: (
+      <>
+        <code>{sourcingCronSchedule}</code> in <code>vercel.json</code> — {sourcingCronDays} — calls{" "}
+        <code>{sourcingCronPath}</code>. One run row opens per run type, so the two searches fail independently.
+      </>
+    ),
+  },
+  {
+    kind: "ai",
+    title: "Search",
+    body: (
+      <>
+        The Sourcing Agent web-searches through the OpenAI Responses API for EHS professionals matching our open orders,
+        and for public EHS openings our pool could fill. Server-side only; the key never leaves the runtime.
+      </>
+    ),
+  },
+  {
+    kind: "ai",
+    title: "Validate",
+    body: (
+      <>
+        Every field is re-checked rather than trusted. A lead with no title or no public <code>http(s)</code> source is
+        thrown away, the URL is normalised, and the run is capped at {sourcingMaxLeadsPerRun}.
+      </>
+    ),
+  },
+  {
+    kind: "ai",
+    title: "Queue",
+    body: (
+      <>
+        Survivors are written to <code>talent_sourcing_leads</code> as <code>new</code>. The run row closes with{" "}
+        <code>leads_found</code> against <code>leads_inserted</code>, and the sweep lands in{" "}
+        <code>talent_activity_log</code> like every other agent action.
+      </>
+    ),
+  },
+  {
+    kind: "gate",
+    title: "Review Gate",
+    body: (
+      <>
+        A human works the queue at <Link href="/employee/talent-engine/leads">/employee/talent-engine/leads</Link>,
+        reading each lead against the query that produced it, and accepts or dismisses it. Nothing ages into acceptance.
+      </>
+    ),
+  },
+  {
+    kind: "done",
+    title: "Accept",
+    body: (
+      <>
+        Accepting is what creates the <code>talent_candidates</code> or <code>talent_job_orders</code> draft, and stamps
+        its id onto <code>created_record_id</code>. That draft then enters the ordinary workflow at §2, step 1.
+      </>
+    ),
+  },
+];
+
+// Derived proof that the review gate is structural rather than procedural, in
+// the same style as `statusesReachingSubmitted` in §2: the sweep writes exactly
+// one status, and every edge leading out of it is a decision only a human makes.
+const leadStatusesFromNew = sourcingLeadTransitions.new;
+const terminalLeadStatuses = (Object.keys(sourcingLeadTransitions) as SourcingLeadStatus[]).filter(
+  (status) => sourcingLeadTransitions[status].length === 0,
+);
+
+// Quoted verbatim from the PRIVACY / EEO CONTRACT on `SourcingLeadRow` in
+// lib/talent-engine/types.ts. It is reproduced rather than paraphrased because
+// the contract is the thing the schema and the extractor are both held to, and a
+// summary of it would be one edit away from permitting something it does not.
+const leadPrivacyContract =
+  "candidate leads carry only public professional information — name or handle as published, title, claimed certifications, vertical, location, pay signal, and the public source URL. Protected attributes are never requested, extracted, or stored, and the scoring surface in scoring.ts cannot receive them.";
 
 /* -------------------------------------------------------------------------- */
 /* Scoped presentation                                                        */
@@ -571,6 +754,23 @@ const frameworkStyles = `
   color: var(--talent-slate); font-size: 0.84rem; line-height: 1.55; }
 .tef-checks li:last-child { border-bottom: none; }
 .tef-checks li::before { content: "✓"; position: absolute; left: 0; top: 8px; color: var(--talent-ok); font-weight: 900; }
+
+/* §8 only: the verbatim privacy contract, and the three numbers that bound a
+   sweep. Both are read from code, so they get a shape that says "this is the
+   value itself" rather than prose that happens to contain a number. */
+.tef-quote { margin: 12px 0 0; padding: 10px 14px; border-left: 3px solid var(--talent-ai);
+  border-radius: 0 8px 8px 0; background: var(--talent-ai-soft); color: var(--talent-slate);
+  font-size: 0.83rem; line-height: 1.6; }
+.tef-quote cite { display: block; margin-top: 6px; color: var(--portal-muted); font-size: 0.74rem;
+  font-style: normal; }
+.tef-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+@media (max-width: 900px) { .tef-facts { grid-template-columns: minmax(0, 1fr); } }
+.tef-fact { padding: 11px 13px; border: 1px solid var(--talent-line); border-radius: 9px;
+  background: var(--talent-paper); }
+.tef-fact b { display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.02rem; font-weight: 850; color: var(--talent-ink); }
+.tef-fact span { display: block; margin-top: 3px; color: var(--portal-muted); font-size: 0.78rem;
+  line-height: 1.5; }
 
 .tef-sub { margin: 16px 0 8px; color: var(--portal-muted); font-size: 0.78rem; font-weight: 850;
   letter-spacing: .05em; text-transform: uppercase; }
@@ -890,10 +1090,11 @@ export default function TalentEngineFrameworkPage() {
         {/* ------------------------------------------------------------- 5 */}
         <Section id="tef-data" number={5} title="Data model">
           <p className="tef-lede">
-            Eight tables, all with row level security enabled. The green columns are the money layer:{" "}
+            {dataModel.length} tables, all with row level security enabled. The green columns are the money layer:{" "}
             <b>spread = bill_rate − pay_rate</b>, <b>markup = spread ÷ pay_rate</b>, and margin is realised per timesheet
             as <b>hours × spread</b>. The enum lines are read from <code>lib/talent-engine/types.ts</code>; the column
-            lists mirror <code>supabase/migrations/20260806140000_ehs_talent_engine.sql</code>.
+            lists mirror <code>supabase/migrations/20260806140000_ehs_talent_engine.sql</code> and{" "}
+            <code>20260807120000_talent_sourcing.sql</code>.
           </p>
 
           <div className="tef-two">
@@ -951,6 +1152,18 @@ export default function TalentEngineFrameworkPage() {
             The original blueprint sketched Edge Functions and a pgvector resume index. Neither is in this platform, and
             listing them as though they were would describe a system nobody can point at — so they sit above, dashed and
             labelled, until they exist.
+          </p>
+          <p className="tef-note">
+            <b>What changed.</b> The module as first built made no network call and held no model key at all —{" "}
+            <code>lib/talent-engine/ai.ts</code> is a deterministic rules engine, so the &ldquo;AI recommends:&rdquo;
+            line on a match card is composed locally and reproduces exactly from the activity log. Web sourcing (
+            <a href="#tef-sourcing">§8</a>) is the first and only place the module reaches outside the building, which
+            makes the OpenAI Responses dependency a real operational requirement rather than a plan, along with the
+            three variables it runs on: <code>OPENAI_API_KEY</code>, <code>OPENAI_RESEARCH_MODEL</code> and{" "}
+            <code>CRON_SECRET</code>. None of the three is new to the platform — all were already in{" "}
+            <code>.env.example</code>. Nothing about the reach changes where it happens: the search runs in the cron
+            route and in <code>lib/talent-engine/sourcing.ts</code>, both server-only, and the browser still never sees a
+            key.
           </p>
 
           <h3 className="tef-sub">Guardrails</h3>
@@ -1010,6 +1223,154 @@ export default function TalentEngineFrameworkPage() {
             Every signal above is job-relevant by construction. The scorer never sees a name, a photo, contact details,
             an age, or any free-text note that could carry a protected characteristic — its input type is an explicit
             allow-list, and both a compile-time assertion and a unit test fail if anything is added to it.
+          </p>
+        </Section>
+
+        {/* ------------------------------------------------------------- 8 */}
+        <Section
+          id="tef-sourcing"
+          number={8}
+          title="Web sourcing pipeline — the twice-weekly sweep"
+          tag={<span className="talent-tag-gate">Step 5 is human</span>}
+        >
+          <p className="tef-lede">
+            Twice a week the Sourcing Agent searches the public web for EHS professionals who fit our open orders, and
+            for EHS openings our pool could fill. Everything it finds lands in a review queue as a <b>lead</b>. A lead is
+            not a candidate and not a job order: it is a page somebody published, plus the agent&apos;s reason for
+            surfacing it, waiting for a human to say yes or no.
+          </p>
+
+          <div className="tef-flow">
+            {sourcingSteps.map((step, index) => (
+              <article className={`tef-step tef-step-${step.kind}`} key={step.title}>
+                <h3>
+                  {index + 1} · {step.title}
+                  {step.kind === "gate" ? " — human" : null}
+                </h3>
+                <p>{step.body}</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="tef-facts">
+            <div className="tef-fact">
+              <b>{sourcingCronSchedule}</b>
+              <span>
+                The schedule, verbatim from <code>vercel.json</code> — {sourcingCronDays}.
+              </span>
+            </div>
+            <div className="tef-fact">
+              <b>{sourcingMaxLeadsPerRun}</b>
+              <span>
+                Hard cap on the leads one run may queue (<code>sourcingMaxLeadsPerRun</code>). A queue nobody can finish
+                is a queue nobody reads.
+              </span>
+            </div>
+            <div className="tef-fact">
+              <b>{sourcingLeadStaleDays} days</b>
+              <span>
+                After which an untouched <code>new</code> lead is badged stale (<code>sourcingLeadStaleDays</code>). A
+                badge only — staleness never decides anything.
+              </span>
+            </div>
+          </div>
+
+          <h3 className="tef-sub">Leads never auto-promote</h3>
+          <p className="tef-note">
+            The same argument as §2, one graph down. <code>sourcingLeadTransitions</code> in{" "}
+            <code>lib/talent-engine/sourcing-policy.ts</code> is the whole lead graph, and the sweep writes exactly one
+            status — <code>new</code>. Every edge out of it (
+            {leadStatusesFromNew.map((status, index) => (
+              <span key={status}>
+                {index > 0 ? ", " : ""}
+                <code>{status}</code>
+              </span>
+            ))}
+            ) is a decision a human makes, and{" "}
+            {terminalLeadStatuses.map((status, index) => (
+              <span key={status}>
+                {index > 0 ? ", " : ""}
+                <code>{status}</code>
+              </span>
+            ))}{" "}
+            is terminal, because accepting is the act that created a real record and stamped{" "}
+            <code>created_record_id</code>. Undoing an acceptance means working on that record, not rewinding the lead.
+            This is CLAUDE.md&apos;s Human Authority Rule on the one surface where the module reads pages we do not
+            control: no lead ages into a candidate, and no volume of them changes that.
+          </p>
+
+          <div className="table-card tef-scroll">
+            <table className="data-table">
+              <caption className="tef-caption">
+                Lead review graph, read from <code>sourcingLeadTransitions</code>.
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Status</th>
+                  <th scope="col">May move to</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(Object.keys(sourcingLeadTransitions) as SourcingLeadStatus[]).map((status) => (
+                  <tr key={status}>
+                    <th className="tef-rowhead" scope="row">
+                      <code>{status}</code>
+                    </th>
+                    <td>
+                      {sourcingLeadTransitions[status].length === 0 ? (
+                        <span className="tef-muted">terminal — nothing follows</span>
+                      ) : (
+                        sourcingLeadTransitions[status].map((next, index) => (
+                          <span key={next}>
+                            {index > 0 ? ", " : ""}
+                            <code>{next}</code>
+                          </span>
+                        ))
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="tef-note">
+            A dismissed lead may be sent back to <code>new</code> by a human who changes their mind. The sweep itself
+            cannot resurrect one: <code>talent_sourcing_leads</code> is unique on{" "}
+            <code>(lead_type, source_url)</code> over a normalised URL, so re-finding the same page is a no-op rather
+            than a fresh row. Without that, every sweep would re-offer what was already turned down.
+          </p>
+
+          <h3 className="tef-sub">What a lead is allowed to contain</h3>
+          <p className="tef-note">
+            Quoted verbatim from the privacy contract on <code>SourcingLeadRow</code> in{" "}
+            <code>lib/talent-engine/types.ts</code>, which the schema and the extractor are both held to:
+          </p>
+          <blockquote className="tef-quote">
+            <ShieldCheck aria-hidden="true" className="tef-shield" size={14} />
+            {leadPrivacyContract}
+            <cite>lib/talent-engine/types.ts — PRIVACY / EEO CONTRACT on SourcingLeadRow</cite>
+          </blockquote>
+          <p className="tef-note">
+            The schema is what enforces it. <code>talent_sourcing_leads</code> has no email column, no phone column and
+            no free-text field a protected attribute would belong in — so &ldquo;do not collect it&rdquo; is not an
+            instruction the model has to obey, it is a column that does not exist. Contact details enter the platform
+            only after a human accepts a lead, on <code>talent_candidates</code>, where they always lived. Certifications
+            on a lead are <i>claimed</i>, never verified; verification stays where §5 puts it, on{" "}
+            <code>talent_candidates.verified_certifications</code>, and it still blocks submittal.
+          </p>
+
+          <h3 className="tef-sub">Where this sits in the tiers</h3>
+          <p className="tef-note">
+            Nothing new. Searching, extracting and queueing are an ordinary{" "}
+            <a href="#tef-tiers">
+              tier {talentAutonomyTiers[0]} — {talentAutonomyTierLabels[talentAutonomyTiers[0]]}
+            </a>{" "}
+            action: unattended, logged to <code>talent_activity_log</code> with its tier on the row, and consequential to
+            nothing outside the queue. Turning a lead into a record is an ordinary tier {talentAutonomyTiers[1]} one —{" "}
+            {talentAutonomyTierLabels[talentAutonomyTiers[1]]} — where the agent has produced a draft and a human with{" "}
+            <code>canPropose</code> releases it. Web sourcing needs no fourth tier because it invents no new kind of
+            authority: it widens the funnel at §2, step 1, and every gate downstream of that is unchanged.
           </p>
         </Section>
 
