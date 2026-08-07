@@ -23,6 +23,7 @@ import {
   buildJobOrderSearchPrompt,
   buildSourcingActivitySummary,
   buildSourcingQuerySummary,
+  collectCitedUrls,
   dedupeLeads,
   parseLeadArray,
   searchSourcingLeads,
@@ -137,20 +138,54 @@ function parsedLead(overrides: Partial<ParsedSourcingLead> = {}): ParsedSourcing
   };
 }
 
-function modelResponse(body: string, status: "completed" | "incomplete" = "completed") {
+/**
+ * `citedUrls` models the `url_citation` annotations the Responses API attaches
+ * to text it grounded in a page the web_search tool actually retrieved. They
+ * are the only URLs in a real response with evidence behind them, and
+ * searchSourcingLeads() now refuses any lead whose source_url is not among
+ * them — see the citation gate in sourcing.ts.
+ */
+function modelResponse(
+  body: string,
+  status: "completed" | "incomplete" = "completed",
+  citedUrls: string[] = [],
+) {
   return {
     status,
     output: [
       // A tool call the extractor must skip over, exactly as a real web-search
       // run returns before the message item.
       { type: "web_search_call", id: "ws_1", status: "completed" },
-      { type: "message", content: [{ type: "output_text", text: body }] },
+      {
+        type: "message",
+        content: [
+          {
+            type: "output_text",
+            text: body,
+            annotations: citedUrls.map((url) => ({ type: "url_citation", url })),
+          },
+        ],
+      },
     ],
   };
 }
 
-function respondWith(items: unknown[]): void {
-  responsesCreate.mockResolvedValue(modelResponse(JSON.stringify(items)));
+/** Every source_url an item carries, for the default "well-behaved" response. */
+function sourceUrlsOf(items: unknown[]): string[] {
+  return items
+    .map((item) => (item as { source_url?: unknown } | null)?.source_url)
+    .filter((url): url is string => typeof url === "string");
+}
+
+/**
+ * By default the model is honest: every URL it reports is one it retrieved, so
+ * the response cites them all. Pass `cite` to model a lying or partly-lying
+ * model — that is what the citation-gate tests do.
+ */
+function respondWith(items: unknown[], cite?: string[]): void {
+  responsesCreate.mockResolvedValue(
+    modelResponse(JSON.stringify(items), "completed", cite ?? sourceUrlsOf(items)),
+  );
 }
 
 const originalApiKey = process.env.OPENAI_API_KEY;
@@ -513,7 +548,7 @@ describe("searchSourcingLeads — parsing and filtering", () => {
     const result = await searchSourcingLeads("candidates", candidateContext());
 
     expect(result.leads).toHaveLength(2);
-    expect(result.raw).toEqual({ found: 2, rejected: 0 });
+    expect(result.raw).toEqual({ found: 2, rejected: 0, unverified: 0 });
     expect(result.querySummary).toContain("Candidate web sweep against 2 open orders");
 
     expect(result.leads[0]).toEqual({
@@ -536,6 +571,8 @@ describe("searchSourcingLeads — parsing and filtering", () => {
         "I searched three public boards [see the sources below] and found one match:\n\n```json\n" +
           JSON.stringify([leadItem()]) +
           "\n```\n\nLet me know if you want a wider sweep.",
+        "completed",
+        sourceUrlsOf([leadItem()]),
       ),
     );
 
@@ -551,7 +588,7 @@ describe("searchSourcingLeads — parsing and filtering", () => {
     const result = await searchSourcingLeads("candidates", candidateContext());
 
     expect(result.leads).toEqual([]);
-    expect(result.raw).toEqual({ found: 0, rejected: 0 });
+    expect(result.raw).toEqual({ found: 0, rejected: 0, unverified: 0 });
   });
 
   it("drops malformed items and counts every one of them as rejected", async () => {
@@ -566,7 +603,7 @@ describe("searchSourcingLeads — parsing and filtering", () => {
 
     const result = await searchSourcingLeads("candidates", candidateContext());
 
-    expect(result.raw).toEqual({ found: 6, rejected: 4 });
+    expect(result.raw).toEqual({ found: 6, rejected: 4, unverified: 0 });
     expect(result.leads.map((lead) => lead.title)).toEqual(["Jordan Blake", "Alex Rivera"]);
   });
 
@@ -582,7 +619,7 @@ describe("searchSourcingLeads — parsing and filtering", () => {
 
     const result = await searchSourcingLeads("candidates", candidateContext());
 
-    expect(result.raw).toEqual({ found: 2, rejected: 1 });
+    expect(result.raw).toEqual({ found: 2, rejected: 1, unverified: 0 });
     expect(result.leads.map((lead) => lead.title)).toEqual(["Jordan Blake"]);
   });
 
@@ -598,7 +635,7 @@ describe("searchSourcingLeads — parsing and filtering", () => {
 
     const result = await searchSourcingLeads("candidates", candidateContext());
 
-    expect(result.raw).toEqual({ found: 2, rejected: 1 });
+    expect(result.raw).toEqual({ found: 2, rejected: 1, unverified: 0 });
     expect(result.leads.map((lead) => lead.title)).toEqual(["Jordan Blake"]);
   });
 
@@ -611,7 +648,7 @@ describe("searchSourcingLeads — parsing and filtering", () => {
 
     const result = await searchSourcingLeads("job_orders", jobOrderContext());
 
-    expect(result.raw).toEqual({ found: 3, rejected: 0 });
+    expect(result.raw).toEqual({ found: 3, rejected: 0, unverified: 0 });
     expect(result.leads.map((lead) => lead.title)).toEqual(["First", "Third"]);
     expect(new Set(result.leads.map((lead) => lead.source_url)).size).toBe(2);
   });
@@ -640,7 +677,7 @@ describe("searchSourcingLeads — parsing and filtering", () => {
 
     const result = await searchSourcingLeads("candidates", candidateContext());
 
-    expect(result.raw).toEqual({ found: sourcingMaxLeadsPerRun + 5, rejected: 5 });
+    expect(result.raw).toEqual({ found: sourcingMaxLeadsPerRun + 5, rejected: 5, unverified: 0 });
     expect(result.leads).toHaveLength(sourcingMaxLeadsPerRun);
   });
 });
@@ -673,5 +710,105 @@ describe("buildSourcingActivitySummary", () => {
 
   it("stays inside the activity feed's summary budget", () => {
     expect(buildSourcingActivitySummary("candidates", 25, 25).length).toBeLessThanOrEqual(500);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The citation gate                                                          */
+/*                                                                            */
+/* A lead's whole value is that a human can click through and see the posting. */
+/* `source_url` is free text the model wrote; the url_citation annotations are */
+/* the only URLs in the response backed by a page the tool actually retrieved. */
+/* -------------------------------------------------------------------------- */
+
+describe("searchSourcingLeads — citation gate", () => {
+  it("drops a lead whose source_url was never retrieved", async () => {
+    const real = leadItem({ source_url: "https://boards.example.com/jobs/real-posting" });
+    const invented = leadItem({
+      title: "Riley Chen",
+      source_url: "https://boards.example.com/jobs/never-fetched",
+    });
+
+    // The tool retrieved only the first page; the second URL is the model's
+    // invention.
+    respondWith([real, invented], ["https://boards.example.com/jobs/real-posting"]);
+
+    const result = await searchSourcingLeads("candidates", candidateContext());
+
+    expect(result.leads).toHaveLength(1);
+    expect(result.leads[0]?.source_url).toBe("https://boards.example.com/jobs/real-posting");
+    expect(result.raw).toEqual({ found: 2, rejected: 0, unverified: 1 });
+  });
+
+  it("rejects the whole batch when the model answered without retrieving anything", async () => {
+    // The exact production failure this gate was built for (2026-08-07): a
+    // sweep returned ten plausible leads whose source URLs were sequential
+    // digit rotations of one another, with no page behind any of them.
+    const fabricated = Array.from({ length: 10 }, (_, i) =>
+      leadItem({ title: `Fabricated ${i}`, source_url: `https://www.indeed.com/viewjob?jk=${i}234567890` }),
+    );
+    respondWith(fabricated, []);
+
+    await expect(searchSourcingLeads("job_orders", jobOrderContext())).rejects.toThrow(
+      /web search retrieved no pages/i,
+    );
+  });
+
+  it("does not fail an honest empty sweep that cited nothing", async () => {
+    // No leads AND no citations is simply "found nothing" — not fabrication.
+    respondWith([], []);
+
+    const result = await searchSourcingLeads("job_orders", jobOrderContext());
+
+    expect(result.leads).toEqual([]);
+    expect(result.raw).toEqual({ found: 0, rejected: 0, unverified: 0 });
+  });
+
+  it("matches a citation that differs only by tracking parameters or fragment", async () => {
+    // Both sides go through normalizeSourceUrl, so a cited URL carrying utm_*
+    // still vouches for the lead's clean one.
+    const item = leadItem({ source_url: "https://boards.example.com/jobs/abc" });
+    respondWith([item], ["https://boards.example.com/jobs/abc?utm_source=openai#top"]);
+
+    const result = await searchSourcingLeads("candidates", candidateContext());
+
+    expect(result.leads).toHaveLength(1);
+    expect(result.raw.unverified).toBe(0);
+  });
+
+  it("counts a malformed lead as rejected, not unverified", async () => {
+    // Ordering matters: validation runs first, so a lead that never parsed is
+    // not also blamed on the citation gate. The good lead's citation keeps the
+    // batch-level "retrieved nothing" guard out of the way.
+    const good = leadItem({ source_url: "https://boards.example.com/jobs/good" });
+    respondWith([good, leadItem({ title: "" })], ["https://boards.example.com/jobs/good"]);
+
+    const result = await searchSourcingLeads("candidates", candidateContext());
+
+    expect(result.raw).toEqual({ found: 2, rejected: 1, unverified: 0 });
+    expect(result.leads).toHaveLength(1);
+  });
+});
+
+describe("collectCitedUrls", () => {
+  it("pulls every url_citation and normalizes it", () => {
+    const cited = collectCitedUrls(
+      modelResponse("[]", "completed", [
+        "https://Example.com/a?utm_source=x",
+        "https://example.com/b#frag",
+      ]),
+    );
+
+    expect(cited).toEqual(new Set(["https://example.com/a", "https://example.com/b"]));
+  });
+
+  it("survives a response shape it does not recognise", () => {
+    // Walks a vendor payload — a sweep must not die on an unexpected shape.
+    expect(collectCitedUrls(null)).toEqual(new Set());
+    expect(collectCitedUrls({})).toEqual(new Set());
+    expect(collectCitedUrls({ output: "nonsense" })).toEqual(new Set());
+    expect(collectCitedUrls({ output: [{ content: [{ annotations: [{ type: "file_citation" }] }] }] })).toEqual(
+      new Set(),
+    );
   });
 });

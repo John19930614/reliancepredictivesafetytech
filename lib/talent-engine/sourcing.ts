@@ -52,6 +52,7 @@ import { sanitizeLabel } from "./ai";
 import {
   capLeads,
   leadDedupKey,
+  normalizeSourceUrl,
   validateLeadCandidate,
   type ParsedSourcingLead,
 } from "./sourcing-policy";
@@ -169,6 +170,64 @@ function describeOrder(order: CandidateSearchContext["openOrders"][number]): str
   return parts.join(" | ");
 }
 
+/**
+ * Every URL the `web_search` tool actually retrieved, normalised with the same
+ * function the leads are normalised with so the two sets are comparable.
+ *
+ * The Responses API attaches `url_citation` annotations to the output_text
+ * parts it grounded in a retrieved page. Those are the only URLs in the whole
+ * response with evidence behind them: the JSON body is free text the model
+ * composed, and it will happily invent a well-formed link that resolves to
+ * nothing. `searchSourcingLeads()` intersects the two.
+ *
+ * Defensive throughout — this walks a vendor response shape, and a sweep must
+ * not die because one annotation arrived in an unexpected form.
+ */
+export function collectCitedUrls(response: unknown): Set<string> {
+  const cited = new Set<string>();
+
+  const output = (response as { output?: unknown } | null)?.output;
+  if (!Array.isArray(output)) return cited;
+
+  for (const item of output) {
+    const content = (item as { content?: unknown } | null)?.content;
+    if (!Array.isArray(content)) continue;
+
+    for (const part of content) {
+      const annotations = (part as { annotations?: unknown } | null)?.annotations;
+      if (!Array.isArray(annotations)) continue;
+
+      for (const annotation of annotations) {
+        const record = annotation as { type?: unknown; url?: unknown } | null;
+        if (record?.type !== "url_citation" || typeof record.url !== "string") continue;
+
+        const normalized = normalizeSourceUrl(record.url);
+        if (normalized) cited.add(normalized);
+      }
+    }
+  }
+
+  return cited;
+}
+
+/**
+ * Extraction discipline. Without this the model treats the search scope as a
+ * template and stamps it onto every result: an observed sweep returned ten
+ * postings all carrying the scope's exact certifications, and tagged a
+ * construction job "Pharma" because Pharma was in the query.
+ */
+function noEchoClause(): string {
+  return (
+    "EXTRACT, DO NOT ECHO. Every field must come from the posting or profile you actually opened. The search " +
+    "scope above tells you what to look for — it is NOT data to copy into your answer. Do not repeat the " +
+    'scope\'s certifications, vertical or location onto a result that does not itself state them: use an empty ' +
+    'array for "certifications" and null for "vertical" or "location" when the source is silent. ' +
+    '"source_url" must be a page you actually retrieved and read in this search — never a constructed, ' +
+    "guessed, pattern-filled or remembered URL. A result you cannot cite a real retrieved page for must be " +
+    "omitted entirely."
+  );
+}
+
 function outputFormatClause(): string {
   return (
     `OUTPUT FORMAT: respond with a strict JSON array of at most ${sourcingMaxLeadsPerRun} objects and nothing ` +
@@ -213,6 +272,7 @@ export function buildCandidateSearchPrompt(ctx: CandidateSearchContext): string 
     ].join("\n"),
     sourcingProtectedAttributeClause,
     sourcingPublicSourcesClause,
+    noEchoClause(),
     outputFormatClause(),
   ].join("\n\n");
 }
@@ -246,6 +306,7 @@ export function buildJobOrderSearchPrompt(ctx: JobOrderSearchContext): string {
     ].join("\n"),
     sourcingProtectedAttributeClause,
     sourcingPublicSourcesClause,
+    noEchoClause(),
     outputFormatClause(),
   ].join("\n\n");
 }
@@ -457,6 +518,10 @@ export interface SourcingSearchResult {
     /** Items thrown away as malformed or gateway-rejected. Duplicates and cap
      *  overflow are NOT counted here — those were usable, just surplus. */
     rejected: number;
+    /** Items dropped because `source_url` was never actually retrieved by the
+     *  web_search tool — i.e. the model invented the link. See
+     *  `collectCitedUrls()` for why this counter has to exist. */
+    unverified: number;
   };
 }
 
@@ -512,8 +577,22 @@ export async function searchSourcingLeads(
     );
   }
 
+  const citedUrls = collectCitedUrls(response);
+
+  // If the model produced leads while the web_search tool retrieved nothing,
+  // every "source" in that batch is necessarily invented — the model answered
+  // from memory. Fail the run loudly instead of filling the queue with links
+  // that go nowhere.
+  if (items.length > 0 && citedUrls.size === 0) {
+    throw new Error(
+      "The sourcing sweep returned leads but the web search retrieved no pages, so every source link would " +
+        "have been fabricated. Nothing was queued. Try again, or narrow the scope.",
+    );
+  }
+
   const found = items.length;
   let rejected = 0;
+  let unverified = 0;
   const accepted: ParsedSourcingLead[] = [];
 
   for (const item of items) {
@@ -532,6 +611,19 @@ export async function searchSourcingLeads(
       continue;
     }
 
+    // THE CITATION GATE. `lead.source_url` is free text the model wrote; it is
+    // not evidence that any such page exists. Only a URL the web_search tool
+    // actually retrieved is. Observed in production on 2026-08-07: a sweep
+    // returned ten plausible Austin contractors whose source URLs were
+    // sequential digit rotations of one another
+    // (indeed.com/viewjob?jk=1234567890, ...2345678901, ...). A lead whose link
+    // goes nowhere is worse than no lead — a recruiter clicks it, finds
+    // nothing, and stops trusting the queue.
+    if (!citedUrls.has(lead.source_url)) {
+      unverified++;
+      continue;
+    }
+
     accepted.push(lead);
   }
 
@@ -540,7 +632,7 @@ export async function searchSourcingLeads(
   // lead cannot eat one of the reviewer's limited slots.
   const leads = capLeads(dedupeLeads(accepted, runType), sourcingMaxLeadsPerRun);
 
-  return { leads, querySummary, raw: { found, rejected } };
+  return { leads, querySummary, raw: { found, rejected, unverified } };
 }
 
 /* -------------------------------------------------------------------------- */
