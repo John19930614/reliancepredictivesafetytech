@@ -47,6 +47,8 @@ import { formatDay, toNumber } from "@/components/talent-engine/format";
 
 const jobOrderLimit = 6;
 const candidateLimit = 6;
+/** Bounds for the intake-form dropdowns (client list, order/candidate pickers). */
+const optionLimit = 300;
 const matchQueueLimit = 8;
 const placementLimit = 60;
 const activityLimit = 8;
@@ -194,7 +196,7 @@ interface TimesheetJoinRow {
 
 export default async function TalentEnginePage() {
   const access = await getTalentAccess();
-  const { supabase, userId, canRead, canApprove, canSetRate } = access;
+  const { supabase, userId, canRead, canApprove, canSetRate, canPropose } = access;
 
   if (!canRead) {
     return (
@@ -297,6 +299,38 @@ export default async function TalentEnginePage() {
     ),
   ]);
 
+  // Options for the intake forms, fetched only when the viewer can use them.
+  // Bounded and name-ordered — these fill <select>s, not the dashboard cards.
+  const [clientOptionsResult, orderOptionsResult, candidateOptionsResult] = canPropose
+    ? await Promise.all([
+        readList<{ id: string; name: string }>(
+          db.from("company_clients").select("id, name").order("name", { ascending: true }).limit(optionLimit),
+        ),
+        readList<{ id: string; title: string; client: { name: string } | null }>(
+          db
+            .from("talent_job_orders")
+            .select("id, title, client:company_clients(name)")
+            .eq("status", "open")
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: true })
+            .limit(optionLimit),
+        ),
+        readList<{ id: string; full_name: string; pay_expectation: number | null }>(
+          db
+            .from("talent_candidates")
+            .select("id, full_name, pay_expectation")
+            .in("status", activePoolStatuses)
+            .order("full_name", { ascending: true })
+            .order("id", { ascending: true })
+            .limit(optionLimit),
+        ),
+      ])
+    : [
+        { rows: [], count: 0, error: null } as ListResult<{ id: string; name: string }>,
+        { rows: [], count: 0, error: null } as ListResult<{ id: string; title: string; client: { name: string } | null }>,
+        { rows: [], count: 0, error: null } as ListResult<{ id: string; full_name: string; pay_expectation: number | null }>,
+      ];
+
   const results = [
     settingsResult,
     jobOrdersResult,
@@ -306,6 +340,9 @@ export default async function TalentEnginePage() {
     activityResult,
     certScanResult,
     poolCountResult,
+    clientOptionsResult,
+    orderOptionsResult,
+    candidateOptionsResult,
   ];
 
   // A table that is not in the schema cache yet means "migration not applied";
@@ -400,6 +437,19 @@ export default async function TalentEnginePage() {
 
   /* ---- Viewer identity ---------------------------------------------------- */
 
+  const clientOptions = clientOptionsResult.rows;
+  const orderOptions = orderOptionsResult.rows.map((order) => ({
+    id: order.id,
+    label: order.client?.name ? `${order.title} — ${order.client.name}` : order.title,
+  }));
+  const candidateOptions = candidateOptionsResult.rows.map((candidate) => ({
+    id: candidate.id,
+    label:
+      candidate.pay_expectation === null
+        ? candidate.full_name
+        : `${candidate.full_name} — asks $${toNumber(candidate.pay_expectation)}/hr`,
+  }));
+
   const { data: profile } = userId
     ? await db.from("employee_chat_profiles").select("display_name").eq("user_id", userId).maybeSingle()
     : { data: null };
@@ -423,17 +473,26 @@ export default async function TalentEnginePage() {
 
       <div className="talent-grid">
         <div className="talent-col">
-          <JobOrdersCard openCount={jobOrdersResult.count} orders={jobOrdersResult.rows} />
-          <TalentPoolCard activeCount={poolCountResult.count} candidates={candidatesResult.rows} />
+          <JobOrdersCard
+            canPropose={canPropose}
+            canSetRate={canSetRate}
+            clients={clientOptions}
+            openCount={jobOrdersResult.count}
+            orders={jobOrdersResult.rows}
+          />
+          <TalentPoolCard activeCount={poolCountResult.count} canPropose={canPropose} candidates={candidatesResult.rows} />
         </div>
 
         <div className="talent-col">
           <MatchQueueCard
             canApprove={canApprove}
+            canPropose={canPropose}
             canSetRate={canSetRate}
+            candidateOptions={candidateOptions}
             hoursPerWeek={hoursPerWeek}
             matches={matchesResult.rows}
             minSpread={minSpread}
+            orderOptions={orderOptions}
             pendingCount={matchesResult.count}
           />
           <MarginLedgerCard

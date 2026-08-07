@@ -1,6 +1,7 @@
 import { HardHat } from "lucide-react";
 import type { CandidateRow } from "@/lib/talent-engine/types";
 import { TalentAiTag, TalentCard, TalentEmpty } from "./TalentCard";
+import { CandidateCreateForm } from "./CandidateCreateForm";
 import { avatarTintClass, formatRate, initials, joinMeta } from "./format";
 
 /**
@@ -11,9 +12,11 @@ import { avatarTintClass, formatRate, initials, joinMeta } from "./format";
 export function TalentPoolCard({
   candidates,
   activeCount,
+  canPropose,
 }: {
   candidates: CandidateRow[];
   activeCount: number;
+  canPropose: boolean;
 }) {
   return (
     <TalentCard
@@ -22,6 +25,7 @@ export function TalentPoolCard({
       tag={<TalentAiTag label="AI screening" />}
       title="EHS Talent Pool"
     >
+      {canPropose ? <CandidateCreateForm /> : null}
       {candidates.length === 0 ? (
         <TalentEmpty
           hint="Sourced and screened EHS professionals land here with the hourly rate they are asking for."

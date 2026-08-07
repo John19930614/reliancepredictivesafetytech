@@ -7711,4 +7711,108 @@ a.platform-card:hover {
   }
 }
 
+/* ---- Intake forms (job order / candidate / match draft) ------------------ */
+
+.talent-intake {
+  margin-bottom: 12px;
+}
+
+.talent-intake-toggle {
+  align-items: center;
+  background: transparent;
+  border: 1px dashed var(--talent-line);
+  border-radius: 8px;
+  color: var(--talent-slate);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 700;
+  gap: 6px;
+  padding: 6px 12px;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.talent-intake-toggle:hover:not(:disabled) {
+  border-color: var(--talent-slate);
+  color: var(--talent-navy);
+}
+
+.talent-intake-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.talent-intake-form {
+  border: 1px solid var(--talent-line);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 10px;
+  padding: 12px;
+}
+
+.talent-field {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.75rem;
+  gap: 4px;
+  min-width: 0;
+}
+
+.talent-field > span {
+  color: var(--portal-muted);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.talent-field > input,
+.talent-field > select {
+  border: 1px solid var(--talent-line);
+  border-radius: 7px;
+  font-size: 0.85rem;
+  min-width: 0;
+  padding: 7px 9px;
+}
+
+.talent-field > input:disabled {
+  background: var(--talent-paper);
+  cursor: not-allowed;
+}
+
+.talent-field-wide {
+  grid-column: 1 / -1;
+}
+
+.talent-field-check {
+  align-items: center;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.talent-field-check > span {
+  text-transform: none;
+}
+
+.talent-intake-submit {
+  flex: 0 0 auto;
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.talent-intake-error {
+  color: var(--talent-danger);
+  font-size: 0.8rem;
+  font-weight: 600;
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+@container talent (max-width: 640px) {
+  .talent-intake-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* ===== End EHS Talent Engine ============================================= */

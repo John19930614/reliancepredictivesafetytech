@@ -2,6 +2,7 @@ import { Zap } from "lucide-react";
 import type { MatchQueueRow } from "@/lib/talent-engine/types";
 import { TalentCard, TalentEmpty, TalentGateTag } from "./TalentCard";
 import { MatchCard } from "./MatchCard";
+import { MatchDraftForm, type MatchDraftOption } from "./MatchDraftForm";
 
 /**
  * The AI Match Queue — the heart of the module. Nothing in it has left the
@@ -15,6 +16,9 @@ export function MatchQueueCard({
   hoursPerWeek,
   canApprove,
   canSetRate,
+  canPropose,
+  orderOptions,
+  candidateOptions,
 }: {
   matches: MatchQueueRow[];
   /** Total rows awaiting a decision, which may exceed what is rendered. */
@@ -23,6 +27,9 @@ export function MatchQueueCard({
   hoursPerWeek: number;
   canApprove: boolean;
   canSetRate: boolean;
+  canPropose: boolean;
+  orderOptions: MatchDraftOption[];
+  candidateOptions: MatchDraftOption[];
 }) {
   const hidden = Math.max(0, pendingCount - matches.length);
 
@@ -33,6 +40,7 @@ export function MatchQueueCard({
       tag={<TalentGateTag label="Needs your approval" />}
       title="AI Match Queue"
     >
+      {canPropose ? <MatchDraftForm candidates={candidateOptions} orders={orderOptions} /> : null}
       {matches.length === 0 ? (
         <TalentEmpty
           hint="When the matching agent pairs a candidate with an order, it prices the spread and parks the draft here for your sign-off. Nothing is ever submitted to a client without it."

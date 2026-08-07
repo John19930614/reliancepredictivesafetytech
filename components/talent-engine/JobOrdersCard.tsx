@@ -1,13 +1,26 @@
 import { ClipboardList } from "lucide-react";
 import type { JobOrderWithClient } from "@/lib/talent-engine/types";
 import { TalentAiTag, TalentCard, TalentEmpty } from "./TalentCard";
+import { JobOrderCreateForm } from "./JobOrderCreateForm";
 import { avatarTintClass, formatRate, initials, joinMeta } from "./format";
 
 /**
  * Open client requisitions. The rate on the right is the BILL rate — what the
  * client pays us — which is the top half of every spread on this page.
  */
-export function JobOrdersCard({ orders, openCount }: { orders: JobOrderWithClient[]; openCount: number }) {
+export function JobOrdersCard({
+  orders,
+  openCount,
+  canPropose,
+  canSetRate,
+  clients,
+}: {
+  orders: JobOrderWithClient[];
+  openCount: number;
+  canPropose: boolean;
+  canSetRate: boolean;
+  clients: { id: string; name: string }[];
+}) {
   return (
     <TalentCard
       count={openCount > 0 ? `${openCount} open` : null}
@@ -15,6 +28,7 @@ export function JobOrdersCard({ orders, openCount }: { orders: JobOrderWithClien
       tag={<TalentAiTag label="AI scouting" />}
       title="Client Job Orders"
     >
+      {canPropose ? <JobOrderCreateForm canSetRate={canSetRate} clients={clients} /> : null}
       {orders.length === 0 ? (
         <TalentEmpty
           hint="Open requisitions appear here with the client's bill rate, which is what every spread is measured against."
