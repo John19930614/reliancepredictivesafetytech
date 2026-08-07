@@ -2,6 +2,7 @@ import { ClipboardList } from "lucide-react";
 import type { JobOrderWithClient } from "@/lib/talent-engine/types";
 import { TalentAiTag, TalentCard, TalentEmpty } from "./TalentCard";
 import { JobOrderCreateForm } from "./JobOrderCreateForm";
+import { JobOrderManagePanel } from "./JobOrderManagePanel";
 import { avatarTintClass, formatRate, initials, joinMeta } from "./format";
 
 /**
@@ -37,7 +38,11 @@ export function JobOrdersCard({
       ) : (
         <ul className="talent-list">
           {orders.map((order) => (
-            <li className="talent-row" key={order.id}>
+            // The row stays a flex line; the manage panel is a sibling BLOCK
+            // beneath it, so opening it pushes the card down rather than
+            // squeezing the rate column.
+            <li className="talent-row talent-row-managed" key={order.id}>
+              <span className="talent-row-line">
               <span aria-hidden="true" className={`talent-avatar ${avatarTintClass(order.client?.name ?? order.id)}`}>
                 {initials(order.client?.name ?? order.title)}
               </span>
@@ -50,10 +55,14 @@ export function JobOrdersCard({
                   {joinMeta([order.client?.name ?? "Unassigned client", order.location]) || "No client or location set"}
                 </span>
               </span>
-              <span className="talent-row-rate">
-                <span className="talent-rate-value">{order.bill_rate === null ? "—" : formatRate(order.bill_rate)}</span>
-                <span className="talent-rate-unit">bill/hr</span>
+                <span className="talent-row-rate">
+                  <span className="talent-rate-value">{order.bill_rate === null ? "—" : formatRate(order.bill_rate)}</span>
+                  <span className="talent-rate-unit">bill/hr</span>
+                </span>
               </span>
+              {canPropose ? (
+                <JobOrderManagePanel canPropose={canPropose} canSetRate={canSetRate} clients={clients} order={order} />
+              ) : null}
             </li>
           ))}
         </ul>

@@ -2,6 +2,7 @@ import { HardHat } from "lucide-react";
 import type { CandidateRow } from "@/lib/talent-engine/types";
 import { TalentAiTag, TalentCard, TalentEmpty } from "./TalentCard";
 import { CandidateCreateForm } from "./CandidateCreateForm";
+import { CandidateManagePanel } from "./CandidateManagePanel";
 import { avatarTintClass, formatRate, initials, joinMeta } from "./format";
 
 /**
@@ -13,10 +14,13 @@ export function TalentPoolCard({
   candidates,
   activeCount,
   canPropose,
+  canApprove,
 }: {
   candidates: CandidateRow[];
   activeCount: number;
   canPropose: boolean;
+  /** Verifying a certification is the gate that unblocks submittal. */
+  canApprove: boolean;
 }) {
   return (
     <TalentCard
@@ -37,7 +41,8 @@ export function TalentPoolCard({
             const certs = candidate.certifications.slice(0, 3).join(", ");
             const title = certs ? `${candidate.full_name} · ${certs}` : candidate.full_name;
             return (
-              <li className="talent-row" key={candidate.id}>
+              <li className="talent-row talent-row-managed" key={candidate.id}>
+                <span className="talent-row-line">
                 <span
                   aria-hidden="true"
                   className={`talent-avatar talent-avatar-square ${avatarTintClass(candidate.id)}`}
@@ -60,8 +65,12 @@ export function TalentPoolCard({
                   <span className="talent-rate-value">
                     {candidate.pay_expectation === null ? "—" : formatRate(candidate.pay_expectation)}
                   </span>
-                  <span className="talent-rate-unit">pay ask</span>
+                    <span className="talent-rate-unit">pay ask</span>
+                  </span>
                 </span>
+                {canPropose ? (
+                  <CandidateManagePanel candidate={candidate} canApprove={canApprove} canPropose={canPropose} />
+                ) : null}
               </li>
             );
           })}
