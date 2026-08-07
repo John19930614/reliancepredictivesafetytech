@@ -4,6 +4,7 @@ import { buildProposalDocumentModel } from "@/components/proposals/proposal-docu
 import type { GeneratorState } from "./generator-state";
 import { renderProposalPdf, toPdfText, wrapText } from "./pdf";
 import { computeProposalTotals } from "./pricing";
+import { maxTeamMembers } from "./team-selection";
 import { termFieldIds } from "./term";
 import { proposalFooterText } from "./types";
 
@@ -174,6 +175,32 @@ describe("renderProposalPdf", () => {
       ],
     }));
     const model = modelFor(heavyState(), bios);
+    const reloaded = await PDFDocument.load(await renderProposalPdf({ model, documentTitle: model.headline }));
+    expect(reloaded.getPageCount()).toBeLessThanOrEqual(8);
+  });
+
+  // The two assertions above use bios and prose of a REASONABLE length, so they
+  // pass whether or not the budget in proposal-document-model.ts exists. These
+  // two use the longest text the platform will store, which is what actually
+  // pushed the file to nine pages before `documentLimits` was introduced.
+  it("stays under eight pages when every bio is at the profile's 4,000-character limit", async () => {
+    const bios = Array.from({ length: maxTeamMembers }, (_, index) => ({
+      id: `${index}`,
+      name: `Team Member ${index + 1}`,
+      title: "Principal Safety Strategist",
+      // Two paragraphs of 2,000 each: the CHECK constraint on
+      // proposal_team_bios.bio caps a stored bio at bioLimits.bio characters.
+      paragraphs: ["word ".repeat(400), "word ".repeat(400)],
+    }));
+    const model = modelFor(heavyState(), bios);
+    const reloaded = await PDFDocument.load(await renderProposalPdf({ model, documentTitle: model.headline }));
+    expect(reloaded.getPageCount()).toBeLessThanOrEqual(8);
+  });
+
+  it("stays under eight pages when the executive summary is an essay", async () => {
+    const state = heavyState();
+    state.fields.customSummary = "word ".repeat(2000); // 10,000 characters
+    const model = modelFor(state);
     const reloaded = await PDFDocument.load(await renderProposalPdf({ model, documentTitle: model.headline }));
     expect(reloaded.getPageCount()).toBeLessThanOrEqual(8);
   });

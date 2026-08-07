@@ -29,6 +29,9 @@ import {
   type GeneratorState,
 } from "@/lib/proposals/generator-state";
 import { lookupPhase, type PhaseKey } from "@/lib/proposals/catalog";
+import { serializeTeamMemberIds, teamFieldIds } from "@/lib/proposals/team-selection";
+import { resolveDocumentExtras } from "@/lib/proposals/team-server";
+import type { DocumentSignature, DocumentTeamMember } from "@/components/proposals/proposal-document-model";
 import { computeProposalTotals } from "@/lib/proposals/pricing";
 import { proposalStatuses, type ProposalStatus } from "@/lib/proposals/types";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
@@ -434,6 +437,41 @@ export async function saveProposalDraft(proposalId: string, formData: unknown): 
 
   revalidateProposals(proposalId);
   return { ok: true };
+}
+
+/**
+ * Resolves the bios and signature image for a team selection, for the EDITOR's
+ * live preview.
+ *
+ * The document view resolves these server-side per render, but the editor's
+ * preview is driven by postMessage state that never leaves the browser — so
+ * ticking a teammate on the left used to change nothing at all on the right,
+ * and the preview labelled "exactly what the client sees" was quietly missing
+ * the Your Team section (and, with it, shifted every section number after it).
+ *
+ * Deliberately routed through `resolveDocumentExtras`, the same helper the
+ * document view, the revision view, the share route and the PDF use: a second
+ * resolver here is exactly how the preview would drift from the document again.
+ * The ids arrive from a client-editable form field and are re-validated by
+ * parseTeamMemberIds / parseSignerId (well-formed uuids only, capped at
+ * maxTeamMembers) before any query runs.
+ */
+export async function loadProposalDocumentExtras(
+  memberIds: unknown,
+  signerId: unknown,
+): Promise<{ team: DocumentTeamMember[]; signature: DocumentSignature | null }> {
+  const { canRead } = await getProposalAccess();
+  // Not an error result: the preview degrades to a document without the team
+  // section rather than putting a permissions banner over the editor.
+  if (!canRead) return { team: [], signature: null };
+
+  const ids = Array.isArray(memberIds) ? memberIds.filter((id): id is string => typeof id === "string") : [];
+  return resolveDocumentExtras({
+    fields: {
+      [teamFieldIds.members]: serializeTeamMemberIds(ids),
+      [teamFieldIds.signer]: typeof signerId === "string" ? signerId : "",
+    },
+  });
 }
 
 /** Restores an earlier revision by copying it forward as a NEW revision (history stays intact). */

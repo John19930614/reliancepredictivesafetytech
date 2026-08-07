@@ -197,6 +197,95 @@ export const documentCopy = Object.freeze({
 });
 
 /* -------------------------------------------------------------------------- */
+/* Page budget                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Character ceilings on the EDITORIAL regions of the document.
+ *
+ * The proposal is held to eight sheets (asserted in lib/proposals/pdf.test.ts
+ * against the real paginator, not eyeballed). Measured against that fixture, a
+ * loaded proposal renders in six pages — but two seller-controlled regions can
+ * push it past the ceiling on their own:
+ *
+ *   six maximum-length bios (6 × 4,000 chars)  ->  9 pages
+ *   a 10,000-character executive summary       ->  8 pages and climbing
+ *
+ * Both are narrative copy, so they are budgeted here, in the one view-model all
+ * three renderers share. Doing it in the renderers instead would mean the HTML
+ * document, the print view and the PDF could each trim differently.
+ *
+ * DELIBERATELY NOT BUDGETED: the assumptions/exclusions block, the per-line
+ * scope paragraphs, and the fee table. Those are the offer — the text a client
+ * signs and the numbers they pay — and silently dropping the tail of an
+ * exclusion or a priced line to save a sheet would be a far worse defect than a
+ * nine-page document. A proposal carrying dozens of line items is genuinely a
+ * long proposal and is allowed to run long.
+ */
+export const documentLimits = Object.freeze({
+  /** Section 01. Roughly 400 words — it is the opener, not the whole scope. */
+  summaryChars: 2500,
+  /**
+   * TOTAL across section 09, shared evenly by the people selected: one bio may
+   * run to the profile's own 4,000-character limit, six are held to ~1,000 each.
+   * At that split the fully loaded fixture lands on seven pages.
+   */
+  teamBioChars: 6000,
+});
+
+/**
+ * Trims to `maxChars` on a word boundary, marking the cut with an ellipsis.
+ *
+ * Returns the input untouched when it already fits, so the overwhelming
+ * majority of proposals are unaffected and nothing is appended to them.
+ */
+export function truncateAtWord(text: string, maxChars: number): string {
+  if (maxChars <= 0) return "";
+  if (text.length <= maxChars) return text;
+  const clipped = text.slice(0, maxChars);
+  const lastSpace = clipped.lastIndexOf(" ");
+  // A single unbroken token longer than the budget has no word boundary to cut
+  // on; take the hard clip rather than returning nothing.
+  const body = (lastSpace > maxChars * 0.5 ? clipped.slice(0, lastSpace) : clipped).trimEnd();
+  return `${body.replace(/[,;:.\-–—]$/, "")}…`;
+}
+
+/**
+ * Applies the team budget, splitting it evenly across the selected people.
+ *
+ * Trims each member's LAST surviving paragraph rather than dropping paragraphs
+ * wholesale, so a bio always ends mid-thought with an ellipsis instead of
+ * silently losing its closing credential line. A member whose bio fits is
+ * returned by identity.
+ */
+export function fitTeamBios(
+  team: readonly DocumentTeamMember[],
+  totalChars: number = documentLimits.teamBioChars,
+): DocumentTeamMember[] {
+  if (team.length === 0) return [];
+  const perMember = Math.floor(totalChars / team.length);
+
+  return team.map((member) => {
+    let remaining = perMember;
+    const paragraphs: string[] = [];
+    for (const paragraph of member.paragraphs) {
+      if (remaining <= 0) break;
+      if (paragraph.length <= remaining) {
+        paragraphs.push(paragraph);
+        remaining -= paragraph.length;
+        continue;
+      }
+      paragraphs.push(truncateAtWord(paragraph, remaining));
+      remaining = 0;
+    }
+    return paragraphs.length === member.paragraphs.length &&
+      paragraphs.every((paragraph, index) => paragraph === member.paragraphs[index])
+      ? member
+      : { ...member, paragraphs };
+  });
+}
+
+/* -------------------------------------------------------------------------- */
 /* Model types                                                                 */
 /* -------------------------------------------------------------------------- */
 
@@ -589,7 +678,7 @@ export function buildProposalDocumentModel({
         ? term.rangeLabel
         : `${term.rangeLabel} (${plural(term.months, "month")})`
       : null,
-    summary: fieldText(state, "customSummary", documentCopy.noSummary),
+    summary: truncateAtWord(fieldText(state, "customSummary", documentCopy.noSummary), documentLimits.summaryChars),
     packageIntro: buildPackageDescription({
       packageName: packageOption.name,
       packageDesc: packageOption.desc,
@@ -616,7 +705,11 @@ export function buildProposalDocumentModel({
       `in the scope.${scheduleTermClause} Billing follows the selected term (${billingTerm}), with ${paymentTerms}.`,
     exclusions: fieldText(state, "customExclusions", documentCopy.noExclusions),
     terms: buildDocumentTerms({ paymentTerms, lateFee, aiData, ipRights, liabilityCap, governingLaw, validDays }),
-    team,
+    // Budgeted HERE rather than at each call site: the detail view, the revision
+    // view, the share route, the PDF and the editor preview all reach the
+    // renderer through this builder, and a per-caller trim is how they would
+    // start disagreeing about what section 09 says.
+    team: fitTeamBios(team),
     sellerSignature: preparedBy ? `${preparedBy} / Authorized Representative` : "Authorized Representative",
     signature,
     legalNotice:

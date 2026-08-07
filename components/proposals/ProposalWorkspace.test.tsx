@@ -40,6 +40,7 @@ vi.mock("@/app/employee/proposals/actions", () => ({
   createProposal: vi.fn(async () => ({ ok: true })),
   deleteProposal: vi.fn(async () => ({ ok: true })),
   duplicateProposal: vi.fn(async () => ({ ok: true, proposalId: "dup-1" })),
+  loadProposalDocumentExtras: vi.fn(async () => ({ team: [], signature: null })),
   restoreProposalRevision: vi.fn(async () => ({ ok: true })),
   saveProposalDraft: vi.fn(async () => ({ ok: true })),
   saveProposalRevision: vi.fn(async () => ({ ok: true, revisionNumber: 6 })),
@@ -49,6 +50,7 @@ vi.mock("@/app/employee/proposals/actions", () => ({
 
 import {
   deleteProposal,
+  loadProposalDocumentExtras,
   restoreProposalRevision,
   setProposalStatus,
   updateProposalMeta,
@@ -371,5 +373,85 @@ describe("ProposalWorkspace — editor save gate", () => {
     expect(screen.getByRole("button", { name: /Save revision/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Save draft now/ })).toBeDisabled();
     expect(screen.getByText(gate.reason as string)).toBeInTheDocument();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Preview fidelity                                                            */
+/*                                                                             */
+/* The badge over the right-hand pane claims "exactly what the client sees".   */
+/* Everything else in the document is derived from the generator state the     */
+/* iframe posts up, but bios and the signature image are database-backed, so   */
+/* the preview has to fetch them — and when it did not, ticking a teammate on  */
+/* the left changed nothing on the right and every section number after 09     */
+/* differed between the editor and the document view.                          */
+/* -------------------------------------------------------------------------- */
+
+const TEAM_MEMBER_ID = "44444444-4444-4444-8444-444444444444";
+
+function stateWithTeam(members: string, signer: string): GeneratorState {
+  return {
+    v: 1,
+    fields: {
+      clientCompany: "Northwind Construction",
+      packageSelect: "professional",
+      proposalTeamMembers: members,
+      proposalSigner: signer,
+    },
+    phases: [],
+    services: [],
+  };
+}
+
+function editorProposal(formData: GeneratorState | null): WorkspaceProposal {
+  return { ...proposalFixture("draft"), form_data: formData };
+}
+
+const roster = [{ userId: TEAM_MEMBER_ID, name: "Dana Reyes", title: "Head of Safety", hasSignature: true }];
+
+describe("ProposalWorkspace — live preview matches the team picker", () => {
+  it("renders the selected teammate's bio and signature in the preview document", async () => {
+    vi.mocked(loadProposalDocumentExtras).mockResolvedValueOnce({
+      team: [
+        {
+          id: TEAM_MEMBER_ID,
+          name: "Dana Reyes",
+          title: "Head of Safety",
+          paragraphs: ["Twenty years leading field safety programs."],
+        },
+      ],
+      signature: { dataUrl: "data:image/png;base64,AAAA", name: "Dana Reyes", title: "Head of Safety", signedOn: null },
+    });
+
+    render(
+      <ProposalWorkspace
+        proposal={editorProposal(stateWithTeam(TEAM_MEMBER_ID, TEAM_MEMBER_ID))}
+        assignedClient={null}
+        roster={roster}
+      />,
+    );
+
+    expect(loadProposalDocumentExtras).toHaveBeenCalledWith([TEAM_MEMBER_ID], TEAM_MEMBER_ID);
+
+    // Section 09 exists in the preview, with the bio prose and the signature
+    // image — the two things the document view resolves server-side.
+    expect(await screen.findByRole("heading", { name: /Your Team/ })).toBeInTheDocument();
+    expect(screen.getByText("Twenty years leading field safety programs.")).toBeInTheDocument();
+    expect(screen.getByAltText("Signature of Dana Reyes")).toBeInTheDocument();
+  });
+
+  it("skips the lookup and the team section when nobody is selected", async () => {
+    render(<ProposalWorkspace proposal={editorProposal(stateWithTeam("", ""))} assignedClient={null} roster={roster} />);
+
+    // Waiting on something the preview always renders proves the document has
+    // painted, so the absence below is a real absence rather than a race.
+    expect(await screen.findByRole("heading", { name: /Executive Summary/ })).toBeInTheDocument();
+    expect(loadProposalDocumentExtras).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: /Your Team/ })).not.toBeInTheDocument();
+  });
+
+  it("tells the seller where the picker lands in the document", () => {
+    render(<ProposalWorkspace proposal={editorProposal(stateWithTeam("", ""))} assignedClient={null} roster={roster} />);
+    expect(screen.getByText(/section 09, Your Team/)).toBeInTheDocument();
   });
 });

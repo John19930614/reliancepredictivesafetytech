@@ -200,20 +200,28 @@ body.embedded .app{grid-template-columns:1fr;max-width:560px;padding:16px}
   <input type="hidden" id="proposalTeamMembers" value="">
   <input type="hidden" id="proposalSigner" value="">
 
-  <!-- SECTION ORDER MIRRORS THE DOCUMENT.
-       Card N feeds document section N, so a seller filling the panel top to
-       bottom builds the document front to back. The Executive Summary and
-       Assumptions cards used to sit together at the bottom under "Custom
-       Notes" while rendering as document sections 01 and 08 — the left panel
-       and the right document disagreed about what order a proposal is
-       written in. Do not reorder these without moving the matching document
-       section in components/proposals/ProposalDocument.tsx.
+  <!-- CARD ORDER MIRRORS THE DOCUMENT ORDER.
+       Filling the panel top to bottom builds the document front to back. The
+       Executive Summary and Assumptions cards used to sit together at the
+       bottom under "Custom Notes" while rendering as document sections 01 and
+       08 — the left panel and the right document disagreed about what order a
+       proposal is written in. Do not reorder these without moving the matching
+       document section in components/proposals/ProposalDocument.tsx.
 
-       Section 10 (Proposal Team & Signature) is intentionally NOT here: bios
-       and signatures are database-backed, and this file is a static asset.
-       The platform renders that picker outside the iframe. -->
+       The card NUMBER is not the document section number: cards 1-2 feed the
+       document header rather than a numbered section, cards 5 and 6 both feed
+       section 03 (and both price into section 05), and sections 04, 06 and 07
+       are static copy with no control. Each <h3> therefore carries an .opt
+       badge naming what it actually produces on the right. Keep the badge
+       accurate when a section moves.
+
+       Proposal Team & Signature is intentionally NOT here: bios and signatures
+       are database-backed and this file is a static asset, so the platform
+       renders that picker outside the iframe, below this panel. It prints as
+       document section 09 — above, not after, the commercial terms — and the
+       picker says so. -->
   <div class="section-card">
-    <h3>1. Proposal &amp; Seller Information</h3>
+    <h3>1. Proposal &amp; Seller Information<span class="opt">document header</span></h3>
     <div class="grid2"><div><label>Consultant / Seller Name</label><input id="sellerName" value="Reliance Predictive Safety Technologies"></div><div><label>Proposal Date</label><input id="proposalDate" type="date"></div></div>
     <div class="grid2"><div><label>Proposal Number</label><input id="proposalNo" value="RPS-2026-PILOT-01"></div><div><label>Valid For</label><select id="validDays"><option>30</option><option selected>60</option><option>90</option><option>120</option></select></div></div>
     <label>Seller Address / Contact</label><textarea id="sellerContact">Sussex, Wisconsin
@@ -221,7 +229,7 @@ Email: john.h.haldemann@gmail.com</textarea>
     <label>Prepared By</label><input id="preparedBy" value="John Haldemann">
   </div>
   <div class="section-card">
-    <h3>2. Client Information</h3>
+    <h3>2. Client Information<span class="opt">document header</span></h3>
     <label>Client Company</label><input id="clientCompany" value="Client Company Name">
     <div class="grid2"><div><label>Client Contact</label><input id="clientContact" value="Client Representative"></div><div><label>Title</label><input id="clientTitle" value="Safety / Operations Leader"></div></div>
     <label>Client Address</label><textarea id="clientAddress">Street Address
@@ -229,12 +237,12 @@ City, State ZIP</textarea>
     <label>Email</label><input id="clientEmail" value="client@email.com">
   </div>
   <div class="section-card">
-    <h3>3. Executive Summary</h3>
+    <h3>3. Executive Summary<span class="opt">section 01</span></h3>
     <p class="cardhint">Section 01 of the document — the first thing the client reads.</p>
   <textarea id="customSummary">Summarize the engagement in two or three sentences: what the client is trying to achieve, what this proposal puts in place, and what happens at the end of the term. The package, term dates, included users and pricing are already stated elsewhere in the document — do not repeat figures here, or they will fall out of date when the numbers change.</textarea>
   </div>
   <div class="section-card">
-    <h3>4. Engagement Term &amp; Package</h3>
+    <h3>4. Engagement Term &amp; Package<span class="opt">section 02</span></h3>
     <label>Package Dropdown</label>
     <select id="packageSelect">
       <option value="starter">Starter Compliance Platform — $35,000/year</option>
@@ -251,12 +259,12 @@ City, State ZIP</textarea>
     <div class="grid2"><div><label>Included Jobsites</label><input id="includedSites" type="number" value="2"></div><div><label>Billing Term</label><select id="billingTerm"><option selected>One-time (pilot)</option><option>Annual upfront</option><option>Quarterly</option><option>Monthly</option><option>Milestone-based</option></select></div></div>
   </div>
   <div class="section-card">
-    <h3>5. Implementation Phases</h3>
+    <h3>5. Implementation Phases<span class="opt">sections 03 &amp; 05</span></h3>
     <div id="phases"></div>
     <button type="button" class="btn btn-secondary small" data-action="addPhase">+ Add Phase</button>
   </div>
   <div class="section-card">
-    <h3>6. Service Lines &amp; Add-Ons</h3>
+    <h3>6. Service Lines &amp; Add-Ons<span class="opt">sections 03 &amp; 05</span></h3>
     <p class="cardhint">Platform modules, documents, training, audits, field support, and travel. Pick an item; its billing unit (person, session, day, mile…) shows on the Qty field.</p>
     <div id="services"></div>
     <button type="button" class="btn btn-secondary small" data-action="addService">+ Add Service Line</button>
@@ -271,18 +279,18 @@ City, State ZIP</textarea>
     <button type="button" class="btn btn-primary small" data-action="addDoc">+ Add document to proposal</button>
   </div>
   <div class="section-card">
-    <h3>7. Pricing &amp; Payment Terms</h3>
+    <h3>7. Pricing &amp; Payment Terms<span class="opt">section 05</span></h3>
     <div class="grid3"><div><label>Discount %</label><input id="discountPct" type="number" value="0"></div><div><label>Tax %</label><input id="taxPct" type="number" value="0"></div><div><label>Deposit %</label><input id="depositPct" type="number" value="0"></div></div>
     <label>Payment Terms</label><select id="paymentTerms"><option>Net 15 from invoice date</option><option selected>Net 30 from invoice date</option><option>Due upon receipt</option><option>50% deposit / 50% at launch</option><option>Monthly subscription billing</option></select>
     <label>Late Fee</label><select id="lateFee"><option selected>1.5% per month on past-due undisputed balances</option><option>1.0% per month on past-due undisputed balances</option><option>No late fee unless separately agreed</option></select>
   </div>
   <div class="section-card">
-    <h3>8. Assumptions &amp; Exclusions</h3>
+    <h3>8. Assumptions &amp; Exclusions<span class="opt">section 08</span></h3>
     <p class="cardhint">Section 08 of the document — what this proposal does not cover.</p>
   <textarea id="customExclusions">This proposal excludes third-party software license costs, client-side hardware, legal review fees, government filing fees, and onsite travel unless specifically included in the pricing schedule.</textarea>
   </div>
   <div class="section-card">
-    <h3>9. Legal &amp; Commercial Terms</h3>
+    <h3>9. Legal &amp; Commercial Terms<span class="opt">commercial terms</span></h3>
     <label>Governing Law</label><select id="governingLaw"><option selected>Wisconsin (primary)</option><option>California (primary)</option><option>Alabama</option><option>Alaska</option><option>Arizona</option><option>Arkansas</option><option>Colorado</option><option>Connecticut</option><option>Delaware</option><option>Florida</option><option>Georgia</option><option>Hawaii</option><option>Idaho</option><option>Illinois</option><option>Indiana</option><option>Iowa</option><option>Kansas</option><option>Kentucky</option><option>Louisiana</option><option>Maine</option><option>Maryland</option><option>Massachusetts</option><option>Michigan</option><option>Minnesota</option><option>Mississippi</option><option>Missouri</option><option>Montana</option><option>Nebraska</option><option>Nevada</option><option>New Hampshire</option><option>New Jersey</option><option>New Mexico</option><option>New York</option><option>North Carolina</option><option>North Dakota</option><option>Ohio</option><option>Oklahoma</option><option>Oregon</option><option>Pennsylvania</option><option>Rhode Island</option><option>South Carolina</option><option>South Dakota</option><option>Tennessee</option><option>Texas</option><option>Utah</option><option>Vermont</option><option>Virginia</option><option>Washington</option><option>West Virginia</option><option>Wyoming</option><option>District of Columbia</option><option>Client state, unless otherwise agreed in writing</option></select>
     <label>Liability Cap</label><select id="liabilityCap"><option selected>Fees paid under this proposal in the prior 12 months (excludes consequential, incidental, indirect, and punitive damages)</option><option>$50,000 or total fees paid, whichever is greater</option><option>Annual contract value, excluding all indirect and consequential damages</option><option>Mutually agreed amount in final MSA</option></select>
     <label>IP / Platform Rights</label><select id="ipRights"><option selected>Seller retains all platform IP, methods, templates, AI workflows, source code, trade secrets, and pre-existing intellectual property. Client receives a limited, non-exclusive, non-transferable license to use purchased deliverables solely during the active paid term. All rights not expressly granted are reserved by Seller.</option><option>Client owns client-provided data and custom configurations. Seller retains all underlying platform IP, tools, methods, and AI logic.</option><option>Custom deliverables are licensed to client for internal use only, subject to full payment. Seller retains all underlying tools and processes.</option><option>To be defined in a separately executed Intellectual Property and License Agreement.</option></select>
