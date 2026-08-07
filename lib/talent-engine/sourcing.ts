@@ -228,14 +228,37 @@ function noEchoClause(): string {
   );
 }
 
+/**
+ * Two-part output, and the prose half is load-bearing.
+ *
+ * Measured against the live API on 2026-08-07 with the same task and model:
+ *
+ *   "strict JSON array and nothing else"  → 0 url_citation annotations, and
+ *                                           three invented indeed.com links
+ *                                           (…jk=1234567890abcdef).
+ *   one cited sentence, then the array    → 3 annotations, and the array's
+ *                                           URLs matched them exactly.
+ *
+ * Citations attach to prose spans the model grounded in a retrieved page. Give
+ * it no prose to write and it stops grounding altogether and answers from
+ * memory — which is how the first production sweep filled the queue with
+ * fabricated sources. The sentences are never stored; they exist so the
+ * annotations exist, and the citation gate in searchSourcingLeads() is what
+ * consumes them.
+ */
 function outputFormatClause(): string {
   return (
-    `OUTPUT FORMAT: respond with a strict JSON array of at most ${sourcingMaxLeadsPerRun} objects and nothing ` +
-    `else. Each object must have exactly these keys: "title", "organization", "location", "vertical", ` +
-    `"certifications", "rate_signal", "source_url", "summary". Use null for any value that is not publicly ` +
-    `published, and an empty array for "certifications" when none are published. No commentary, no ` +
-    `explanation, no markdown code fences, and no text before or after the array. If nothing suitable is ` +
-    `found, respond with [].`
+    "OUTPUT FORMAT — two parts, in this order.\n\n" +
+    "PART 1 — EVIDENCE. A numbered list with one line per result you actually opened. Each line must name " +
+    "the result and link to that exact page. Do not summarise in aggregate: one line per result, and every " +
+    "line carries its own link. If you opened nothing, write NONE.\n\n" +
+    "PART 2 — DATA. After a line containing only ---, output a JSON array of at most " +
+    `${sourcingMaxLeadsPerRun} objects, one per line of part 1, with keys exactly: "title", ` +
+    '"organization", "location", "vertical", "certifications", "rate_signal", "source_url", "summary". ' +
+    'Each "source_url" must be the same link you gave for that result in part 1. Use null for anything not ' +
+    'publicly published and an empty array for "certifications" when the source states none. "rate_signal" ' +
+    "must be a plain number of US dollars PER HOUR — if the source publishes an annual salary, a range, or " +
+    "no rate at all, use null. If part 1 was NONE, output []."
   );
 }
 
@@ -451,7 +474,15 @@ export function parseLeadArray(text: string): unknown[] | null {
   const trimmed = typeof text === "string" ? text.trim() : "";
   if (trimmed === "") return null;
 
-  const sources = [trimmed];
+  // The prompt asks for cited prose, then a `---` line, then the array. Try the
+  // final segment FIRST: the prose half legitimately contains bracketed text
+  // (citation markers, bracketed job titles), and a greedy scan of the whole
+  // response could lock onto one of those instead of the real payload.
+  const sources: string[] = [];
+  const separated = trimmed.split(/^\s*-{3,}\s*$/m);
+  if (separated.length > 1) sources.push(separated[separated.length - 1].trim());
+  sources.push(trimmed);
+
   const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) sources.push(fence[1].trim());
 

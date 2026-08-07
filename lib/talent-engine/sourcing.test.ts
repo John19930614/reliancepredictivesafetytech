@@ -233,10 +233,18 @@ describe("buildCandidateSearchPrompt", () => {
     expect(prompt).toContain("Write about the role and the credentials only.");
   });
 
-  it("asks for a strict JSON array capped at the per-run maximum, with no commentary", () => {
+  it("asks for cited evidence before the data array, capped at the per-run maximum", () => {
     const prompt = buildCandidateSearchPrompt(candidateContext());
-    expect(prompt).toContain(`strict JSON array of at most ${sourcingMaxLeadsPerRun} objects and nothing else`);
-    expect(prompt).toContain("No commentary, no explanation, no markdown code fences");
+    // The two-part shape is load-bearing, not cosmetic. Measured against the
+    // live API on 2026-08-07 with the same task and model: demanding a bare
+    // JSON array produced ZERO url_citation annotations and three invented
+    // indeed.com links, while asking for a per-result cited list first produced
+    // eleven annotations whose URLs matched the array. No citations means the
+    // citation gate has nothing to verify against, and every lead is refused.
+    expect(prompt).toContain("PART 1 — EVIDENCE");
+    expect(prompt).toContain("PART 2 — DATA");
+    expect(prompt).toContain("one line per result you actually opened");
+    expect(prompt).toContain(`at most ${sourcingMaxLeadsPerRun} objects`);
     expect(prompt).toContain(
       '"title", "organization", "location", "vertical", "certifications", "rate_signal", "source_url", "summary"',
     );
@@ -310,10 +318,11 @@ describe("buildJobOrderSearchPrompt", () => {
     expect(empty).toContain("- Locations: anywhere in the United States");
   });
 
-  it("asks for a strict JSON array capped at the per-run maximum", () => {
-    expect(buildJobOrderSearchPrompt(jobOrderContext())).toContain(
-      `strict JSON array of at most ${sourcingMaxLeadsPerRun} objects and nothing else`,
-    );
+  it("asks for cited evidence before the data array, capped at the per-run maximum", () => {
+    const prompt = buildJobOrderSearchPrompt(jobOrderContext());
+    expect(prompt).toContain(`at most ${sourcingMaxLeadsPerRun} objects`);
+    expect(prompt).toContain("PART 1 — EVIDENCE");
+    expect(prompt).toContain("PART 2 — DATA");
   });
 
   it("is deterministic and de-duplicates the scope lists", () => {
@@ -810,5 +819,38 @@ describe("collectCitedUrls", () => {
     expect(collectCitedUrls({ output: [{ content: [{ annotations: [{ type: "file_citation" }] }] }] })).toEqual(
       new Set(),
     );
+  });
+});
+
+describe("parseLeadArray — the two-part response shape", () => {
+  it("takes the array after the --- separator, not brackets in the evidence list", () => {
+    // The evidence half legitimately contains bracketed text — markdown links,
+    // citation markers, bracketed job titles. A greedy scan could lock onto one
+    // of those instead of the payload.
+    const response = [
+      "**PART 1 — EVIDENCE**",
+      "1. [Associate Safety Consultant](https://swooped.co/job-postings/x) — BSI, Austin TX.",
+      "2. [Construction HSE Lead](https://jobs.insightglobal.com/y) — Insight Global.",
+      "",
+      "---",
+      "",
+      '[{"title":"Associate Safety Consultant","source_url":"https://swooped.co/job-postings/x"}]',
+    ].join("\n");
+
+    const parsed = parseLeadArray(response);
+
+    expect(parsed).toHaveLength(1);
+    expect((parsed?.[0] as { title?: string })?.title).toBe("Associate Safety Consultant");
+  });
+
+  it("still finds the array when the model heads it or fences it anyway", () => {
+    // Observed live: gpt-4o-mini reprints "**PART 2 — DATA**" after the
+    // separator, and sometimes wraps the array in a ```json fence, despite
+    // being told not to.
+    const headed = ['---', '**PART 2 — DATA**', '[{"title":"Headed"}]'].join("\n");
+    const fenced = ["---", "```json", '[{"title":"Fenced"}]', "```"].join("\n");
+
+    expect((parseLeadArray(headed)?.[0] as { title?: string })?.title).toBe("Headed");
+    expect((parseLeadArray(fenced)?.[0] as { title?: string })?.title).toBe("Fenced");
   });
 });
