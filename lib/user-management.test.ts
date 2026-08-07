@@ -6,6 +6,7 @@ import {
   getPortalModuleForPath,
   hasFullPortalVisibility,
   normalizePortalModuleKeys,
+  portalModuleCatalog,
 } from "./user-management";
 
 describe("portal module access", () => {
@@ -46,6 +47,67 @@ describe("portal module access", () => {
     expect(canAccessEmployeePath("super_admin", "active", "/employee/platform/dev-command", [])).toBe(true);
     expect(canAccessEmployeePath("company_admin", "active", "/employee/platform/dev-command", ["platform_dev_command"])).toBe(false);
     expect(canAccessEmployeePath("employee", "active", "/employee/platform/dev-command", [])).toBe(false);
+  });
+
+  it("maps both talent engine tabs to the one ehs_talent_engine module", () => {
+    // The console and the framework reference share a single module key, so a
+    // grant opens both tabs and nobody has to be granted twice.
+    expect(getPortalModuleForPath("/employee/talent-engine")?.key).toBe("ehs_talent_engine");
+    expect(getPortalModuleForPath("/employee/talent-engine/framework")?.key).toBe("ehs_talent_engine");
+    expect(getPortalModuleForPath("/employee/talent-engine/")?.key).toBe("ehs_talent_engine");
+    expect(portalModuleCatalog.find((module) => module.key === "ehs_talent_engine")?.group).toBe("Commercial");
+  });
+
+  it("gates the talent engine on an explicit grant because it exposes bill, pay and spread", () => {
+    expect(canAccessEmployeePath("employee", "active", "/employee/talent-engine", ["ehs_talent_engine"])).toBe(true);
+    expect(canAccessEmployeePath("employee", "active", "/employee/talent-engine/framework", ["ehs_talent_engine"])).toBe(true);
+    // Owner roles keep full visibility without an explicit grant.
+    expect(canAccessEmployeePath("super_admin", "active", "/employee/talent-engine", [])).toBe(true);
+    expect(canAccessEmployeePath("super_admin", "active", "/employee/talent-engine/framework", [])).toBe(true);
+    // An active employee without the grant sees neither tab.
+    expect(canAccessEmployeePath("employee", "active", "/employee/talent-engine", ["dashboard"])).toBe(false);
+    expect(canAccessEmployeePath("employee", "active", "/employee/talent-engine/framework", ["dashboard"])).toBe(false);
+    // The grant does not survive archiving the account.
+    expect(canAccessEmployeePath("employee", "archived", "/employee/talent-engine", ["ehs_talent_engine"])).toBe(false);
+    expect(canAccessEmployeePath("employee", "archived", "/employee/talent-engine/framework", ["ehs_talent_engine"])).toBe(false);
+    expect(canAccessEmployeePath("super_admin", "archived", "/employee/talent-engine", [])).toBe(false);
+  });
+
+  it("keeps the talent engine out of the default employee grant", () => {
+    expect(defaultEmployeePortalModuleKeys).not.toContain("ehs_talent_engine");
+    expect(canAccessEmployeePath("employee", "active", "/employee/talent-engine", defaultEmployeePortalModuleKeys)).toBe(false);
+  });
+
+  it("puts the web-sourcing review queue on the same grant, with no second module key", () => {
+    // /employee/talent-engine/leads is a SUB-PATH of the module's single prefix,
+    // so `startsWith` already resolves it. That is deliberate: a separate key
+    // would have to be handed out again, and everyone who can already see bill
+    // rates, pay rates and the spread would arrive at the review queue locked
+    // out of the very thing they are meant to review.
+    expect(getPortalModuleForPath("/employee/talent-engine/leads")?.key).toBe("ehs_talent_engine");
+    expect(getPortalModuleForPath("/employee/talent-engine/leads/")?.key).toBe("ehs_talent_engine");
+    expect(getPortalModuleForPath("/employee/talent-engine/leads?status=new")?.key).toBe("ehs_talent_engine");
+
+    // Nothing else in the catalog claims a piece of the talent-engine surface,
+    // so there is exactly one grant to reason about for the whole module.
+    const talentModules = portalModuleCatalog.filter((module) =>
+      module.pathPrefixes.some((prefix) => prefix.startsWith("/employee/talent-engine")),
+    );
+    expect(talentModules.map((module) => module.key)).toEqual(["ehs_talent_engine"]);
+
+    // The grant, and only the grant, opens the queue for a non-owner role.
+    expect(canAccessEmployeePath("employee", "active", "/employee/talent-engine/leads", ["ehs_talent_engine"])).toBe(true);
+    expect(canAccessEmployeePath("internal_reviewer", "active", "/employee/talent-engine/leads", ["ehs_talent_engine"])).toBe(true);
+    expect(canAccessEmployeePath("employee", "active", "/employee/talent-engine/leads", ["dashboard"])).toBe(false);
+    expect(canAccessEmployeePath("employee", "active", "/employee/talent-engine/leads", [])).toBe(false);
+    expect(canAccessEmployeePath("employee", "active", "/employee/talent-engine/leads", defaultEmployeePortalModuleKeys)).toBe(false);
+
+    // Owner roles keep full visibility without an explicit grant; archiving the
+    // account still closes the queue for everyone, grant or not.
+    expect(canAccessEmployeePath("super_admin", "active", "/employee/talent-engine/leads", [])).toBe(true);
+    expect(canAccessEmployeePath("platform_admin", "active", "/employee/talent-engine/leads", [])).toBe(true);
+    expect(canAccessEmployeePath("employee", "archived", "/employee/talent-engine/leads", ["ehs_talent_engine"])).toBe(false);
+    expect(canAccessEmployeePath("super_admin", "archived", "/employee/talent-engine/leads", [])).toBe(false);
   });
 
   it("maps payroll tracker routes to the payroll module", () => {

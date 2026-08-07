@@ -62,6 +62,16 @@ export const portalModuleCatalog = [
   // have to be granted per user, so everyone who can reach Proposals today
   // would lose the page.
   { key: "client_proposals", label: "Proposals", group: "Commercial", pathPrefixes: ["/employee/proposals", "/employee/proposals/templates", "/employee/proposals/bio"] },
+  // Covers the whole EHS Talent Engine surface: the live console
+  // (/employee/talent-engine) and the framework & architecture reference
+  // (/employee/talent-engine/framework). The single prefix already
+  // prefix-matches the sub-page, so no second entry is needed and — as with
+  // Proposals — the sub-page is deliberately NOT its own module key.
+  //
+  // This key is intentionally absent from `defaultEmployeePortalModuleKeys`:
+  // the module exposes client bill rates, worker pay rates and the spread
+  // between them, so it has to be granted deliberately, per user.
+  { key: "ehs_talent_engine", label: "Talent Engine", group: "Commercial", pathPrefixes: ["/employee/talent-engine"] },
   { key: "active_companies", label: "Active Companies", group: "Commercial", pathPrefixes: ["/employee/active-companies", "/employee/clients"] },
   { key: "employee_mail", label: "Employee Mail", group: "Commercial", pathPrefixes: ["/employee/mail"] },
   { key: "company_tree", label: "Company Tree", group: "People", pathPrefixes: ["/employee/company-tree"] },

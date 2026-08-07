@@ -6631,3 +6631,1622 @@ a.platform-card:hover {
 .get-started-step-done .get-started-step-text span {
   color: #2e7d32;
 }
+
+/* ========================================================================= */
+/* ===== EHS Talent Engine ================================================= */
+/* ========================================================================= */
+/* Console for the ehs_talent_engine module (AI-managed markup staffing).
+   Brand colour comes from the portal variables (--portal-gold,
+   --portal-gold-bright, --portal-muted). The only module-local variables are
+   the ones carrying MONEY semantics, which the rest of the portal has no
+   vocabulary for, and they are all declared once, here, on .talent-console:
+
+     money  — the spread you keep (bill − pay)
+     flag   — spread below the minimum floor. Never signalled by colour alone;
+              the strip always also says "Low" and names the floor.
+     ai     — something an agent did without a human in the loop
+
+   Every class in this section is namespaced .talent-*. */
+
+.talent-console {
+  --talent-ink: #0c1b29;
+  --talent-navy: #0e2438;
+  --talent-slate: #1f4463;
+  --talent-line: #e2e8f0;
+  --talent-paper: #f4f6f9;
+  --talent-card: #ffffff;
+  /* Unfilled track behind every arc and meter on the page. */
+  --talent-track: #e8edf3;
+  --talent-shadow:
+    0 1px 2px rgba(13, 32, 51, 0.06),
+    0 4px 14px rgba(13, 32, 51, 0.06);
+  --talent-radius: 12px;
+
+  /* money — the spread you keep */
+  --talent-money: #0f8f5f;
+  --talent-money-soft: #e4f5ec;
+  --talent-money-line: #bfe6d1;
+
+  /* margin flag — spread under the floor */
+  --talent-flag: #a86a06;
+  --talent-flag-soft: #fdf1da;
+  --talent-flag-line: #e0a127;
+
+  /* AI / automation */
+  --talent-ai: #0e7c86;
+  --talent-ai-soft: #e0f2f3;
+  --talent-ai-line: #bfe0e3;
+
+  /* Human approval gate — a tint pair derived from the brand gold, which
+     stays var(--portal-gold) wherever the accent itself is drawn. */
+  --talent-gate-soft: #fdf3dd;
+  --talent-gate-ink: #5a3903;
+
+  /* score bands + decisions */
+  --talent-ok: #1f9d55;
+  --talent-warn: #e2711d;
+  --talent-danger: #b42318;
+  --talent-danger-soft: #f9dedc;
+
+  display: grid;
+  gap: 18px;
+  color: var(--talent-ink);
+  container-name: talent;
+  container-type: inline-size;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Zero-specificity reset (`:where()` adds nothing), so every class below can
+   own its own spacing without fighting user-agent margins on <p>/<h*>/<ul>
+   and without escalating specificity against the rest of the portal. */
+.talent-console :where(p, h1, h2, h3, ul, ol, li, figure, table) {
+  margin: 0;
+  padding: 0;
+}
+
+.talent-console :where(ul, ol) {
+  list-style: none;
+}
+
+/* ── Header strip ───────────────────────────────────────────────────────── */
+
+.talent-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 3px solid var(--portal-gold);
+  border-radius: var(--talent-radius);
+  padding: 18px 22px;
+  background: linear-gradient(120deg, var(--talent-navy) 0%, var(--talent-slate) 100%);
+  box-shadow: var(--talent-shadow);
+  color: #eef4fa;
+}
+
+.talent-header-id {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+}
+
+.talent-header-mark {
+  display: flex;
+  flex: 0 0 46px;
+  width: 46px;
+  height: 46px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  background: var(--portal-gold);
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.18);
+  color: var(--talent-navy);
+}
+
+.talent-header h1 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.talent-header-sub {
+  color: #a9c2d8;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.talent-header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+}
+
+.talent-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  padding: 8px 13px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.talent-status-dot {
+  flex: 0 0 9px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #39d98a;
+  animation: talent-pulse 2s infinite;
+}
+
+@keyframes talent-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(57, 217, 138, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(57, 217, 138, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(57, 217, 138, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .talent-status-dot {
+    animation: none;
+  }
+}
+
+.talent-viewer {
+  color: #c7d8e6;
+  font-size: 0.76rem;
+  text-align: right;
+}
+
+.talent-viewer strong {
+  display: block;
+  color: #fff;
+  font-size: 0.83rem;
+}
+
+/* ── KPI row ────────────────────────────────────────────────────────────── */
+
+.talent-kpis {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.talent-kpi {
+  border: 1px solid var(--talent-line);
+  border-radius: var(--talent-radius);
+  padding: 15px 16px;
+  background: var(--talent-card);
+  box-shadow: var(--talent-shadow);
+}
+
+.talent-kpi-label {
+  color: var(--portal-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.talent-kpi-value {
+  margin-top: 4px;
+  color: var(--talent-navy);
+  font-size: 1.65rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.talent-kpi-note {
+  margin-top: 6px;
+  color: var(--portal-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+/* The two money tiles and the approval tile get the accent treatment. */
+.talent-kpi-money {
+  border-color: var(--talent-money);
+  background: linear-gradient(180deg, #f3fbf6, #fff);
+  box-shadow:
+    0 0 0 1px var(--talent-money),
+    var(--talent-shadow);
+}
+
+.talent-kpi-money .talent-kpi-value {
+  color: var(--talent-money);
+}
+
+.talent-kpi-money .talent-kpi-note {
+  color: var(--talent-money);
+}
+
+.talent-kpi-gate {
+  border-color: var(--portal-gold);
+  box-shadow:
+    0 0 0 1px var(--portal-gold),
+    var(--talent-shadow);
+}
+
+/* ── Three-column grid ──────────────────────────────────────────────────── */
+
+.talent-grid {
+  display: grid;
+  grid-template-columns: 1.02fr 1.4fr 0.95fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.talent-col {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Card shell ─────────────────────────────────────────────────────────── */
+
+.talent-card {
+  overflow: hidden;
+  border: 1px solid var(--talent-line);
+  border-radius: var(--talent-radius);
+  background: var(--talent-card);
+  box-shadow: var(--talent-shadow);
+}
+
+.talent-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--talent-line);
+  padding: 13px 16px;
+}
+
+.talent-card-head h2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--talent-navy);
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.talent-card-count {
+  flex: 0 0 auto;
+  border: 1px solid var(--talent-line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--talent-paper);
+  color: var(--portal-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.talent-card-body {
+  padding: 14px 16px;
+}
+
+.talent-card-body-flush {
+  padding: 0;
+}
+
+.talent-tag-ai,
+.talent-tag-gate {
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.talent-tag-ai {
+  background: var(--talent-ai);
+  color: #fff;
+}
+
+.talent-tag-gate {
+  border: 1px solid var(--portal-gold);
+  background: var(--talent-gate-soft);
+  color: var(--talent-gate-ink);
+}
+
+.talent-empty {
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  padding: 20px 16px;
+  background: var(--talent-paper);
+  color: var(--portal-muted);
+  font-size: 0.83rem;
+  text-align: center;
+}
+
+.talent-empty strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--talent-slate);
+  font-size: 0.88rem;
+}
+
+/* ── Simple list rows (job orders, talent pool) ─────────────────────────── */
+
+.talent-list {
+  display: block;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.talent-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px dashed var(--talent-line);
+  padding: 10px 0;
+}
+
+.talent-row:last-child {
+  border-bottom: none;
+}
+
+.talent-avatar {
+  display: flex;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  color: #fff;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.talent-avatar-square {
+  border-radius: 8px;
+}
+
+/* Deterministic tints so an avatar is never an inline colour. */
+.talent-avatar-1 { background: #1f4463; }
+.talent-avatar-2 { background: #0e7c86; }
+.talent-avatar-3 { background: #8a6320; }
+.talent-avatar-4 { background: #2f6f4a; }
+.talent-avatar-5 { background: #4a4f7a; }
+
+.talent-row-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.talent-row-title {
+  display: block;
+  overflow: hidden;
+  color: var(--talent-ink);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.talent-row-sub {
+  display: block;
+  overflow: hidden;
+  color: var(--portal-muted);
+  font-size: 0.73rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.talent-row-rate {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.talent-rate-value {
+  display: block;
+  color: var(--talent-navy);
+  font-size: 0.83rem;
+  font-weight: 800;
+}
+
+.talent-rate-unit {
+  display: block;
+  color: var(--portal-muted);
+  font-size: 0.63rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── Match queue ────────────────────────────────────────────────────────── */
+
+.talent-match {
+  border: 1px solid var(--talent-line);
+  border-radius: 11px;
+  padding: 13px;
+  background: #fcfdff;
+}
+
+.talent-match + .talent-match {
+  margin-top: 13px;
+}
+
+.talent-match-flagged {
+  border-color: var(--talent-flag-line);
+  background: #fffdf5;
+}
+
+.talent-match-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.talent-match-pair {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  font-size: 0.8rem;
+}
+
+.talent-match-name {
+  color: var(--talent-navy);
+  font-weight: 800;
+}
+
+.talent-match-arrow {
+  color: var(--talent-flag);
+  font-weight: 800;
+}
+
+.talent-match-job {
+  color: var(--talent-slate);
+  font-weight: 700;
+}
+
+.talent-score {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.talent-score-ring {
+  width: 38px;
+  height: 38px;
+}
+
+.talent-score-track {
+  stroke: var(--talent-track);
+}
+
+.talent-score-arc-strong { stroke: var(--talent-ok); }
+.talent-score-arc-mid    { stroke: var(--talent-warn); }
+.talent-score-arc-low    { stroke: var(--talent-danger); }
+
+.talent-score-pct {
+  color: var(--talent-navy);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.talent-score-label {
+  color: var(--portal-muted);
+  font-size: 0.63rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Rate strip — Bill / Pay / Spread / Wk Margin */
+.talent-ratestrip {
+  display: flex;
+  overflow: hidden;
+  align-items: stretch;
+  margin-bottom: 11px;
+  border: 1px solid var(--talent-money);
+  border-radius: 9px;
+  background: #fff;
+}
+
+.talent-ratestrip-flagged {
+  border-color: var(--talent-flag-line);
+}
+
+.talent-rs {
+  flex: 1;
+  min-width: 0;
+  border-right: 1px solid #dfeee7;
+  padding: 8px 6px;
+  text-align: center;
+}
+
+.talent-rs:last-child {
+  border-right: none;
+}
+
+.talent-rs-spread {
+  background: var(--talent-money-soft);
+}
+
+.talent-rs-spread .talent-rs-value {
+  color: var(--talent-money);
+}
+
+.talent-rs-flag {
+  background: var(--talent-flag-soft);
+}
+
+.talent-rs-flag .talent-rs-value {
+  color: var(--talent-flag);
+}
+
+.talent-rs-key {
+  display: block;
+  color: var(--portal-muted);
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.talent-rs-value {
+  display: block;
+  margin-top: 1px;
+  color: var(--talent-navy);
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.talent-rs-unit {
+  display: block;
+  color: var(--portal-muted);
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+
+.talent-ai-note {
+  margin-bottom: 11px;
+  border: 1px solid var(--talent-ai-line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: var(--talent-ai-soft);
+  color: #0c4b52;
+  font-size: 0.78rem;
+}
+
+.talent-ai-note strong {
+  color: #093a40;
+}
+
+.talent-ai-note-empty {
+  border-style: dashed;
+  background: var(--talent-paper);
+  color: var(--portal-muted);
+}
+
+/* ── Decision actions (the only interactive part of the console) ────────── */
+
+.talent-actions-shell {
+  display: grid;
+  gap: 8px;
+}
+
+.talent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.talent-btn {
+  flex: 1 1 30%;
+  min-width: 110px;
+  border: 1px solid var(--talent-line);
+  border-radius: 8px;
+  padding: 9px;
+  background: #fff;
+  color: var(--talent-slate);
+  cursor: pointer;
+  font-size: 0.79rem;
+  font-weight: 700;
+  text-align: center;
+  transition:
+    filter 150ms ease,
+    opacity 150ms ease;
+}
+
+.talent-btn:hover:not(:disabled) {
+  filter: brightness(0.97);
+}
+
+.talent-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.talent-btn-approve {
+  border-color: var(--talent-ok);
+  background: var(--talent-ok);
+  color: #fff;
+}
+
+.talent-btn-reject {
+  border-color: var(--talent-danger-soft);
+  color: var(--talent-danger);
+}
+
+.talent-action-error {
+  border: 1px solid var(--talent-danger-soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff0f0;
+  color: #5e1111;
+  font-size: 0.76rem;
+}
+
+.talent-action-hint {
+  color: var(--portal-muted);
+  font-size: 0.72rem;
+}
+
+/* "Review draft" / "Edit terms" disclosure: the AI's full draft, the reviewer
+   note that gets attached to whichever decision follows, and — below the floor
+   — the counter pay rate. */
+.talent-review-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--talent-line);
+  border-radius: 9px;
+  padding: 11px 12px;
+  background: var(--talent-paper);
+}
+
+.talent-review-heading {
+  color: var(--talent-slate);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.talent-review-draft {
+  color: var(--talent-ink);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.talent-review-field {
+  display: grid;
+  gap: 5px;
+}
+
+.talent-review-field label {
+  color: var(--talent-slate);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.talent-review-field input,
+.talent-review-field textarea {
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-size: 0.8rem;
+}
+
+/* Available to assistive tech, invisible on screen — used for the ledger's
+   <caption>, which would otherwise duplicate the card heading. */
+.talent-visually-hidden {
+  position: absolute;
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── Margin ledger ──────────────────────────────────────────────────────── */
+
+.talent-ledger-wrapper {
+  overflow-x: auto;
+  padding: 0 4px;
+}
+
+.talent-ledger {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.talent-ledger th,
+.talent-ledger td {
+  border-bottom: 1px solid var(--talent-line);
+  padding: 8px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.talent-ledger th {
+  background: var(--talent-paper);
+  color: var(--portal-muted);
+  font-size: 0.63rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.talent-ledger .talent-ledger-lead {
+  text-align: left;
+  white-space: normal;
+}
+
+.talent-ledger-name {
+  color: var(--talent-ink);
+  font-weight: 700;
+}
+
+.talent-ledger-client {
+  color: var(--portal-muted);
+  font-size: 0.68rem;
+}
+
+.talent-ledger-spread {
+  color: var(--talent-money);
+  font-weight: 800;
+}
+
+.talent-ledger tfoot td {
+  border-top: 2px solid var(--talent-navy);
+  border-bottom: none;
+  background: #fafcff;
+  color: var(--talent-navy);
+  font-weight: 800;
+}
+
+/* ── Revenue & margin donut ─────────────────────────────────────────────── */
+
+.talent-rev {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.talent-donut {
+  position: relative;
+  flex: 0 0 110px;
+  width: 110px;
+  height: 110px;
+}
+
+.talent-donut-track {
+  stroke: var(--talent-track);
+}
+
+.talent-donut-arc {
+  stroke: var(--talent-money);
+}
+
+.talent-donut-center {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inset: 0;
+  flex-direction: column;
+}
+
+.talent-donut-center strong {
+  color: var(--talent-navy);
+  font-size: 1.2rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.talent-donut-center span {
+  color: var(--portal-muted);
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.talent-rev-list {
+  display: flex;
+  min-width: 150px;
+  flex: 1;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.talent-rev-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.79rem;
+}
+
+.talent-rev-row > span:first-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--talent-slate);
+}
+
+.talent-rev-row strong {
+  color: var(--talent-navy);
+  font-weight: 800;
+}
+
+.talent-rev-swatch {
+  flex: 0 0 10px;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.talent-rev-swatch-billings { background: #cfd8e2; }
+.talent-rev-swatch-pay      { background: #8aa0b4; }
+.talent-rev-swatch-margin   { background: var(--talent-money); }
+
+.talent-rev-row-muted > span:first-child {
+  color: var(--portal-muted);
+}
+
+/* ── AI agent activity feed ─────────────────────────────────────────────── */
+
+.talent-feed {
+  display: block;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.talent-feed-item {
+  display: flex;
+  gap: 11px;
+  border-bottom: 1px dashed var(--talent-line);
+  padding: 9px 0;
+}
+
+.talent-feed-item:last-child {
+  border-bottom: none;
+}
+
+.talent-feed-dot {
+  flex: 0 0 9px;
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--portal-muted);
+}
+
+.talent-feed-dot-ai    { background: var(--talent-ai); }
+.talent-feed-dot-gate  { background: var(--talent-flag-line); }
+.talent-feed-dot-human { background: var(--talent-ok); }
+.talent-feed-dot-money { background: var(--talent-money); }
+
+.talent-feed-text {
+  font-size: 0.79rem;
+  line-height: 1.4;
+}
+
+.talent-feed-text strong {
+  color: var(--talent-navy);
+}
+
+.talent-feed-meta {
+  margin-top: 2px;
+  color: var(--portal-muted);
+  font-size: 0.68rem;
+}
+
+.talent-feed-badge {
+  font-size: 0.57rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.talent-feed-badge-auto  { color: var(--talent-ai); }
+.talent-feed-badge-gate  { color: var(--talent-flag); }
+.talent-feed-badge-human { color: var(--talent-money); }
+
+/* ── Certification tracker ──────────────────────────────────────────────── */
+
+.talent-cert + .talent-cert {
+  margin-top: 11px;
+}
+
+.talent-cert-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.talent-cert-label > span:first-child {
+  color: var(--talent-ink);
+}
+
+.talent-cert-value {
+  color: var(--portal-muted);
+  font-weight: 700;
+}
+
+.talent-meter {
+  overflow: hidden;
+  height: 8px;
+  margin-top: 3px;
+  border-radius: 999px;
+  background: var(--talent-track);
+}
+
+.talent-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--talent-ok);
+}
+
+.talent-meter-warn  { background: var(--portal-gold); }
+.talent-meter-alert { background: var(--talent-warn); }
+
+/* ── Footnote ───────────────────────────────────────────────────────────── */
+
+.talent-foot {
+  margin: 4px 0 0;
+  color: var(--portal-muted);
+  font-size: 0.72rem;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.talent-no-access {
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--talent-radius);
+  padding: 40px 24px;
+  background: #fff;
+  color: var(--portal-muted);
+  text-align: center;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+
+@media (max-width: 1400px) {
+  .talent-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1100px) {
+  .talent-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .talent-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .talent-header,
+  .talent-header-meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .talent-viewer {
+    text-align: left;
+  }
+
+  .talent-btn {
+    flex: 1 1 100%;
+  }
+}
+
+/* The console renders inside .portal-main, next to a 292px sidebar, so the
+   VIEWPORT is the wrong thing to measure: a 1300px window leaves this grid
+   about 950px, and three columns at that width squeeze the four-cell rate strip
+   onto two lines. Container queries ask the question that actually matters —
+   how wide is this console — and the media queries above stay in place as the
+   fallback for engines without container query support. */
+@container talent (max-width: 1040px) {
+  .talent-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .talent-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container talent (max-width: 640px) {
+  .talent-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .talent-header,
+  .talent-header-meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .talent-viewer {
+    text-align: left;
+  }
+
+  .talent-btn {
+    flex: 1 1 100%;
+  }
+}
+
+/* ---- Intake forms (job order / candidate / match draft) ------------------ */
+
+.talent-intake {
+  margin-bottom: 12px;
+}
+
+.talent-intake-toggle {
+  align-items: center;
+  background: transparent;
+  border: 1px dashed var(--talent-line);
+  border-radius: 8px;
+  color: var(--talent-slate);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 700;
+  gap: 6px;
+  padding: 6px 12px;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.talent-intake-toggle:hover:not(:disabled) {
+  border-color: var(--talent-slate);
+  color: var(--talent-navy);
+}
+
+.talent-intake-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.talent-intake-form {
+  border: 1px solid var(--talent-line);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 10px;
+  padding: 12px;
+}
+
+.talent-field {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.75rem;
+  gap: 4px;
+  min-width: 0;
+}
+
+.talent-field > span {
+  color: var(--portal-muted);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.talent-field > input,
+.talent-field > select {
+  border: 1px solid var(--talent-line);
+  border-radius: 7px;
+  font-size: 0.85rem;
+  min-width: 0;
+  padding: 7px 9px;
+}
+
+.talent-field > input:disabled {
+  background: var(--talent-paper);
+  cursor: not-allowed;
+}
+
+.talent-field-wide {
+  grid-column: 1 / -1;
+}
+
+.talent-field-check {
+  align-items: center;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.talent-field-check > span {
+  text-transform: none;
+}
+
+.talent-intake-submit {
+  flex: 0 0 auto;
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.talent-intake-error {
+  color: var(--talent-danger);
+  font-size: 0.8rem;
+  font-weight: 600;
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+@container talent (max-width: 640px) {
+  .talent-intake-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- Web sourcing: the review queue at /talent-engine/leads -------------- */
+/* No new palette. Everything below reuses the tokens declared on
+   .talent-console: `ai` for what an agent did unattended, `flag` for a lead
+   that has gone stale, `money` for a published rate signal. Lead status is
+   always ALSO spelled out in text — a badge's tint is never the only signal. */
+
+/* Back to the console, sitting on the dark header gradient. */
+.talent-backlink {
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: #eef4fa;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 700;
+  gap: 7px;
+  padding: 8px 14px;
+  text-decoration: none;
+  transition: background-color 150ms ease;
+}
+
+.talent-backlink:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Intro band: what the loop is, plus the manual sweep triggers. */
+.talent-lead-intro {
+  border: 1px solid var(--talent-line);
+  border-left: 3px solid var(--talent-ai);
+  border-radius: var(--talent-radius);
+  background: var(--talent-card);
+  box-shadow: var(--talent-shadow);
+  display: grid;
+  gap: 11px;
+  padding: 14px 16px;
+}
+
+.talent-lead-lede {
+  color: var(--talent-slate);
+  font-size: 0.83rem;
+  line-height: 1.55;
+}
+
+.talent-sweep {
+  display: grid;
+  gap: 8px;
+}
+
+.talent-sweep-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* The lead cards and the sweep buttons carry icons; the console's own buttons
+   do not, so the flex alignment is scoped here rather than added to .talent-btn. */
+.talent-lead .talent-btn,
+.talent-sweep .talent-btn {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+/* Two review columns — candidate leads and job-order leads. */
+.talent-lead-columns {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.talent-lead-list {
+  display: grid;
+  gap: 13px;
+}
+
+/* ── One lead ───────────────────────────────────────────────────────────── */
+
+.talent-lead {
+  border: 1px solid var(--talent-line);
+  border-radius: 11px;
+  background: #fcfdff;
+  padding: 13px;
+}
+
+/* Unreviewed past sourcingLeadStaleDays. The tint only reinforces the badge
+   text, which names the window. */
+.talent-lead-stale {
+  border-color: var(--talent-flag-line);
+  background: #fffdf5;
+}
+
+.talent-lead-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.talent-lead-id {
+  min-width: 0;
+  flex: 1;
+}
+
+.talent-lead-title {
+  color: var(--talent-navy);
+  font-size: 0.87rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.talent-lead-meta {
+  color: var(--portal-muted);
+  font-size: 0.74rem;
+  margin-top: 2px;
+}
+
+.talent-lead-rate {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.talent-lead-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 9px;
+}
+
+.talent-lead-badge {
+  border: 1px solid var(--talent-line);
+  border-radius: 999px;
+  background: var(--talent-paper);
+  color: var(--portal-muted);
+  font-size: 0.63rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+
+.talent-lead-badge-status {
+  border-color: var(--portal-gold);
+  background: var(--talent-gate-soft);
+  color: var(--talent-gate-ink);
+}
+
+.talent-lead-badge-stale {
+  border-color: var(--talent-flag-line);
+  background: var(--talent-flag-soft);
+  color: var(--talent-flag);
+  white-space: normal;
+}
+
+.talent-lead-certs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 9px;
+}
+
+.talent-lead-cert {
+  border: 1px solid var(--talent-ai-line);
+  border-radius: 5px;
+  background: var(--talent-ai-soft);
+  color: #0c4b52;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  padding: 2px 7px;
+}
+
+/* The public URL the claim came from — the reviewer's way of disbelieving the
+   agent. Truncated for layout; the full URL is in the title attribute. */
+.talent-lead-source {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.talent-lead-source-key {
+  color: var(--portal-muted);
+  flex: 0 0 auto;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.talent-lead-source-link {
+  align-items: center;
+  color: var(--talent-slate);
+  display: inline-flex;
+  font-size: 0.74rem;
+  font-weight: 700;
+  gap: 5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-decoration: underline;
+}
+
+.talent-lead-source-link:hover {
+  color: var(--talent-navy);
+}
+
+/* Rendered when source_url is not plain http(s) — shown, never linked. */
+.talent-lead-source-plain {
+  color: var(--portal-muted);
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+}
+
+/* ── Recent sweeps strip ────────────────────────────────────────────────── */
+
+.talent-runs {
+  display: grid;
+  gap: 11px;
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+}
+
+.talent-run {
+  border: 1px solid var(--talent-line);
+  border-radius: 9px;
+  background: var(--talent-paper);
+  padding: 9px 11px;
+}
+
+.talent-run-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.talent-run-type {
+  color: var(--talent-navy);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.talent-run-status {
+  border-radius: 4px;
+  font-size: 0.57rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.talent-run-status-done {
+  background: var(--talent-money-soft);
+  color: var(--talent-money);
+}
+
+.talent-run-status-running {
+  background: var(--talent-ai-soft);
+  color: var(--talent-ai);
+}
+
+.talent-run-status-failed {
+  background: var(--talent-danger-soft);
+  color: var(--talent-danger);
+}
+
+.talent-run-counts {
+  color: var(--talent-slate);
+  font-size: 0.73rem;
+  margin-top: 5px;
+}
+
+.talent-run-counts strong {
+  color: var(--talent-navy);
+  font-weight: 800;
+}
+
+.talent-run-meta,
+.talent-run-query {
+  color: var(--portal-muted);
+  font-size: 0.68rem;
+  margin-top: 3px;
+}
+
+.talent-run-query {
+  overflow-wrap: anywhere;
+}
+
+.talent-run-error {
+  border-radius: 6px;
+  background: #fff0f0;
+  color: #5e1111;
+  font-size: 0.68rem;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  padding: 5px 7px;
+}
+
+/* ── Dismissed leads (collapsed, restorable) ────────────────────────────── */
+
+.talent-dismissed {
+  border: 1px solid var(--talent-line);
+  border-radius: var(--talent-radius);
+  background: var(--talent-card);
+  box-shadow: var(--talent-shadow);
+  overflow: hidden;
+}
+
+.talent-dismissed-summary {
+  align-items: center;
+  color: var(--talent-navy);
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  font-weight: 800;
+  gap: 10px;
+  list-style: none;
+  padding: 13px 16px;
+}
+
+.talent-dismissed-summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Text affordance rather than a bare chevron — the open/closed state has to be
+   readable, not inferred from an arrow's rotation. */
+.talent-dismissed-summary::after {
+  border: 1px solid var(--talent-line);
+  border-radius: 999px;
+  color: var(--portal-muted);
+  content: "Show";
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  margin-left: auto;
+  padding: 2px 10px;
+  text-transform: uppercase;
+}
+
+.talent-dismissed[open] .talent-dismissed-summary::after {
+  content: "Hide";
+}
+
+.talent-dismissed-hint {
+  color: var(--portal-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.talent-dismissed-list {
+  border-top: 1px solid var(--talent-line);
+  padding: 14px 16px;
+}
+
+/* ── Console link-card into the queue ───────────────────────────────────── */
+
+.talent-leadlink {
+  align-items: center;
+  border: 1px solid var(--talent-line);
+  border-left: 3px solid var(--talent-ai);
+  border-radius: var(--talent-radius);
+  background: var(--talent-card);
+  box-shadow: var(--talent-shadow);
+  color: inherit;
+  display: flex;
+  gap: 11px;
+  padding: 12px 14px;
+  text-decoration: none;
+  transition: border-color 150ms ease;
+}
+
+.talent-leadlink:hover {
+  border-color: var(--talent-ai);
+}
+
+.talent-leadlink-mark {
+  align-items: center;
+  border-radius: 8px;
+  background: var(--talent-ai-soft);
+  color: var(--talent-ai);
+  display: flex;
+  flex: 0 0 32px;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+
+.talent-leadlink-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.talent-leadlink-title {
+  color: var(--talent-navy);
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.talent-leadlink-sub {
+  color: var(--portal-muted);
+  display: block;
+  font-size: 0.71rem;
+  line-height: 1.4;
+}
+
+.talent-leadlink-count {
+  border: 1px solid var(--talent-line);
+  border-radius: 999px;
+  background: var(--talent-paper);
+  color: var(--talent-slate);
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+@container talent (max-width: 1040px) {
+  .talent-lead-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1100px) {
+  .talent-lead-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ===== End EHS Talent Engine ============================================= */
