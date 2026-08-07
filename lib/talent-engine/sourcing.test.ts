@@ -178,14 +178,22 @@ function sourceUrlsOf(items: unknown[]): string[] {
 }
 
 /**
+ * A sweep is TWO calls, and the split is the whole point — see the comment on
+ * evidenceFormatClause(). Call 1 searches and returns a cited prose note; call
+ * 2 has no tools and turns that note into the array.
+ *
  * By default the model is honest: every URL it reports is one it retrieved, so
- * the response cites them all. Pass `cite` to model a lying or partly-lying
- * model — that is what the citation-gate tests do.
+ * the research call cites them all. Pass `cite` to model a lying or
+ * partly-lying model — that is what the citation-gate tests do.
  */
 function respondWith(items: unknown[], cite?: string[]): void {
-  responsesCreate.mockResolvedValue(
-    modelResponse(JSON.stringify(items), "completed", cite ?? sourceUrlsOf(items)),
-  );
+  responsesCreate
+    // Call 1 — research. Prose; the citations are what matter.
+    .mockResolvedValueOnce(
+      modelResponse("1. A result. https://example.com", "completed", cite ?? sourceUrlsOf(items)),
+    )
+    // Call 2 — structuring. No citations; just the array.
+    .mockResolvedValueOnce(modelResponse(JSON.stringify(items), "completed", []));
 }
 
 const originalApiKey = process.env.OPENAI_API_KEY;
@@ -193,6 +201,10 @@ const originalModel = process.env.OPENAI_RESEARCH_MODEL;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // clearAllMocks() clears call records but NOT the queue built by
+  // mockResolvedValueOnce, and a sweep consumes two responses. Without this an
+  // unused leftover from one test becomes the first response of the next.
+  responsesCreate.mockReset();
   process.env.OPENAI_API_KEY = "test-key";
   delete process.env.OPENAI_RESEARCH_MODEL;
 });
@@ -241,13 +253,11 @@ describe("buildCandidateSearchPrompt", () => {
     // indeed.com links, while asking for a per-result cited list first produced
     // eleven annotations whose URLs matched the array. No citations means the
     // citation gate has nothing to verify against, and every lead is refused.
-    expect(prompt).toContain("PART 1 — EVIDENCE");
-    expect(prompt).toContain("PART 2 — DATA");
-    expect(prompt).toContain("one line per result you actually opened");
-    expect(prompt).toContain(`at most ${sourcingMaxLeadsPerRun} objects`);
-    expect(prompt).toContain(
-      '"title", "organization", "location", "vertical", "certifications", "rate_signal", "source_url", "summary"',
-    );
+    expect(prompt).toContain("one entry per result you actually opened");
+    expect(prompt).toContain(`at most ${sourcingMaxLeadsPerRun} results`);
+    // The research call must NOT ask for JSON. Asking one turn to both search
+    // and emit strict JSON cost whichever the model dropped that run.
+    expect(prompt).toContain("Do not output JSON");
   });
 
   it("renders every open order it was given", () => {
@@ -320,9 +330,9 @@ describe("buildJobOrderSearchPrompt", () => {
 
   it("asks for cited evidence before the data array, capped at the per-run maximum", () => {
     const prompt = buildJobOrderSearchPrompt(jobOrderContext());
-    expect(prompt).toContain(`at most ${sourcingMaxLeadsPerRun} objects`);
-    expect(prompt).toContain("PART 1 — EVIDENCE");
-    expect(prompt).toContain("PART 2 — DATA");
+    expect(prompt).toContain(`at most ${sourcingMaxLeadsPerRun} results`);
+    expect(prompt).toContain("one entry per result you actually opened");
+    expect(prompt).toContain("Do not output JSON");
   });
 
   it("is deterministic and de-duplicates the scope lists", () => {
@@ -508,13 +518,21 @@ describe("searchSourcingLeads — model call", () => {
     await searchSourcingLeads("candidates", candidateContext());
 
     expect(openAiConstructor).toHaveBeenCalledWith({ apiKey: "test-key" });
-    expect(responsesCreate).toHaveBeenCalledTimes(1);
+    // Two calls: research (with the web tool) then structuring (without it).
+    expect(responsesCreate).toHaveBeenCalledTimes(2);
 
-    const request = responsesCreate.mock.calls[0][0];
-    expect(request.model).toBe("gpt-4o-mini");
-    expect(request.tools).toEqual([{ type: "web_search_preview" }]);
-    expect(request.input).toContain(exclusionLiteral);
-    expect(request.input).toContain("- Site Safety Manager");
+    const research = responsesCreate.mock.calls[0][0];
+    expect(research.model).toBe("gpt-4o-mini");
+    expect(research.tools).toEqual([{ type: "web_search_preview" }]);
+    expect(research.input).toContain(exclusionLiteral);
+    expect(research.input).toContain("- Site Safety Manager");
+
+    // The structuring call must NOT carry the web tool: its only input is the
+    // note call 1 produced, and letting it search again would let it introduce
+    // a URL that nothing cited.
+    const structuring = responsesCreate.mock.calls[1][0];
+    expect(structuring.tools).toBeUndefined();
+    expect(structuring.input).toContain("RESEARCH NOTE:");
   });
 
   it("honours OPENAI_RESEARCH_MODEL without introducing a new environment variable", async () => {
@@ -541,8 +559,12 @@ describe("searchSourcingLeads — model call", () => {
     await expect(searchSourcingLeads("candidates", candidateContext())).rejects.toThrow(/cut off/);
   });
 
-  it("throws when nothing array-shaped can be recovered from the output", async () => {
-    responsesCreate.mockResolvedValue(modelResponse("I could not find anything useful today."));
+  it("throws when nothing array-shaped can be recovered from the structuring call", async () => {
+    // Research succeeded and cited a page, so the sweep proceeds — then the
+    // structuring call answers in prose instead of the array.
+    responsesCreate
+      .mockResolvedValueOnce(modelResponse("1. A result.", "completed", ["https://example.com/a"]))
+      .mockResolvedValueOnce(modelResponse("I could not format that, sorry."));
 
     await expect(searchSourcingLeads("candidates", candidateContext())).rejects.toThrow(
       /could not be parsed/,
@@ -749,18 +771,23 @@ describe("searchSourcingLeads — citation gate", () => {
     expect(result.raw).toEqual({ found: 2, rejected: 0, unverified: 1 });
   });
 
-  it("rejects the whole batch when the model answered without retrieving anything", async () => {
-    // The exact production failure this gate was built for (2026-08-07): a
-    // sweep returned ten plausible leads whose source URLs were sequential
-    // digit rotations of one another, with no page behind any of them.
-    const fabricated = Array.from({ length: 10 }, (_, i) =>
-      leadItem({ title: `Fabricated ${i}`, source_url: `https://www.indeed.com/viewjob?jk=${i}234567890` }),
+  it("queues nothing, and never structures, when the search retrieved no pages", async () => {
+    // The production failure this gate was built for (2026-08-07): a sweep
+    // returned ten plausible leads whose source URLs were sequential digit
+    // rotations of one another, with no page behind any of them. With no
+    // citations there is nothing to verify against, so the sweep stops after
+    // the research call and reports an empty result rather than queueing
+    // links that go nowhere.
+    responsesCreate.mockResolvedValueOnce(
+      modelResponse("Here are ten great roles!", "completed", []),
     );
-    respondWith(fabricated, []);
 
-    await expect(searchSourcingLeads("job_orders", jobOrderContext())).rejects.toThrow(
-      /web search retrieved no pages/i,
-    );
+    const result = await searchSourcingLeads("job_orders", jobOrderContext());
+
+    expect(result.leads).toEqual([]);
+    expect(result.raw).toEqual({ found: 0, rejected: 0, unverified: 0 });
+    // The structuring call never happened — nothing to structure.
+    expect(responsesCreate).toHaveBeenCalledTimes(1);
   });
 
   it("does not fail an honest empty sweep that cited nothing", async () => {

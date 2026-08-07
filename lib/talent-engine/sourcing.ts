@@ -183,6 +183,23 @@ function describeOrder(order: CandidateSearchContext["openOrders"][number]): str
  * Defensive throughout — this walks a vendor response shape, and a sweep must
  * not die because one annotation arrived in an unexpected form.
  */
+/** Concatenated output_text across a Responses API result. */
+function extractOutputText(response: unknown): string {
+  const output = (response as { output?: unknown } | null)?.output;
+  if (!Array.isArray(output)) return "";
+
+  return output
+    .filter((item) => (item as { type?: unknown } | null)?.type === "message")
+    .flatMap((item) => {
+      const content = (item as { content?: unknown } | null)?.content;
+      return Array.isArray(content) ? content : [];
+    })
+    .filter((part) => (part as { type?: unknown } | null)?.type === "output_text")
+    .map((part) => (part as { text?: unknown }).text ?? "")
+    .filter((text): text is string => typeof text === "string")
+    .join("");
+}
+
 export function collectCitedUrls(response: unknown): Set<string> {
   const cited = new Set<string>();
 
@@ -246,20 +263,57 @@ function noEchoClause(): string {
  * annotations exist, and the citation gate in searchSourcingLeads() is what
  * consumes them.
  */
-function outputFormatClause(): string {
+/**
+ * The research call's output contract. Prose only, deliberately.
+ *
+ * Measured against the live API on 2026-08-07, all with the same model and
+ * task, this is the third shape tried and the first that works:
+ *
+ *   1. "strict JSON array, nothing else" → 0 url_citation annotations and
+ *      invented links. Citations attach to prose the model grounded in a
+ *      retrieved page; give it none to write and it stops grounding.
+ *   2. cited list, then `---`, then the array → 11 annotations, but the model
+ *      often wrote the evidence and never emitted the array at all.
+ *   3. THIS: ask only for cited prose, and let a second, tool-free call do the
+ *      structuring. Each call has one job.
+ *
+ * Searching and emitting strict JSON are separate skills, and requiring both at
+ * once cost whichever the model dropped that run.
+ */
+function evidenceFormatClause(): string {
   return (
-    "OUTPUT FORMAT — two parts, in this order.\n\n" +
-    "PART 1 — EVIDENCE. A numbered list with one line per result you actually opened. Each line must name " +
-    "the result and link to that exact page. Do not summarise in aggregate: one line per result, and every " +
-    "line carries its own link. If you opened nothing, write NONE.\n\n" +
-    "PART 2 — DATA. After a line containing only ---, output a JSON array of at most " +
-    `${sourcingMaxLeadsPerRun} objects, one per line of part 1, with keys exactly: "title", ` +
-    '"organization", "location", "vertical", "certifications", "rate_signal", "source_url", "summary". ' +
-    'Each "source_url" must be the same link you gave for that result in part 1. Use null for anything not ' +
-    'publicly published and an empty array for "certifications" when the source states none. "rate_signal" ' +
-    "must be a plain number of US dollars PER HOUR — if the source publishes an annual salary, a range, or " +
-    "no rate at all, use null. If part 1 was NONE, output []."
+    "OUTPUT FORMAT: a numbered list, one entry per result you actually opened, and nothing else. Each entry " +
+    `must name the result and link to that exact page. List at most ${sourcingMaxLeadsPerRun} results. Do ` +
+    "not summarise in aggregate — one entry per result, each carrying its own link. Under each entry, state " +
+    "in plain prose whatever the page publishes of: the organisation, the location, the industry vertical, " +
+    "the certifications it names, and the rate. Give the rate only if the page publishes an hourly rate; if " +
+    "it publishes an annual salary, a range, or nothing, say the hourly rate is not published. Do not output " +
+    "JSON. If you opened nothing, write NONE."
   );
+}
+
+/**
+ * The structuring call. No tools, no web access, one job: turn the research
+ * note into the array. It is explicitly forbidden from inventing a URL, since
+ * anything it emits that was not in the note would fail the citation gate
+ * anyway — better it returns fewer rows than plausible-looking noise.
+ */
+function buildStructuringPrompt(researchNote: string): string {
+  return [
+    "Convert the research note below into structured data. The note is the ONLY source of information: do " +
+      "not add results, do not add facts, and never invent or complete a URL. If the note does not state " +
+      "something, that value is null.",
+    `RESEARCH NOTE:\n${researchNote}`,
+    "OUTPUT FORMAT: a bare JSON array and nothing else — no prose, no markdown code fence, no heading. One " +
+      `object per numbered entry in the note, at most ${sourcingMaxLeadsPerRun}, with keys exactly: ` +
+      '"title", "organization", "location", "vertical", "certifications", "rate_signal", "source_url", ' +
+      '"summary".',
+    '"source_url" must be copied verbatim from that entry in the note. "certifications" is an array of the ' +
+      'certifications the entry names, or [] if it names none. "rate_signal" is a plain number of US ' +
+      "dollars per hour, or null if the note says the hourly rate is not published — never a string, never " +
+      'a range, never an annual figure. "summary" is one or two sentences drawn from that entry. If the ' +
+      "note is NONE or lists nothing, output [].",
+  ].join("\n\n");
 }
 
 /**
@@ -296,7 +350,7 @@ export function buildCandidateSearchPrompt(ctx: CandidateSearchContext): string 
     sourcingProtectedAttributeClause,
     sourcingPublicSourcesClause,
     noEchoClause(),
-    outputFormatClause(),
+    evidenceFormatClause(),
   ].join("\n\n");
 }
 
@@ -330,7 +384,7 @@ export function buildJobOrderSearchPrompt(ctx: JobOrderSearchContext): string {
     sourcingProtectedAttributeClause,
     sourcingPublicSourcesClause,
     noEchoClause(),
-    outputFormatClause(),
+    evidenceFormatClause(),
   ].join("\n\n");
 }
 
@@ -579,6 +633,7 @@ export async function searchSourcingLeads(
   const client = new OpenAI({ apiKey });
   const model = process.env.OPENAI_RESEARCH_MODEL || "gpt-4o-mini";
 
+  // ---- Call 1: RESEARCH. Web search, prose out, citations attached. --------
   const response = await client.responses.create({
     model,
     tools: [{ type: "web_search_preview" }],
@@ -593,31 +648,40 @@ export async function searchSourcingLeads(
     );
   }
 
-  const text = response.output
-    .filter((item) => item.type === "message")
-    .flatMap((item) => (item as { type: "message"; content: Array<{ type: string; text?: string }> }).content)
-    .filter((c) => c.type === "output_text")
-    .map((c) => c.text ?? "")
-    .join("");
+  const researchNote = extractOutputText(response);
+  const citedUrls = collectCitedUrls(response);
 
+  // Nothing retrieved means nothing to structure. An empty sweep is a normal
+  // outcome, not a failure — the queue simply gains nothing this run.
+  if (citedUrls.size === 0) {
+    return { leads: [], querySummary, raw: { found: 0, rejected: 0, unverified: 0 } };
+  }
+
+  // ---- Call 2: STRUCTURE. No tools, no web, one job: emit the array. -------
+  //
+  // Splitting the calls is the fix for two failures seen live on 2026-08-07.
+  // Asked for search AND strict JSON in one turn, the model dropped whichever
+  // it felt like: first it emitted clean JSON with fabricated links and zero
+  // citations, then it wrote a properly cited note and never emitted the array
+  // at all. Neither call here has to do both.
+  const structured = await client.responses.create({
+    model,
+    max_output_tokens: 16000,
+    input: buildStructuringPrompt(researchNote),
+  });
+
+  if (structured.status === "incomplete") {
+    throw new Error(
+      "The sourcing sweep found results but was cut off while structuring them. Narrow the run and try again.",
+    );
+  }
+
+  const text = extractOutputText(structured);
   const items = parseLeadArray(text);
   if (!items) {
     const snippet = text.slice(0, 300).replace(/\s+/g, " ").trim();
     throw new Error(
       `The sourcing sweep finished but the output could not be parsed. Model returned: "${snippet}…". Please try again.`,
-    );
-  }
-
-  const citedUrls = collectCitedUrls(response);
-
-  // If the model produced leads while the web_search tool retrieved nothing,
-  // every "source" in that batch is necessarily invented — the model answered
-  // from memory. Fail the run loudly instead of filling the queue with links
-  // that go nowhere.
-  if (items.length > 0 && citedUrls.size === 0) {
-    throw new Error(
-      "The sourcing sweep returned leads but the web search retrieved no pages, so every source link would " +
-        "have been fabricated. Nothing was queued. Try again, or narrow the scope.",
     );
   }
 
