@@ -17,7 +17,7 @@
  */
 
 import Link from "next/link";
-import { Radar } from "lucide-react";
+import { ClipboardCheck, Radar } from "lucide-react";
 import { buildConsoleSummary, computeSpread, computeWeeklyMargin, summariseLedger } from "@/lib/talent-engine/pricing";
 import { getTalentAccess, type TalentAccess } from "@/lib/talent-engine/access";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
@@ -64,6 +64,8 @@ const certTrackerRows = 4;
 const activePoolStatuses = ["sourced", "screening", "available"] as const;
 /** Match statuses that are sitting on a human. */
 const pendingStatuses = ["pending_approval", "counter_proposed"] as const;
+/** Past the gate, not yet billing — the Placement Desk's workload. */
+const deskWaitingStatuses = ["approved", "submitted"] as const;
 
 /* -------------------------------------------------------------------------- */
 /* Read helpers                                                               */
@@ -223,6 +225,7 @@ export default async function TalentEnginePage() {
     certScanResult,
     poolCountResult,
     newLeadsResult,
+    deskWaitingResult,
   ] = await Promise.all([
     readList<{
       min_spread_per_hour: number | null;
@@ -306,6 +309,16 @@ export default async function TalentEnginePage() {
     readList<{ id: string }>(
       db.from("talent_sourcing_leads").select("id", { count: "exact", head: true }).eq("status", "new"),
     ),
+
+    // Matches past the approval gate but not yet placed. Counted here only —
+    // the desk route is where they are worked. Without this the console has no
+    // hint that anything is sitting between "approved" and "billing".
+    readList<{ id: string }>(
+      db
+        .from("talent_matches")
+        .select("id", { count: "exact", head: true })
+        .in("status", deskWaitingStatuses),
+    ),
   ]);
 
   // Options for the intake forms, fetched only when the viewer can use them.
@@ -350,6 +363,7 @@ export default async function TalentEnginePage() {
     certScanResult,
     poolCountResult,
     newLeadsResult,
+    deskWaitingResult,
     clientOptionsResult,
     orderOptionsResult,
     candidateOptionsResult,
@@ -490,7 +504,12 @@ export default async function TalentEnginePage() {
             openCount={jobOrdersResult.count}
             orders={jobOrdersResult.rows}
           />
-          <TalentPoolCard activeCount={poolCountResult.count} canPropose={canPropose} candidates={candidatesResult.rows} />
+          <TalentPoolCard
+            activeCount={poolCountResult.count}
+            canApprove={canApprove}
+            canPropose={canPropose}
+            candidates={candidatesResult.rows}
+          />
           <Link className="talent-leadlink" href="/employee/talent-engine/leads">
             <span aria-hidden="true" className="talent-leadlink-mark">
               <Radar size={16} />
@@ -503,6 +522,27 @@ export default async function TalentEnginePage() {
             </span>
             <span className="talent-leadlink-count">
               {newLeadsResult.count === 0 ? "None new" : `${newLeadsResult.count} new`}
+            </span>
+          </Link>
+          {/*
+            The desk is where an approved match becomes a placement and a
+            placement becomes billable hours. It is a separate route because the
+            console is the money DASHBOARD — the desk is the work. Same
+            `/employee/talent-engine` prefix grant, so no new module key.
+          */}
+          <Link className="talent-leadlink" href="/employee/talent-engine/desk">
+            <span aria-hidden="true" className="talent-leadlink-mark">
+              <ClipboardCheck size={16} />
+            </span>
+            <span className="talent-leadlink-main">
+              <span className="talent-leadlink-title">Placement desk</span>
+              <span className="talent-leadlink-sub">
+                Approved matches waiting to be submitted or placed, and the weekly hours that turn a placement into
+                margin.
+              </span>
+            </span>
+            <span className="talent-leadlink-count">
+              {deskWaitingResult.count === 0 ? "Nothing waiting" : `${deskWaitingResult.count} waiting`}
             </span>
           </Link>
         </div>

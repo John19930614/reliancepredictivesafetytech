@@ -8249,4 +8249,340 @@ a.platform-card:hover {
   }
 }
 
+/* ---- Placement Desk: /employee/talent-engine/desk ------------------------ */
+/* The post-approval working surface. No new palette and no new tokens: every
+   colour below is one of the ones declared on .talent-console — `gate` for the
+   human decision that is still owed, `flag` for a spread under the floor or a
+   week about to be overwritten, `money` for margin already realised, `ai` for
+   nothing at all, because there is no agent on this page. Every state is also
+   spelled out in text; a tint is never the only signal.
+
+   Structure is borrowed rather than reinvented: the cards are .talent-card, the
+   buttons .talent-btn, the forms .talent-intake-form / .talent-field. What is
+   defined here is only what those do not already cover. */
+
+/* Intro band: what this surface is for. Mirrors .talent-lead-intro's shape,
+   in the gate tint rather than the AI one — the work here is all human. */
+.talent-desk-intro {
+  border: 1px solid var(--talent-line);
+  border-left: 3px solid var(--portal-gold);
+  border-radius: var(--talent-radius);
+  background: var(--talent-card);
+  box-shadow: var(--talent-shadow);
+  display: grid;
+  gap: 11px;
+  padding: 14px 16px;
+}
+
+.talent-desk-lede {
+  color: var(--talent-slate);
+  font-size: 0.83rem;
+  line-height: 1.55;
+}
+
+/* Cleared-to-place and active placements, side by side. */
+.talent-desk-columns {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.talent-desk-list {
+  display: grid;
+  gap: 13px;
+}
+
+/* ── One match or placement ─────────────────────────────────────────────── */
+
+.talent-desk-row {
+  border: 1px solid var(--talent-line);
+  border-radius: 11px;
+  background: #fcfdff;
+  padding: 13px;
+}
+
+/* An approved match the certification gate will refuse. The tint only
+   reinforces the .talent-desk-block paragraph, which names the certs. */
+.talent-desk-row-blocked {
+  border-color: var(--talent-flag-line);
+  background: #fffdf5;
+}
+
+.talent-desk-row-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.talent-desk-pair {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.talent-desk-name {
+  color: var(--talent-navy);
+  font-size: 0.87rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.talent-desk-arrow {
+  color: var(--portal-muted);
+  font-size: 0.8rem;
+}
+
+.talent-desk-job {
+  color: var(--talent-slate);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.talent-desk-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 9px;
+}
+
+.talent-desk-badge {
+  border: 1px solid var(--talent-line);
+  border-radius: 999px;
+  background: var(--talent-paper);
+  color: var(--portal-muted);
+  font-size: 0.63rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+
+/* Still owed a human action. */
+.talent-desk-badge-status {
+  border-color: var(--portal-gold);
+  background: var(--talent-gate-soft);
+  color: var(--talent-gate-ink);
+  white-space: normal;
+}
+
+/* Earning the spread right now. */
+.talent-desk-badge-live {
+  border-color: var(--talent-money-line);
+  background: var(--talent-money-soft);
+  color: var(--talent-money);
+}
+
+.talent-desk-badge-flag {
+  border-color: var(--talent-flag-line);
+  background: var(--talent-flag-soft);
+  color: var(--talent-flag);
+  white-space: normal;
+}
+
+/* Why the submittal will be refused, in words. */
+.talent-desk-block {
+  border: 1px solid var(--talent-flag-line);
+  border-radius: 8px;
+  margin-bottom: 11px;
+  padding: 9px 11px;
+  background: var(--talent-flag-soft);
+  color: #5f3d05;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.talent-desk-block strong {
+  color: var(--talent-flag);
+}
+
+/* ── Weeks already logged ───────────────────────────────────────────────── */
+
+.talent-desk-weeks {
+  margin-bottom: 11px;
+}
+
+.talent-desk-weeks-head {
+  color: var(--portal-muted);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.talent-desk-weeks-none {
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: var(--talent-paper);
+  color: var(--portal-muted);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.talent-desk-weeklist {
+  display: grid;
+  gap: 4px;
+}
+
+.talent-desk-week {
+  align-items: baseline;
+  border-bottom: 1px solid var(--talent-line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  padding-bottom: 4px;
+}
+
+.talent-desk-week:last-child {
+  border-bottom: none;
+}
+
+.talent-desk-week-key {
+  color: var(--talent-slate);
+  flex: 1 1 auto;
+  font-size: 0.74rem;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.talent-desk-week-hours {
+  color: var(--portal-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.talent-desk-week-margin {
+  color: var(--talent-money);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+/* ── The write surfaces ─────────────────────────────────────────────────── */
+
+/* The timesheet and settings forms sit inside a card body that already has
+   padding, so they lose the intake form's top margin and gain a tint that
+   separates them from the read-only rows above. */
+.talent-desk-form {
+  background: var(--talent-paper);
+  margin-top: 0;
+}
+
+/* Start date beside the placement button: the date belongs to the button, so
+   they share a row rather than stacking into a two-step-looking form. */
+.talent-desk-startrow {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.talent-desk-startrow > .talent-field {
+  flex: 1 1 140px;
+}
+
+.talent-desk-startrow > .talent-btn {
+  flex: 0 0 auto;
+}
+
+/* Every button on this page carries an icon; the console's do not, so the
+   flex alignment is scoped here rather than added to .talent-btn. */
+.talent-desk-btn {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+/* "That week already has hours" — shown BEFORE the click, because the action
+   treats a repeat week as a correction that overwrites in place. */
+.talent-desk-warn {
+  border: 1px solid var(--talent-flag-line);
+  border-radius: 7px;
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--talent-flag-soft);
+  color: #5f3d05;
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.talent-desk-saved {
+  border: 1px solid var(--talent-money-line);
+  border-radius: 7px;
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--talent-money-soft);
+  color: #08543a;
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+/* ── Money floor (admin only) ───────────────────────────────────────────── */
+
+.talent-desk-settings {
+  display: grid;
+  gap: 11px;
+}
+
+.talent-desk-settings-note {
+  border-left: 3px solid var(--portal-gold);
+  padding-left: 11px;
+  color: var(--talent-slate);
+  font-size: 0.79rem;
+  line-height: 1.55;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+
+@container talent (max-width: 1040px) {
+  .talent-desk-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1100px) {
+  .talent-desk-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- Rows that carry a collapsible manage panel -------------------------- */
+
+/*
+ * A plain `.talent-row` is a flex line. A managed row has to stack: the line on
+ * top, the manage panel underneath, so opening the panel pushes the card down
+ * instead of crushing the rate column into the name.
+ */
+.talent-row-managed {
+  display: block;
+}
+
+.talent-row-line {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.talent-row-managed .talent-intake {
+  margin: 8px 0 0;
+  padding-left: 45px; /* clears the avatar so the toggle lines up with the name */
+}
+
+@container talent (max-width: 640px) {
+  .talent-row-managed .talent-intake {
+    padding-left: 0;
+  }
+}
+
 /* ===== End EHS Talent Engine ============================================= */
