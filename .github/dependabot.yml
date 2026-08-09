@@ -1,0 +1,30 @@
+version: 2
+
+# Dependency alerting for a repo whose only other CVE signal is CI — and CI's
+# audit step stays red on any unfixed high, which means a *new* advisory is
+# invisible inside an already-failing job. Dependabot reports each one on its
+# own, so a fresh CVE is a fresh PR rather than a line in a log nobody reads.
+#
+# NOTE: this file configures version updates. Dependabot *alerts* are a separate
+# repository setting and must be enabled in Settings -> Code security.
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    # Majors land as their own PR: `ai`, `openai` and `typescript` each need a
+    # deliberate migration, and batching them with patch bumps would make an
+    # otherwise safe PR unreviewable.
+    groups:
+      patch-and-minor:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3

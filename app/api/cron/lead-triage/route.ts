@@ -1,5 +1,6 @@
 import { validateAIOutput } from "@/lib/ai/gateway";
 import { recordAuditEvent } from "@/lib/audit/events";
+import { rejectUnauthorizedCron } from "@/lib/cron/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { rankFindings, requiresHumanReview, type TriageLeadInput } from "@/lib/leads/triage-schema";
 import { runLeadTriage } from "@/lib/leads/triage";
@@ -11,17 +12,8 @@ const LOOKBACK_DAYS = 60;
 const MAX_LEADS_PER_RUN = 60;
 
 export async function GET(request: Request) {
-  const authHeader = request.headers.get("authorization");
-
-  if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // On Vercel, cron jobs include x-vercel-cron: 1. Requiring it in production
-  // prevents replaying a leaked Bearer token from outside Vercel's scheduler.
-  if (process.env.VERCEL === "1" && request.headers.get("x-vercel-cron") !== "1") {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const unauthorized = rejectUnauthorizedCron("/api/cron/lead-triage", request);
+  if (unauthorized) return unauthorized;
 
   const supabase = createAdminClient();
   if (!supabase) {

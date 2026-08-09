@@ -1,17 +1,9 @@
+import { rejectUnauthorizedCron } from "@/lib/cron/auth";
 import { runDailyAiDigest } from "@/lib/notifications/digest";
 
 export async function GET(request: Request) {
-  const authHeader = request.headers.get("authorization");
-
-  if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // On Vercel, cron jobs include x-vercel-cron: 1. Requiring it in production
-  // prevents replaying a leaked Bearer token from outside Vercel's scheduler.
-  if (process.env.VERCEL === "1" && request.headers.get("x-vercel-cron") !== "1") {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const unauthorized = rejectUnauthorizedCron("/api/cron/daily-digest", request);
+  if (unauthorized) return unauthorized;
 
   try {
     const results = await runDailyAiDigest();

@@ -9,6 +9,7 @@
 // orchestration itself lives in ./orchestrate.ts so the manual "run now" server
 // action executes exactly the same routine under the user's own RLS.
 
+import { rejectUnauthorizedCron } from "@/lib/cron/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sourcingRunTypes } from "@/lib/talent-engine/types";
 import { runSourcingSweep } from "./orchestrate";
@@ -16,17 +17,8 @@ import { runSourcingSweep } from "./orchestrate";
 export const maxDuration = 300;
 
 export async function GET(request: Request) {
-  const authHeader = request.headers.get("authorization");
-
-  if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // On Vercel, cron jobs include x-vercel-cron: 1. Requiring it in production
-  // prevents replaying a leaked Bearer token from outside Vercel's scheduler.
-  if (process.env.VERCEL === "1" && request.headers.get("x-vercel-cron") !== "1") {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const unauthorized = rejectUnauthorizedCron("/api/cron/talent-sourcing", request);
+  if (unauthorized) return unauthorized;
 
   const supabase = createAdminClient();
   if (!supabase) {
