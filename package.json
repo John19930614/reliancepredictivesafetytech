@@ -14,7 +14,7 @@
     "types:generate": "supabase gen types typescript --project-id kmwgyoalstydoejqjemy > lib/supabase/types.ts"
   },
   "dependencies": {
-    "@ai-sdk/react": "^3.0.0",
+    "@ai-sdk/react": "^4.0.58",
     "@react-email/components": "^1.0.12",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.105.3",
