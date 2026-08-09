@@ -726,6 +726,7 @@ export type Database = {
           form_data: Json | null
           id: string
           owner: string | null
+          proposal_number: string | null
           proposal_value: number | null
           status: string
           summary: string | null
@@ -749,6 +750,7 @@ export type Database = {
           form_data?: Json | null
           id?: string
           owner?: string | null
+          proposal_number?: string | null
           proposal_value?: number | null
           status?: string
           summary?: string | null
@@ -772,6 +774,7 @@ export type Database = {
           form_data?: Json | null
           id?: string
           owner?: string | null
+          proposal_number?: string | null
           proposal_value?: number | null
           status?: string
           summary?: string | null
@@ -956,10 +959,64 @@ export type Database = {
           },
         ]
       }
+      company_client_contacts: {
+        Row: {
+          client_id: string
+          created_at: string
+          email: string
+          id: string
+          is_primary: boolean
+          name: string
+          notes: string
+          phone: string
+          sort_order: number
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          email?: string
+          id?: string
+          is_primary?: boolean
+          name: string
+          notes?: string
+          phone?: string
+          sort_order?: number
+          title?: string
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          email?: string
+          id?: string
+          is_primary?: boolean
+          name?: string
+          notes?: string
+          phone?: string
+          sort_order?: number
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_client_contacts_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "company_clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       company_clients: {
         Row: {
+          address_line1: string | null
+          address_line2: string | null
+          city: string | null
           company_type: string | null
           contact_name: string | null
+          country: string | null
           created_at: string | null
           email: string | null
           id: string
@@ -968,13 +1025,20 @@ export type Database = {
           notes: string | null
           owner: string | null
           phone: string | null
+          postal_code: string | null
           source: string | null
+          state: string | null
           status: string
           updated_at: string | null
+          website: string | null
         }
         Insert: {
+          address_line1?: string | null
+          address_line2?: string | null
+          city?: string | null
           company_type?: string | null
           contact_name?: string | null
+          country?: string | null
           created_at?: string | null
           email?: string | null
           id?: string
@@ -983,13 +1047,20 @@ export type Database = {
           notes?: string | null
           owner?: string | null
           phone?: string | null
+          postal_code?: string | null
           source?: string | null
+          state?: string | null
           status?: string
           updated_at?: string | null
+          website?: string | null
         }
         Update: {
+          address_line1?: string | null
+          address_line2?: string | null
+          city?: string | null
           company_type?: string | null
           contact_name?: string | null
+          country?: string | null
           created_at?: string | null
           email?: string | null
           id?: string
@@ -998,9 +1069,12 @@ export type Database = {
           notes?: string | null
           owner?: string | null
           phone?: string | null
+          postal_code?: string | null
           source?: string | null
+          state?: string | null
           status?: string
           updated_at?: string | null
+          website?: string | null
         }
         Relationships: []
       }
@@ -5692,6 +5766,57 @@ export type Database = {
         }
         Relationships: []
       }
+      platform_company_profile: {
+        Row: {
+          address_line1: string
+          address_line2: string
+          city: string
+          country: string
+          display_name: string
+          email: string
+          id: boolean
+          legal_name: string
+          phone: string
+          postal_code: string
+          state: string
+          updated_at: string
+          updated_by: string | null
+          website: string
+        }
+        Insert: {
+          address_line1?: string
+          address_line2?: string
+          city?: string
+          country?: string
+          display_name?: string
+          email?: string
+          id?: boolean
+          legal_name?: string
+          phone?: string
+          postal_code?: string
+          state?: string
+          updated_at?: string
+          updated_by?: string | null
+          website?: string
+        }
+        Update: {
+          address_line1?: string
+          address_line2?: string
+          city?: string
+          country?: string
+          display_name?: string
+          email?: string
+          id?: boolean
+          legal_name?: string
+          phone?: string
+          postal_code?: string
+          state?: string
+          updated_at?: string
+          updated_by?: string | null
+          website?: string
+        }
+        Relationships: []
+      }
       platform_health_checks: {
         Row: {
           check_name: string
@@ -7902,6 +8027,7 @@ export type Database = {
       is_company_portal_owner: { Args: never; Returns: boolean }
       is_company_portal_super_admin: { Args: never; Returns: boolean }
       mark_employee_last_seen: { Args: never; Returns: undefined }
+      next_client_proposal_number: { Args: never; Returns: string }
     }
     Enums: {
       [_ in never]: never

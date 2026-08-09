@@ -199,6 +199,13 @@ body.embedded .app{grid-template-columns:1fr;max-width:560px;padding:16px}
        These two hidden inputs are that element. -->
   <input type="hidden" id="proposalTeamMembers" value="">
   <input type="hidden" id="proposalSigner" value="">
+  <!-- The people the proposal is addressed to, one per line, encoded
+       "name | title | email | phone" (lib/proposals/client-contacts.ts). Owned
+       by the platform's "Client company & addressees" panel above this builder,
+       which resolves them from the company record — the same reason the team
+       picker lives outside this file. Hidden here for the same reason the two
+       inputs above are: the bridge only collects fields that have an element. -->
+  <input type="hidden" id="clientContacts" value="">
 
   <!-- CARD ORDER MIRRORS THE DOCUMENT ORDER.
        Filling the panel top to bottom builds the document front to back. The
@@ -222,19 +229,26 @@ body.embedded .app{grid-template-columns:1fr;max-width:560px;padding:16px}
        picker says so. -->
   <div class="section-card">
     <h3>1. Proposal &amp; Seller Information<span class="opt">document header</span></h3>
-    <div class="grid2"><div><label>Consultant / Seller Name</label><input id="sellerName" value="Reliance Predictive Safety Technologies"></div><div><label>Proposal Date</label><input id="proposalDate" type="date"></div></div>
-    <div class="grid2"><div><label>Proposal Number</label><input id="proposalNo" value="RPS-2026-PILOT-01"></div><div><label>Valid For</label><select id="validDays"><option>30</option><option selected>60</option><option>90</option><option>120</option></select></div></div>
-    <label>Seller Address / Contact</label><textarea id="sellerContact">Sussex, Wisconsin
-Email: john.h.haldemann@gmail.com</textarea>
-    <label>Prepared By</label><input id="preparedBy" value="John Haldemann">
+    <!-- EVERY FIELD IN THIS CARD STARTS EMPTY, WITH A `placeholder` ONLY.
+         These inputs used to ship pre-filled with real-looking values — a
+         company name, a personal gmail address, "John Haldemann", and the
+         proposal number "RPS-2026-PILOT-01". The platform autosaves whatever
+         the form holds, and the document renderer cannot tell an example from
+         an entry, so every proposal printed them: the same reference number on
+         every document, and a personal inbox as the company's contact.
+         A `value` here is a value on a document a client signs. Use
+         `placeholder`. The platform prefills these from the company profile
+         (platform_company_profile) and the signed-in employee. -->
+    <div class="grid2"><div><label>Consultant / Seller Name</label><input id="sellerName" placeholder="Your company name"></div><div><label>Proposal Date</label><input id="proposalDate" type="date"></div></div>
+    <div class="grid2"><div><label>Proposal Number</label><input id="proposalNo" placeholder="Allocated automatically"></div><div><label>Valid For</label><select id="validDays"><option>30</option><option selected>60</option><option>90</option><option>120</option></select></div></div>
+    <label>Seller Address / Contact</label><textarea id="sellerContact" placeholder="Street address&#10;City, State ZIP&#10;Email: hello@example.com"></textarea>
+    <label>Prepared By</label><input id="preparedBy" placeholder="Your name">
   </div>
   <div class="section-card">
     <h3>2. Client Information<span class="opt">document header</span></h3>
-    <label>Client Company</label><input id="clientCompany" value="Client Company Name">
-    <div class="grid2"><div><label>Client Contact</label><input id="clientContact" value="Client Representative"></div><div><label>Title</label><input id="clientTitle" value="Safety / Operations Leader"></div></div>
-    <label>Client Address</label><textarea id="clientAddress">Street Address
-City, State ZIP</textarea>
-    <label>Email</label><input id="clientEmail" value="client@email.com">
+    <p class="cardhint">The people this proposal is addressed to are chosen in the <strong>Client company &amp; addressees</strong> panel above, which reads them from the company record. Leave the address blank to use the one on that record.</p>
+    <label>Client Company</label><input id="clientCompany" placeholder="Client company name">
+    <label>Client Address</label><textarea id="clientAddress" placeholder="Street address&#10;City, State ZIP"></textarea>
   </div>
   <div class="section-card">
     <h3>3. Executive Summary<span class="opt">section 01</span></h3>
@@ -508,7 +522,23 @@ function update(){
  if($('pDocline'))$('pDocline').textContent=isPilot?(monthPrefix+'Pilot & Platform Access Proposal'):(monthPrefix?(p.name+' \u2014 '+monthPrefix+'Term'):(p.name+' Proposal'));
  if($('termSummary'))$('termSummary').textContent=term.rangeLabel?(term.rangeLabel+(term.months?(' \u00b7 '+term.months+' month'+(term.months===1?'':'s')):' \u00b7 end is before start')):'No term selected \u2014 the document omits every duration.';
  $('pTitle').textContent='Proposal for '+$('clientCompany').value;
- $('pClient').innerHTML='<b>'+esc($('clientCompany').value)+'</b><br>'+esc($('clientContact').value)+' — '+esc($('clientTitle').value)+'<br>'+nl($('clientAddress').value)+'<br>'+esc($('clientEmail').value);
+ // Addressees now come from the hidden #clientContacts field, one per line,
+ // encoded "name | title | email | phone" (lib/proposals/client-contacts.ts).
+ // The three single-contact inputs this line used to read were removed: the
+ // block holds up to six people and they are resolved from the company record
+ // by the platform's panel, which a static file cannot do.
+ // Kept rendering here only so the STANDALONE copy still shows a party block —
+ // the embedded copy hides this preview and the platform renders
+ // <ProposalDocument> from the same view-model used for print and the PDF.
+ var _addressees=String(($('clientContacts')||{}).value||'').split(/\r?\n/).map(function(line){
+   var parts=line.split('|').map(function(part){return part.trim();});
+   if(!parts[0]) return '';
+   var identity=[parts[0],parts[1]].filter(Boolean).join(' — ');
+   return parts[2]?(identity+' · '+parts[2]):identity;
+ }).filter(Boolean);
+ $('pClient').innerHTML='<b>'+esc($('clientCompany').value)+'</b>'
+   +(_addressees.length?'<br>'+_addressees.map(esc).join('<br>'):'')
+   +(String($('clientAddress').value||'').trim()?'<br>'+nl($('clientAddress').value):'');
  $('pSeller').innerHTML='<b>'+esc($('sellerName').value)+'</b><br>Prepared by: '+esc($('preparedBy').value)+'<br>'+nl($('sellerContact').value);
  var _sn=$('sellerName').value; if($('pWordmark'))$('pWordmark').textContent=_sn; if($('pLegalSeller'))$('pLegalSeller').textContent=_sn;
  document.title=($('clientCompany').value||'Proposal')+' \u2014 Platform Billing Proposal';

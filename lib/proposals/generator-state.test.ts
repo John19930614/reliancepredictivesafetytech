@@ -143,21 +143,89 @@ describe("deriveSummaryFromState", () => {
 });
 
 describe("buildPrefillState", () => {
-  it("prefills client fields from the assigned company", () => {
-    expect(buildPrefillState({ name: "Acme", contact_name: "Jo Field", email: "jo@acme.com" })).toEqual({
-      v: 1,
-      fields: { clientCompany: "Acme", clientContact: "Jo Field", clientEmail: "jo@acme.com" },
-    });
+  const acme = {
+    id: "c1",
+    name: "Acme",
+    addressText: "500 Mill Road\nMilwaukee, WI 53202",
+    contacts: [
+      { id: "p1", isPrimary: true, name: "Jo Field", title: "Safety Director", email: "jo@acme.com", phone: "" },
+      { id: "p2", isPrimary: false, name: "Pat Reyes", title: "Project Executive", email: "pat@acme.com", phone: "" },
+    ],
+    legacyContactName: "",
+    legacyContactEmail: "",
+  };
+
+  const profile = {
+    legal_name: "Reliance Predictive Safety Technologies LLC",
+    display_name: "Reliance Predictive Safety Technologies",
+    address_line1: "1 Main St",
+    address_line2: "",
+    city: "Sussex",
+    state: "Wisconsin",
+    postal_code: "53089",
+    country: "United States",
+    email: "hello@example.com",
+    phone: "262-555-0100",
+    website: "",
+  };
+
+  it("prefills the company, its address and its primary contact", () => {
+    const prefill = buildPrefillState({ company: acme })!;
+    expect(prefill.fields.clientCompany).toBe("Acme");
+    expect(prefill.fields.clientAddress).toBe("500 Mill Road\nMilwaukee, WI 53202");
+    // Primary only — a proposal opens addressed to one person, and the seller
+    // ticks anyone else they want on it.
+    expect(prefill.fields.clientContacts).toBe("Jo Field | Safety Director | jo@acme.com");
+  });
+
+  it("prefills the seller block from the company profile, not from a hardcoded string", () => {
+    const prefill = buildPrefillState({ companyProfile: profile })!;
+    expect(prefill.fields.sellerName).toBe("Reliance Predictive Safety Technologies");
+    expect(prefill.fields.sellerContact).toBe(
+      "1 Main St\nSussex, Wisconsin 53089\nPhone: 262-555-0100\nEmail: hello@example.com",
+    );
+  });
+
+  it("carries the preparer, the allocated number and the date", () => {
+    const prefill = buildPrefillState({
+      preparedBy: "John Haldemann",
+      proposalNumber: "RPS-2026-0007",
+      today: "2026-08-09",
+    })!;
+    expect(prefill.fields.preparedBy).toBe("John Haldemann");
+    expect(prefill.fields.proposalNo).toBe("RPS-2026-0007");
+    expect(prefill.fields.proposalDate).toBe("2026-08-09");
+  });
+
+  it("falls back to the legacy single contact when the record has no contact rows", () => {
+    const prefill = buildPrefillState({
+      company: { ...acme, contacts: [], legacyContactName: "Sue", legacyContactEmail: "sue@staff.example" },
+    })!;
+    expect(prefill.fields.clientContacts).toBe("Sue |  | sue@staff.example");
   });
 
   it("never includes phases/services so generator defaults survive", () => {
-    const prefill = buildPrefillState({ name: "Acme" });
+    const prefill = buildPrefillState({ company: acme });
     expect(prefill && "phases" in prefill).toBe(false);
     expect(prefill && "services" in prefill).toBe(false);
   });
 
+  it("omits blanks rather than writing empty strings", () => {
+    // The whole point: a field the platform knows nothing about must stay
+    // ABSENT so the generator shows its placeholder, rather than being answered
+    // with "" — or, as the asset used to, with example text that then printed.
+    const prefill = buildPrefillState({ company: { ...acme, addressText: "" }, preparedBy: "  " })!;
+    expect(prefill.fields).not.toHaveProperty("clientAddress");
+    expect(prefill.fields).not.toHaveProperty("preparedBy");
+  });
+
   it("returns null with no company or no usable fields", () => {
     expect(buildPrefillState(null)).toBeNull();
-    expect(buildPrefillState({ name: null, contact_name: null, email: null })).toBeNull();
+    expect(buildPrefillState({})).toBeNull();
+    expect(
+      buildPrefillState({
+        company: { id: "c9", name: "", addressText: "", contacts: [], legacyContactName: "", legacyContactEmail: "" },
+      }),
+    ).toBeNull();
   });
 });

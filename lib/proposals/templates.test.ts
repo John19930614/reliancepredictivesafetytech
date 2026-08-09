@@ -51,7 +51,19 @@ const capturedFromAcme: GeneratorState = {
   ],
 };
 
-const newClient = { name: "Beta Builders", contact_name: "Sam Ortiz", email: "sam@beta.example" };
+/** The company the template is being APPLIED to — never the captured one. */
+const newClient = {
+  company: {
+    id: "beta",
+    name: "Beta Builders",
+    addressText: "9 Foundry Way\nMadison, WI 53703",
+    contacts: [
+      { id: "b1", isPrimary: true, name: "Sam Ortiz", title: "EHS Manager", email: "sam@beta.example", phone: "" },
+    ],
+    legacyContactName: "",
+    legacyContactEmail: "",
+  },
+};
 
 describe("blocked field identification", () => {
   it("flags every known client-identity field", () => {
@@ -219,12 +231,29 @@ describe("buildStateFromTemplate", () => {
     const state = buildStateFromTemplate(capturedFromAcme, newClient)!;
 
     expect(state.fields.clientCompany).toBe("Beta Builders");
-    expect(state.fields.clientContact).toBe("Sam Ortiz");
-    expect(state.fields.clientEmail).toBe("sam@beta.example");
-    // No equivalent on company_clients — left blank rather than inherited.
+    expect(state.fields.clientContacts).toBe("Sam Ortiz | EHS Manager | sam@beta.example");
+    // The address now comes across too — company_clients gained address columns
+    // in 20260809100000, so it is no longer left blank for want of a source.
+    expect(state.fields.clientAddress).toBe("9 Foundry Way\nMadison, WI 53703");
+    // The legacy single-contact fields are scrubbed and not re-supplied.
+    expect(state.fields).not.toHaveProperty("clientContact");
     expect(state.fields).not.toHaveProperty("clientTitle");
-    expect(state.fields).not.toHaveProperty("clientAddress");
+    expect(state.fields).not.toHaveProperty("clientEmail");
     expect(JSON.stringify(state.fields)).not.toMatch(/Acme|Dana|dana@acme|Denver/i);
+  });
+
+  it("never carries the captured client's addressee list to another company", () => {
+    // clientContacts holds names, titles and emails of real people. Leaking it
+    // would print another client's staff on the front page of this proposal.
+    const capturedWithContacts = {
+      ...capturedFromAcme,
+      fields: { ...capturedFromAcme.fields, clientContacts: "Dana Vance | Safety Lead | dana@acme.example" },
+    };
+    const state = buildStateFromTemplate(capturedWithContacts, newClient)!;
+    expect(state.fields.clientContacts).toBe("Sam Ortiz | EHS Manager | sam@beta.example");
+
+    const unassigned = buildStateFromTemplate(capturedWithContacts, null)!;
+    expect(unassigned.fields).not.toHaveProperty("clientContacts");
   });
 
   it("carries the scope and line items across", () => {
@@ -250,7 +279,9 @@ describe("buildStateFromTemplate", () => {
   });
 
   it("ignores a company row that has nothing to prefill", () => {
-    const state = buildStateFromTemplate(capturedFromAcme, { name: null, contact_name: null, email: null })!;
+    const state = buildStateFromTemplate(capturedFromAcme, {
+      company: { id: "x", name: "", addressText: "", contacts: [], legacyContactName: "", legacyContactEmail: "" },
+    })!;
     expect(state.fields).not.toHaveProperty("clientCompany");
     expect(state.fields.packageSelect).toBe("growth");
   });

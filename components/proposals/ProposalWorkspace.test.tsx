@@ -361,14 +361,14 @@ describe("ProposalRevisionHistory — comparison", () => {
 
 describe("ProposalWorkspace — editor save gate", () => {
   it("enables both saves on a draft", () => {
-    render(<ProposalWorkspace proposal={proposalFixture("draft")} assignedClient={null} />);
+    render(<ProposalWorkspace proposal={proposalFixture("draft")} />);
     expect(screen.getByRole("button", { name: /Save revision/ })).toBeEnabled();
     expect(screen.getByRole("button", { name: /Save draft now/ })).toBeEnabled();
   });
 
   it("disables both saves and explains the lock when the proposal is not editable", () => {
     const gate = canEditProposalContent("accepted");
-    render(<ProposalWorkspace proposal={proposalFixture("accepted")} assignedClient={null} />);
+    render(<ProposalWorkspace proposal={proposalFixture("accepted")} />);
 
     expect(screen.getByRole("button", { name: /Save revision/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Save draft now/ })).toBeDisabled();
@@ -426,7 +426,7 @@ describe("ProposalWorkspace — live preview matches the team picker", () => {
     render(
       <ProposalWorkspace
         proposal={editorProposal(stateWithTeam(TEAM_MEMBER_ID, TEAM_MEMBER_ID))}
-        assignedClient={null}
+       
         roster={roster}
       />,
     );
@@ -441,7 +441,7 @@ describe("ProposalWorkspace — live preview matches the team picker", () => {
   });
 
   it("skips the lookup and the team section when nobody is selected", async () => {
-    render(<ProposalWorkspace proposal={editorProposal(stateWithTeam("", ""))} assignedClient={null} roster={roster} />);
+    render(<ProposalWorkspace proposal={editorProposal(stateWithTeam("", ""))} roster={roster} />);
 
     // Waiting on something the preview always renders proves the document has
     // painted, so the absence below is a real absence rather than a race.
@@ -451,7 +451,7 @@ describe("ProposalWorkspace — live preview matches the team picker", () => {
   });
 
   it("tells the seller where the picker lands in the document", () => {
-    render(<ProposalWorkspace proposal={editorProposal(stateWithTeam("", ""))} assignedClient={null} roster={roster} />);
+    render(<ProposalWorkspace proposal={editorProposal(stateWithTeam("", ""))} roster={roster} />);
     expect(screen.getByText(/section 09, Your Team/)).toBeInTheDocument();
   });
 });

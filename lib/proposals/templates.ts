@@ -24,6 +24,7 @@ import {
   type GeneratorFieldValue,
   type GeneratorItem,
   type GeneratorState,
+  type ProposalPrefill,
 } from "./generator-state";
 
 /* -------------------------------------------------------------------------- */
@@ -34,11 +35,15 @@ import {
  * Generator field ids that identify the CLIENT the template was captured from.
  * Transcribed from the client block of assets/proposal-generator-v15.html.
  *
- * These are removed unconditionally. `clientCompany` / `clientContact` /
- * `clientEmail` are re-supplied from the NEW proposal's assigned company by
- * buildPrefillState(); `clientTitle` and `clientAddress` have no equivalent on
- * company_clients and are deliberately left blank — a blank address is a typo
- * away from being fixed, another company's address on a signed document is not.
+ * These are removed unconditionally, then re-supplied from the NEW proposal's
+ * assigned company by buildPrefillState(). Since 20260809100000 that includes
+ * the address and the full contact list, so a template applied to an assigned
+ * company now arrives complete rather than blank.
+ *
+ * `clientContacts` MUST stay on this list. It carries names, titles and email
+ * addresses of people at the company the template was captured from, and it is
+ * the single field on which a leak would be most obviously damaging — another
+ * client's staff printed on the front page of a proposal.
  */
 export const clientIdentityFieldIds = Object.freeze([
   "clientCompany",
@@ -46,6 +51,7 @@ export const clientIdentityFieldIds = Object.freeze([
   "clientTitle",
   "clientEmail",
   "clientAddress",
+  "clientContacts",
 ] as const);
 
 /**
@@ -161,11 +167,15 @@ export function isTemplateFormData(value: unknown): value is GeneratorState {
 /* -------------------------------------------------------------------------- */
 
 /** The subset of company_clients used to prefill the new proposal's client block. */
-export interface TemplateClientPrefill {
-  name?: string | null;
-  contact_name?: string | null;
-  email?: string | null;
-}
+/**
+ * What a template application knows about the proposal it is seeding.
+ *
+ * An alias for the shared prefill shape rather than its own three-field type:
+ * a template-applied proposal and a from-scratch proposal must open with the
+ * same client address, the same contact list and the same seller block, and
+ * two separate input types is how they would drift apart.
+ */
+export type TemplateClientPrefill = ProposalPrefill;
 
 /**
  * Builds the initial GeneratorState for a proposal started from `templateBody`,

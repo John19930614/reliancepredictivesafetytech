@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { CONTACT_EMAIL } from "@/lib/company-data";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 
@@ -15,6 +16,15 @@ export default function SettingsPage() {
       </div>
 
       <div className="portal-grid">
+        <section className="portal-card">
+          <h3>Company profile</h3>
+          <p>
+            The legal name, address and contact details printed as the Prepared By block on every proposal. Admins only.
+          </p>
+          <Link className="button button-light" href="/employee/settings/company">
+            Edit company profile
+          </Link>
+        </section>
         <section className="portal-card">
           <h3>Supabase status</h3>
           <p>{connected ? "Public Supabase URL/key are configured." : "Add Supabase environment variables before employee use."}</p>
