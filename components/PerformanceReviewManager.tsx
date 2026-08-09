@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ChevronLeft, ClipboardList, Plus, Star, Users } from "lucide-react";
+import { canReadPerformanceReview, visiblePerformanceReviews } from "@/lib/performance/policy";
 import {
   performanceReviewCycleStatuses,
   performanceReviewTypes,
@@ -97,8 +98,10 @@ export function PerformanceReviewManager({
   const selectedReview = reviews.find((r) => r.id === selectedReviewId) ?? null;
   const cycleReviews = selectedCycleId ? (reviewsByCycleId.get(selectedCycleId) ?? []) : [];
 
-  // For non-admins: only their own review(s)
-  const myReviews = reviews.filter((r) => r.employee_user_id === currentUserId);
+  // Reviews this user may see. RLS returns only these rows now, so this is a
+  // presentation filter over an already-scoped set rather than the access
+  // control itself — see lib/performance/policy.ts.
+  const myReviews = visiblePerformanceReviews(reviews, currentUserId, false);
 
   function getSupabase() {
     const sb = createClient();
@@ -497,7 +500,7 @@ export function PerformanceReviewManager({
                   {cycleReviews.map((review) => {
                     const profile = profilesById.get(review.employee_user_id);
                     const name = profile?.display_name ?? profile?.email ?? review.employee_user_id.slice(0, 8);
-                    const canOpen = isAdmin || review.employee_user_id === currentUserId;
+                    const canOpen = canReadPerformanceReview(review, currentUserId, isAdmin);
                     return (
                       <tr key={review.id}>
                         <td>{name}</td>
