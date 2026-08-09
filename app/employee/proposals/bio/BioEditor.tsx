@@ -9,7 +9,8 @@
 import { useRef, useState, useTransition } from "react";
 import Image from "next/image";
 import { Eraser, Save, Upload } from "lucide-react";
-import { bioLimits, clearOwnSignature, saveOwnBio, saveOwnSignature } from "./actions";
+import { clearOwnSignature, saveOwnBio, saveOwnSignature } from "./actions";
+import { bioLimits } from "./limits";
 
 export interface BioEditorProps {
   initial: {
