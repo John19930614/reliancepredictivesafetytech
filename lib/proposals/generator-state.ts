@@ -2,6 +2,14 @@
 // produced by the bridge injected in scripts/build-proposal-generator.mjs:
 //   { v: 1, fields: { <elementId>: string | boolean }, phases: Item[], services: Item[] }
 
+import { companyDocumentName, formatSellerContactBlock, type CompanyProfile } from "@/lib/company/profile";
+import {
+  clientFieldIds,
+  defaultContactsForCompany,
+  serializeClientContacts,
+  type ClientCompanyDetail,
+} from "./client-contacts";
+
 export interface GeneratorItem {
   type: string;
   key: string;
@@ -106,18 +114,75 @@ export function deriveSummaryFromState(state: GeneratorState | null): string | n
 }
 
 /**
- * Initial state for a proposal that has no saved form data yet: prefill the
- * client block from the assigned company record. Deliberately omits
- * phases/services so the generator keeps its default pilot line items — the
- * bridge only replaces item lists when they are present as arrays. Returns
- * null when there is nothing to prefill.
+ * Everything a brand-new proposal can be filled in from before anyone types.
+ *
+ * All of it is optional and all of it is data the platform already holds. The
+ * point is that a proposal should open knowing who it is for, where they are,
+ * who we are and what our address is — none of which a seller should have to
+ * retype, and none of which the generator should invent.
  */
-export function buildPrefillState(client: { name?: string | null; contact_name?: string | null; email?: string | null } | null): { v: number; fields: Record<string, string> } | null {
-  if (!client) return null;
+export interface ProposalPrefill {
+  /** The assigned client company: name, address and the people on the record. */
+  company?: ClientCompanyDetail | null;
+  /** Our own company record, for the Prepared By block. */
+  companyProfile?: CompanyProfile | null;
+  /** Display name of the signed-in employee, for "Prepared By". */
+  preparedBy?: string | null;
+  /** The reference the database allocated to this proposal, e.g. RPS-2026-0007. */
+  proposalNumber?: string | null;
+  /**
+   * Today as `YYYY-MM-DD`.
+   *
+   * Passed in rather than read from `new Date()` so this module stays pure and
+   * the printed date is decided by ONE clock. The document formats calendar
+   * dates by parsing the string parts precisely to avoid a timezone shift, and
+   * a `new Date()` here would reintroduce it.
+   */
+  today?: string | null;
+}
+
+/**
+ * Initial state for a proposal that has no saved form data yet.
+ *
+ * Deliberately omits phases/services so the generator keeps its default line
+ * items — the bridge only replaces item lists when they are present as arrays.
+ * Returns null when there is genuinely nothing to prefill.
+ *
+ * Only NON-EMPTY values are written. A blank stays absent rather than being set
+ * to "", so a field the platform knows nothing about shows the generator's
+ * placeholder and reads as "needs filling in" instead of as an answered
+ * question. That distinction is the whole reason this function exists: the
+ * generator used to ship its inputs pre-filled with example text
+ * ("Street Address / City, State ZIP", "client@email.com"), the autosave
+ * persisted it, and the document printed it as though it were real.
+ */
+export function buildPrefillState(prefill: ProposalPrefill | null | undefined): {
+  v: number;
+  fields: Record<string, string>;
+} | null {
+  if (!prefill) return null;
   const fields: Record<string, string> = {};
-  if (client.name) fields.clientCompany = client.name;
-  if (client.contact_name) fields.clientContact = client.contact_name;
-  if (client.email) fields.clientEmail = client.email;
+
+  const put = (id: string, value: string | null | undefined) => {
+    const text = typeof value === "string" ? value.trim() : "";
+    if (text !== "") fields[id] = text;
+  };
+
+  const { company, companyProfile } = prefill;
+
+  put(clientFieldIds.company, company?.name);
+  put(clientFieldIds.address, company?.addressText);
+  put(clientFieldIds.contacts, serializeClientContacts(defaultContactsForCompany(company)));
+
+  if (companyProfile) {
+    put("sellerName", companyDocumentName(companyProfile));
+    put("sellerContact", formatSellerContactBlock(companyProfile));
+  }
+
+  put("preparedBy", prefill.preparedBy);
+  put("proposalNo", prefill.proposalNumber);
+  put("proposalDate", prefill.today);
+
   if (Object.keys(fields).length === 0) return null;
   return { v: 1, fields };
 }

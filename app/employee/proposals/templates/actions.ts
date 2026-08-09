@@ -27,7 +27,23 @@ import {
   templateDescriptionMaxLength,
   validateTemplateFields,
 } from "@/lib/proposals/templates";
+import {
+  loadClientCompanyDetail,
+  loadCompanyProfile,
+  loadPreparedByName,
+} from "@/lib/proposals/company-server";
+import type { GeneratorState } from "@/lib/proposals/generator-state";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
+
+/**
+ * Today's calendar date in the company's own timezone, as `YYYY-MM-DD`.
+ *
+ * NOT `toISOString().slice(0, 10)`: UTC runs ahead of US Central, so a proposal
+ * created after 6pm would be dated tomorrow.
+ */
+function todayInCompanyTimezone(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" }).format(new Date());
+}
 
 export interface TemplateActionResult {
   ok: boolean;
@@ -348,17 +364,23 @@ export async function createProposalFromTemplate(
 
   // Look the company up BEFORE building the state: buildStateFromTemplate
   // scrubs the captured client's identity out and layers this company's in.
-  let client: { name: string | null; contact_name: string | null; email: string | null } | null = null;
-  if (clientId) {
-    const { data } = await supabase
-      .from("company_clients")
-      .select("name, contact_name, email")
-      .eq("id", clientId)
-      .maybeSingle();
-    client = data ?? null;
-  }
+  // Since 20260809100000 that identity includes the address and every contact
+  // on the record, so applying a template to an assigned company now produces a
+  // complete Prepared For block rather than a company name over blank lines.
+  const [clientCompany, companyProfile, preparedByName] = await Promise.all([
+    loadClientCompanyDetail(supabase, clientId),
+    loadCompanyProfile(supabase),
+    loadPreparedByName(supabase, userId),
+  ]);
 
-  const formData = buildStateFromTemplate(template.form_data, client);
+  // proposalNumber is omitted here and patched in after the insert: the
+  // reference is allocated by the column default, so it does not exist yet.
+  const formData = buildStateFromTemplate(template.form_data, {
+    company: clientCompany,
+    companyProfile,
+    preparedBy: preparedByName,
+    today: todayInCompanyTimezone(),
+  });
   if (!formData) {
     return { ok: false, error: "That template's saved form data is unusable, so it cannot start a proposal." };
   }
@@ -384,9 +406,31 @@ export async function createProposalFromTemplate(
       form_data: formData,
       created_by: userId,
     })
-    .select("id")
+    .select("id, proposal_number")
     .single();
   if (error || !proposal) return { ok: false, error: error?.message ?? "Failed to create the proposal." };
+
+  // Stamp the reference the database just allocated onto the saved state, so
+  // the document prints this proposal's number rather than the one the template
+  // was captured under. Written before revision 1 so the checkpoint carries it.
+  //
+  // A NEW object rather than a mutation of `formData`: that object was already
+  // handed to the insert above, and mutating it after the fact would make the
+  // state that was written and the state in memory disagree.
+  const allocatedNumber = (proposal.proposal_number ?? null) as string | null;
+  const savedFormData: GeneratorState = allocatedNumber
+    ? { ...formData, fields: { ...formData.fields, proposalNo: allocatedNumber } }
+    : formData;
+
+  if (allocatedNumber) {
+    const { error: numberError } = await supabase
+      .from("client_proposals")
+      .update({ form_data: savedFormData })
+      .eq("id", proposal.id);
+    if (numberError) {
+      return { ok: false, error: `Proposal created but its reference number failed to save: ${numberError.message}` };
+    }
+  }
 
   const { error: revisionError } = await supabase.from("client_proposal_revisions").insert({
     proposal_id: proposal.id,
@@ -396,7 +440,9 @@ export async function createProposalFromTemplate(
     body_markdown: null,
     change_note: `Created from template "${template.name}"`,
     status_at_save: "draft",
-    form_data: formData,
+    // The numbered state, so restoring revision 1 cannot reinstate a proposal
+    // with no reference — or worse, with the template's original one.
+    form_data: savedFormData,
     created_by: userId,
   });
   if (revisionError) return { ok: false, error: `Proposal created but revision 1 failed: ${revisionError.message}` };

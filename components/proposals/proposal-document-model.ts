@@ -21,6 +21,11 @@ import {
   defaultPackageKey,
   stripPhaseOrdinal,
 } from "@/lib/proposals/catalog";
+import {
+  formatClientContactLine,
+  parseClientContacts,
+  type ProposalClientContact,
+} from "@/lib/proposals/client-contacts";
 import type { GeneratorState } from "@/lib/proposals/generator-state";
 import {
   computeProposalTotals,
@@ -374,6 +379,13 @@ export interface ProposalDocumentModel {
   wordmark: string;
   statusLabel: string;
   preparedFor: DocumentPartyBlock;
+  /**
+   * The addressees behind `preparedFor.lines`, still structured.
+   *
+   * Carried on the model so a renderer that needs the parts (a mail-merge, an
+   * acceptance email's To: list) does not have to re-parse the formatted line.
+   */
+  clientContacts: ProposalClientContact[];
   preparedByBlock: DocumentPartyBlock;
   proposalDate: string;
   proposalNumber: string;
@@ -568,9 +580,9 @@ export function buildProposalDocumentModel({
   const sellerName = fieldText(state, "sellerName", documentTermDefaults.sellerName);
   const preparedBy = fieldText(state, "preparedBy");
   const clientCompany = fieldText(state, "clientCompany");
-  const clientContact = fieldText(state, "clientContact");
-  const clientTitle = fieldText(state, "clientTitle");
-  const clientEmail = fieldText(state, "clientEmail");
+  // Falls back to the legacy single-contact fields internally, so a proposal
+  // saved before the multi-contact panel existed still names its addressee.
+  const clientContacts = parseClientContacts(state?.fields);
 
   const validDays = fieldText(state, "validDays", documentTermDefaults.validDays);
   const billingTerm = fieldText(state, "billingTerm", documentTermDefaults.billingTerm);
@@ -583,11 +595,13 @@ export function buildProposalDocumentModel({
 
   /* --- Parties ---------------------------------------------------------- */
 
-  const clientLines: string[] = [];
-  const contactLine = [clientContact, clientTitle].filter((part) => part !== "").join(" — ");
-  if (contactLine) clientLines.push(contactLine);
+  // Addressees first, then the company's postal address underneath them — the
+  // order the block reads in. A proposal is routinely addressed to two or three
+  // people at the same company (the safety director who asked for it, the
+  // project executive who approves it), and the block used to have room for
+  // exactly one.
+  const clientLines: string[] = clientContacts.map(formatClientContactLine);
   clientLines.push(...fieldLines(state, "clientAddress"));
-  if (clientEmail) clientLines.push(clientEmail);
 
   const sellerLines: string[] = [];
   if (preparedBy) sellerLines.push(`Prepared by: ${preparedBy}`);
@@ -668,6 +682,7 @@ export function buildProposalDocumentModel({
     wordmark: sellerName,
     statusLabel: proposalStatusLabels[proposal.status] ?? String(proposal.status),
     preparedFor: buildParty(clientCompany, clientLines),
+    clientContacts,
     preparedByBlock: buildParty(sellerName, sellerLines),
     proposalDate: formatDocumentDate(fieldText(state, "proposalDate")),
     proposalNumber: fieldText(state, "proposalNo", missingValue),

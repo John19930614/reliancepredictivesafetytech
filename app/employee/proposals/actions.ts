@@ -27,7 +27,13 @@ import {
   isGeneratorState,
   type GeneratorItem,
   type GeneratorState,
+  type ProposalPrefill,
 } from "@/lib/proposals/generator-state";
+import {
+  loadClientCompanyDetail,
+  loadCompanyProfile,
+  loadPreparedByName,
+} from "@/lib/proposals/company-server";
 import { lookupPhase, type PhaseKey } from "@/lib/proposals/catalog";
 import { serializeTeamMemberIds, teamFieldIds } from "@/lib/proposals/team-selection";
 import { resolveDocumentExtras } from "@/lib/proposals/team-server";
@@ -120,16 +126,25 @@ function buildDefaultPhaseItems(): GeneratorItem[] {
 }
 
 /** Full, valid generator state so revision 1 is openable and restorable. */
-function buildInitialFormState(
-  client: { name?: string | null; contact_name?: string | null; email?: string | null } | null,
-): GeneratorState {
-  const prefill = buildPrefillState(client);
+function buildInitialFormState(prefill: ProposalPrefill | null): GeneratorState {
+  const prefilled = buildPrefillState(prefill);
   return {
-    v: prefill?.v ?? 1,
-    fields: prefill?.fields ?? {},
+    v: prefilled?.v ?? 1,
+    fields: prefilled?.fields ?? {},
     phases: buildDefaultPhaseItems(),
     services: [],
   };
+}
+
+/**
+ * Today's calendar date in the company's own timezone, as `YYYY-MM-DD`.
+ *
+ * NOT `toISOString().slice(0, 10)`: UTC runs ahead of US Central, so a proposal
+ * created after 6pm would be dated tomorrow. `en-CA` is the locale whose short
+ * date format is ISO order.
+ */
+function todayInCompanyTimezone(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" }).format(new Date());
 }
 
 /**
@@ -173,21 +188,20 @@ export async function createProposal(input: CreateProposalInput): Promise<Action
   const clientId = input.clientId || null;
   const summary = input.summary?.trim() || null;
 
-  // Seed revision 1 with a complete generator state (prefilled from the
-  // assigned company when there is one). Without this the first revision has
-  // null form_data, which makes it un-openable and blanks the working copy if
-  // anyone restores it.
-  let client: { name: string | null; contact_name: string | null; email: string | null } | null = null;
-  if (clientId) {
-    const { data } = await supabase
-      .from("company_clients")
-      .select("name, contact_name, email")
-      .eq("id", clientId)
-      .maybeSingle();
-    client = data ?? null;
-  }
-  const formData = buildInitialFormState(client);
+  // Everything the new proposal can be filled in from before anyone types: the
+  // assigned company's address and people, our own company record, and the
+  // name of whoever is creating it.
+  const [clientCompany, companyProfile, preparedByName] = await Promise.all([
+    loadClientCompanyDetail(supabase, clientId),
+    loadCompanyProfile(supabase),
+    loadPreparedByName(supabase, userId),
+  ]);
 
+  // The row is inserted BEFORE the form state is built, because the proposal's
+  // reference number is allocated by the column default
+  // (next_client_proposal_number) and the document has to print the number this
+  // proposal actually got. Building the state first would mean either guessing
+  // the number or burning a sequence value on a row that may fail to insert.
   const { data: proposal, error } = await supabase
     .from("client_proposals")
     .insert({
@@ -200,13 +214,31 @@ export async function createProposal(input: CreateProposalInput): Promise<Action
       body_markdown: input.bodyMarkdown ?? null,
       status: "draft",
       current_revision: 1,
-      form_data: formData,
       created_by: userId,
     })
-    .select("id")
+    .select("id, proposal_number")
     .single();
 
   if (error || !proposal) return { ok: false, error: error?.message ?? "Failed to create proposal." };
+
+  // Seed revision 1 with a complete generator state. Without this the first
+  // revision has null form_data, which makes it un-openable and blanks the
+  // working copy if anyone restores it.
+  const formData = buildInitialFormState({
+    company: clientCompany,
+    companyProfile,
+    preparedBy: preparedByName,
+    proposalNumber: (proposal.proposal_number ?? null) as string | null,
+    today: todayInCompanyTimezone(),
+  });
+
+  const { error: formDataError } = await supabase
+    .from("client_proposals")
+    .update({ form_data: formData })
+    .eq("id", proposal.id);
+  if (formDataError) {
+    return { ok: false, error: `Proposal created but its starting content failed to save: ${formDataError.message}` };
+  }
 
   const { error: revisionError } = await supabase.from("client_proposal_revisions").insert({
     proposal_id: proposal.id,

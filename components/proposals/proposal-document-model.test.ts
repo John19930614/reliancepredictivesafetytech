@@ -160,14 +160,46 @@ describe("buildProposalDocumentModel — well-formed state", () => {
   });
 
   it("builds both party blocks", () => {
+    // This fixture predates the addressee list, so it exercises the LEGACY
+    // fallback: the single clientContact/clientTitle/clientEmail triple folded
+    // into one addressee. Historical revisions are immutable and still carry
+    // those fields, so the fallback has to keep working forever.
     expect(model.preparedFor).toEqual({
       name: "Acme Construction",
-      lines: ["Dana Reyes — Safety Director", "100 Main St", "Madison, WI 53703", "dana@acme.test"],
+      lines: ["Dana Reyes — Safety Director · dana@acme.test", "100 Main St", "Madison, WI 53703"],
     });
     expect(model.preparedByBlock).toEqual({
       name: "Reliance Predictive Safety Technologies",
       lines: ["Prepared by: John Haldemann", "Sussex, Wisconsin", "Email: sales@example.com"],
     });
+  });
+
+  it("addresses the proposal to every person on the addressee list", () => {
+    // The reported gap: a proposal goes to the safety director who asked for it
+    // AND the project executive who approves it, and the block had room for one.
+    const multi = buildProposalDocumentModel({
+      state: {
+        ...wellFormed,
+        fields: {
+          ...wellFormed.fields,
+          clientContacts:
+            "Dana Reyes | Safety Director | dana@acme.test\nPat Vance | Project Executive | pat@acme.test\nJo Kim",
+        },
+      },
+      proposal: subject(),
+    });
+
+    expect(multi.preparedFor.lines).toEqual([
+      "Dana Reyes — Safety Director · dana@acme.test",
+      "Pat Vance — Project Executive · pat@acme.test",
+      // Name only: no title, no email, and no stray separators printed.
+      "Jo Kim",
+      "100 Main St",
+      "Madison, WI 53703",
+    ]);
+    expect(multi.clientContacts).toHaveLength(3);
+    // The list wins outright — the legacy triple is not appended as a fourth.
+    expect(multi.preparedFor.lines.join(" ")).not.toContain("Dana Reyes — Safety Director,");
   });
 
   it("renders the proposal date and validity from saved values", () => {

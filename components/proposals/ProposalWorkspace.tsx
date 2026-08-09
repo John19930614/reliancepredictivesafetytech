@@ -15,7 +15,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Copy, Eye, FileClock, GitCompare, RotateCcw, Save, Trash2 } from "lucide-react";
+import {
+  Building2,
+  Copy,
+  Eye,
+  FileClock,
+  GitCompare,
+  MapPin,
+  RotateCcw,
+  Save,
+  Trash2,
+  UserPlus,
+  X,
+} from "lucide-react";
 import {
   deleteProposal,
   duplicateProposal,
@@ -32,7 +44,24 @@ import {
   deriveTitleFromState,
   isGeneratorState,
   type GeneratorState,
+  type ProposalPrefill,
 } from "@/lib/proposals/generator-state";
+import {
+  clientFieldIds,
+  formatClientContactLine,
+  maxClientContacts,
+  normalizeClientContact,
+  parseClientContacts,
+  serializeClientContacts,
+  type ClientCompanyDetail,
+  type ProposalClientContact,
+} from "@/lib/proposals/client-contacts";
+import {
+  companyDocumentName,
+  formatSellerContactBlock,
+  missingCompanyProfileFields,
+  type CompanyProfile,
+} from "@/lib/company/profile";
 import {
   canEditProposalContent,
   canEditProposalMeta,
@@ -76,12 +105,8 @@ export interface WorkspaceProposal {
   body_markdown: string | null;
   current_revision: number;
   form_data: unknown;
-}
-
-export interface WorkspaceClientDetail {
-  name: string | null;
-  contact_name: string | null;
-  email: string | null;
+  /** Reference allocated by the database at creation, e.g. "RPS-2026-0007". */
+  proposal_number?: string | null;
 }
 
 interface SimpleResult {
@@ -250,11 +275,18 @@ function useDocumentExtras(state: GeneratorState | null) {
 
 export function ProposalWorkspace({
   proposal,
-  assignedClient,
+  clientCompany = null,
+  companyProfile = null,
+  prefill = null,
   roster = [],
 }: {
   proposal: WorkspaceProposal;
-  assignedClient: WorkspaceClientDetail | null;
+  /** The assigned company's address and people, for the client panel. */
+  clientCompany?: ClientCompanyDetail | null;
+  /** Our own company record, for the seller block's refresh action. */
+  companyProfile?: CompanyProfile | null;
+  /** What a proposal with no saved state yet should open filled in with. */
+  prefill?: ProposalPrefill | null;
   /** Colleagues who have published a bio, for the team checkboxes. */
   roster?: TeamRosterEntry[];
 }) {
@@ -310,13 +342,13 @@ export function ProposalWorkspace({
   editableRef.current = editGate.ok;
   lockReasonRef.current = editGate.reason ?? "";
 
-  // Computed exactly once: `assignedClient` is a fresh object on every server
-  // render, and re-deriving it per render used to re-arm the bridge listener.
+  // Computed exactly once: `prefill` is a fresh object on every server render,
+  // and re-deriving it per render used to re-arm the bridge listener.
   const initialStateRef = useRef<unknown>(undefined);
   if (initialStateRef.current === undefined) {
     initialStateRef.current = isGeneratorState(proposal.form_data)
       ? proposal.form_data
-      : buildPrefillState(assignedClient);
+      : buildPrefillState(prefill);
   }
 
   const postToGenerator = useCallback((message: object) => {
@@ -632,6 +664,18 @@ export function ProposalWorkspace({
       */}
       <div className="proposal-editor-grid">
         <div>
+          {/* Above the generator because the parties are the FIRST thing the
+              document prints. It cannot live inside the iframe: the company
+              address and its contact list are database-backed and the asset is
+              a static file with no Supabase access. */}
+          <ProposalClientPanel
+            company={clientCompany}
+            companyProfile={companyProfile}
+            state={previewState}
+            disabled={!editGate.ok}
+            onChange={(fields) => postToGenerator({ type: "proposal:load", state: { v: 1, fields } })}
+          />
+
           <iframe
             ref={iframeRef}
             src="/employee/proposals/generator"
@@ -682,6 +726,334 @@ export function ProposalWorkspace({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Client company, address & addressees                                        */
+/* -------------------------------------------------------------------------- */
+
+/** Two contacts are the same person when name and email both match. */
+function sameContact(a: ProposalClientContact, b: ProposalClientContact): boolean {
+  return a.name.toLowerCase() === b.name.toLowerCase() && a.email.toLowerCase() === b.email.toLowerCase();
+}
+
+/**
+ * Where the proposal's Prepared For block comes from.
+ *
+ * Lives outside the generator iframe for the same reason the team picker does:
+ * the company address and its contact list are database-backed, and the asset
+ * is a static file with no Supabase access. Writes land in `state.fields`
+ * through the SAME `proposal:load` bridge message the initial hydration uses,
+ * so they are saved, versioned and diffed exactly like any other generator
+ * field — there is no second storage path.
+ *
+ * WHAT THIS PANEL OWNS vs WHAT IT OFFERS
+ * The addressee list (`clientContacts`) is owned outright — it has no input in
+ * the asset, and every change here writes it. The address and the seller block
+ * are only OFFERED: they are ordinary textareas in the generator that a seller
+ * may legitimately override for one proposal (a project office rather than the
+ * head office), so pulling the record's value is a button they press, never a
+ * write that quietly reverts what they typed.
+ */
+function ProposalClientPanel({
+  company,
+  companyProfile,
+  state,
+  disabled,
+  onChange,
+}: {
+  company: ClientCompanyDetail | null;
+  companyProfile: CompanyProfile | null;
+  state: GeneratorState | null;
+  disabled: boolean;
+  onChange: (fields: Record<string, string>) => void;
+}) {
+  // The selection round-trips through the iframe (parent -> proposal:load ->
+  // generator -> debounced proposal:preview -> parent), which takes ~250ms. A
+  // checkbox that takes a quarter second to tick feels broken, so the panel
+  // renders its own optimistic copy and re-syncs whenever the generator reports
+  // a value that differs from what we last sent.
+  const incoming = useMemo(() => serializeClientContacts(parseClientContacts(state?.fields)), [state]);
+  const [contactsValue, setContactsValue] = useState(incoming);
+  const lastSentRef = useRef(incoming);
+
+  useEffect(() => {
+    if (incoming !== lastSentRef.current) {
+      lastSentRef.current = incoming;
+      setContactsValue(incoming);
+    }
+  }, [incoming]);
+
+  const [draft, setDraft] = useState({ name: "", title: "", email: "" });
+  const [notice, setNotice] = useState("");
+
+  const selected = useMemo(
+    () => parseClientContacts({ [clientFieldIds.contacts]: contactsValue }),
+    [contactsValue],
+  );
+
+  function pushContacts(next: readonly ProposalClientContact[]) {
+    const value = serializeClientContacts(next);
+    setContactsValue(value);
+    lastSentRef.current = value;
+    onChange({ [clientFieldIds.contacts]: value });
+  }
+
+  function toggleContact(option: ProposalClientContact, checked: boolean) {
+    setNotice("");
+    pushContacts(checked ? [...selected, option] : selected.filter((contact) => !sameContact(contact, option)));
+  }
+
+  function addDraftContact() {
+    const contact = normalizeClientContact(draft);
+    if (!contact.name) {
+      setNotice("A contact needs at least a name.");
+      return;
+    }
+    if (selected.some((existing) => sameContact(existing, contact))) {
+      setNotice(`${contact.name} is already on this proposal.`);
+      return;
+    }
+    setNotice("");
+    setDraft({ name: "", title: "", email: "" });
+    pushContacts([...selected, contact]);
+  }
+
+  const atLimit = selected.length >= maxClientContacts;
+  const addressText = company?.addressText ?? "";
+  const savedAddress = typeof state?.fields?.[clientFieldIds.address] === "string"
+    ? String(state.fields[clientFieldIds.address]).trim()
+    : "";
+  const addressMatches = savedAddress !== "" && savedAddress === addressText;
+
+  const profileName = companyProfile ? companyDocumentName(companyProfile) : "";
+  const profileBlock = companyProfile ? formatSellerContactBlock(companyProfile) : "";
+  const profileGaps = companyProfile ? missingCompanyProfileFields(companyProfile) : [];
+
+  return (
+    <div className="form-panel" style={{ marginBottom: 16 }}>
+      <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>
+        <Building2 size={16} style={{ verticalAlign: "-2px", marginRight: 6 }} />
+        Client company &amp; addressees
+      </h2>
+      <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem" }}>
+        Prints in the <strong>Prepared For</strong> block at the top of the document — the people first, the company
+        address underneath. Pulled from the company record so nothing has to be retyped.
+      </p>
+
+      {company ? (
+        <>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            <strong>{company.name || "Unnamed company"}</strong>
+            <Link href={`/employee/clients/${company.id}`} style={{ fontSize: "0.85rem" }}>
+              Open the company record
+            </Link>
+          </div>
+
+          {/* --- Address ---------------------------------------------------- */}
+          <div className="field">
+            <label>
+              <MapPin size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+              Address on the company record
+            </label>
+            {addressText ? (
+              <>
+                <div className="rp-doc-prewrap" style={{ fontSize: "0.9rem", whiteSpace: "pre-wrap" }}>
+                  {addressText}
+                </div>
+                <button
+                  className="button button-light"
+                  type="button"
+                  style={{ marginTop: 8 }}
+                  disabled={disabled || addressMatches}
+                  onClick={() => onChange({ [clientFieldIds.address]: addressText })}
+                >
+                  {addressMatches ? "Already on this proposal" : "Use this address"}
+                </button>
+              </>
+            ) : (
+              <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem", margin: 0 }}>
+                No address on file. <Link href={`/employee/clients/${company.id}`}>Add one to the company record</Link>{" "}
+                and it will be available to every future proposal — or type it straight into the Client Address box in
+                the builder below for this proposal only.
+              </p>
+            )}
+          </div>
+        </>
+      ) : (
+        <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem" }}>
+          This proposal is not assigned to a company, so there is no record to pull an address or contacts from. Assign
+          one from the document view, or add the people below by hand.
+        </p>
+      )}
+
+      {/* --- Addressees --------------------------------------------------- */}
+      <div className="field" style={{ marginTop: 14 }}>
+        <label>Addressed to (up to {maxClientContacts})</label>
+
+        {company && company.contacts.length > 0 ? (
+          <div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
+            {company.contacts.map((option) => {
+              const checked = selected.some((contact) => sameContact(contact, option));
+              return (
+                <label
+                  key={option.id}
+                  style={{ display: "flex", alignItems: "flex-start", gap: 8, opacity: !checked && atLimit ? 0.5 : 1 }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={disabled || (!checked && atLimit)}
+                    style={{ width: "auto", marginTop: 3 }}
+                    onChange={(event) => toggleContact(option, event.target.checked)}
+                  />
+                  <span>
+                    <strong>{option.name}</strong>
+                    {option.title ? <span style={{ color: "var(--portal-muted)" }}> — {option.title}</span> : null}
+                    {option.isPrimary ? <span className="badge badge-green" style={{ marginLeft: 6 }}>Primary</span> : null}
+                    {option.email ? (
+                      <span style={{ color: "var(--portal-muted)", fontSize: "0.8rem" }}> · {option.email}</span>
+                    ) : null}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        ) : company ? (
+          <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem" }}>
+            Nobody is on this company record yet.{" "}
+            <Link href={`/employee/clients/${company.id}`}>Add contacts to the record</Link> so every future proposal
+            can use them, or add someone to this proposal only below.
+          </p>
+        ) : null}
+
+        {/* Ad-hoc addressee. A proposal is often addressed to someone who is
+            not in the CRM yet — the GC's safety consultant, an interim PM —
+            and blocking on "add them to the company record first" is how a
+            seller ends up typing a name into the summary instead. */}
+        <div style={{ display: "grid", gap: 6, gridTemplateColumns: "1fr 1fr 1fr auto", alignItems: "end" }}>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="proposal-contact-name" style={{ fontSize: "0.8rem" }}>
+              Name
+            </label>
+            <input
+              id="proposal-contact-name"
+              value={draft.name}
+              disabled={disabled || atLimit}
+              placeholder="Kevin Sanducker"
+              onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+            />
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="proposal-contact-title" style={{ fontSize: "0.8rem" }}>
+              Title
+            </label>
+            <input
+              id="proposal-contact-title"
+              value={draft.title}
+              disabled={disabled || atLimit}
+              placeholder="Safety Director"
+              onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
+            />
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="proposal-contact-email" style={{ fontSize: "0.8rem" }}>
+              Email
+            </label>
+            <input
+              id="proposal-contact-email"
+              value={draft.email}
+              disabled={disabled || atLimit}
+              placeholder="kevin@example.com"
+              onChange={(event) => setDraft((current) => ({ ...current, email: event.target.value }))}
+            />
+          </div>
+          <button
+            className="button button-light"
+            type="button"
+            disabled={disabled || atLimit}
+            onClick={addDraftContact}
+          >
+            <UserPlus size={14} /> Add
+          </button>
+        </div>
+        {notice ? (
+          <p style={{ color: "var(--portal-muted)", fontSize: "0.8rem", marginTop: 6 }}>{notice}</p>
+        ) : null}
+        {atLimit ? (
+          <p style={{ color: "var(--portal-muted)", fontSize: "0.8rem", marginTop: 6 }}>
+            {maxClientContacts} is the maximum. Remove someone to add another.
+          </p>
+        ) : null}
+      </div>
+
+      {/* --- What will actually print -------------------------------------- */}
+      <div className="field" style={{ marginTop: 6 }}>
+        <label>On this proposal</label>
+        {selected.length === 0 ? (
+          <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem", margin: 0 }}>
+            Nobody yet — the document will print the company name with no addressee.
+          </p>
+        ) : (
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 4 }}>
+            {selected.map((contact) => (
+              <li
+                key={`${contact.name}|${contact.email}`}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
+              >
+                <span style={{ fontSize: "0.9rem" }}>{formatClientContactLine(contact)}</span>
+                <button
+                  className="button button-light"
+                  type="button"
+                  disabled={disabled}
+                  title={`Remove ${contact.name} from this proposal`}
+                  onClick={() => toggleContact(contact, false)}
+                >
+                  <X size={14} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* --- Seller block --------------------------------------------------- */}
+      {companyProfile ? (
+        <div className="field" style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--portal-line, #dbe2e9)" }}>
+          <label>Our details, from the company profile</label>
+          {profileName || profileBlock ? (
+            <div style={{ fontSize: "0.85rem", whiteSpace: "pre-wrap", color: "var(--portal-muted)" }}>
+              {[profileName, profileBlock].filter((part) => part !== "").join("\n")}
+            </div>
+          ) : (
+            <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem", margin: 0 }}>
+              The company profile is empty, so there is nothing to pull.
+            </p>
+          )}
+          <button
+            className="button button-light"
+            type="button"
+            style={{ marginTop: 8 }}
+            disabled={disabled || (!profileName && !profileBlock)}
+            onClick={() =>
+              onChange({
+                sellerName: profileName,
+                sellerContact: profileBlock,
+              })
+            }
+          >
+            Use these on this proposal
+          </button>
+          {profileGaps.length > 0 ? (
+            <p style={{ color: "var(--portal-muted)", fontSize: "0.8rem", marginTop: 8 }}>
+              The company profile is still missing its {profileGaps.join(", ")}. Until an admin fills those in, every
+              proposal prints an incomplete seller block.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

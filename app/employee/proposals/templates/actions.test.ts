@@ -307,8 +307,20 @@ describe("client identity never crosses between proposals", () => {
       "client_proposal_templates:select": {
         data: { id: TEMPLATE_ID, name: "Pilot", form_data: leakyBody, is_archived: false },
       },
-      "company_clients:select": { data: { name: "Beta Builders", contact_name: "Sam Ortiz", email: "sam@beta.example" } },
-      "client_proposals:insert": { data: { id: NEW_PROPOSAL_ID } },
+      "company_clients:select": {
+        data: {
+          id: CLIENT_ID,
+          name: "Beta Builders",
+          contact_name: "Sam Ortiz",
+          email: "sam@beta.example",
+          address_line1: "9 Foundry Way",
+          city: "Madison",
+          state: "WI",
+          postal_code: "53703",
+        },
+      },
+      "client_proposals:insert": { data: { id: NEW_PROPOSAL_ID, proposal_number: "RPS-2026-0042" } },
+      "client_proposals:update": {},
       "client_proposal_revisions:insert": {},
     });
     signIn("employee", supabase);
@@ -323,19 +335,29 @@ describe("client identity never crosses between proposals", () => {
 
     const inserted = findCall(supabase, "client_proposals", "insert")?.payload as { form_data: GeneratorState };
     expect(inserted.form_data.fields.clientCompany).toBe("Beta Builders");
-    expect(inserted.form_data.fields.clientContact).toBe("Sam Ortiz");
-    expect(inserted.form_data.fields.clientEmail).toBe("sam@beta.example");
-    expect(inserted.form_data.fields).not.toHaveProperty("clientAddress");
+    // One addressee, folded from the company record's single legacy contact.
+    expect(inserted.form_data.fields.clientContacts).toBe("Sam Ortiz |  | sam@beta.example");
+    // The address comes across now — company_clients has address columns.
+    expect(inserted.form_data.fields.clientAddress).toBe("9 Foundry Way\nMadison, WI 53703");
+    // The captured template's own reference must not carry over. The NEW
+    // proposal's number is stamped on by the follow-up update, once the
+    // database has allocated it.
     expect(inserted.form_data.fields).not.toHaveProperty("proposalNo");
     expect(JSON.stringify(inserted.form_data)).not.toMatch(/Acme|Dana|dana@acme/i);
 
-    // Revision 1 must be the same scrubbed state, or restoring it re-leaks.
+    const numbered = findCall(supabase, "client_proposals", "update")?.payload as { form_data: GeneratorState };
+    expect(numbered.form_data.fields.proposalNo).toBe("RPS-2026-0042");
+
+    // Revision 1 must be the same scrubbed state the working copy ends up
+    // holding — including the allocated number — or restoring it either
+    // re-leaks the captured client or wipes the proposal's own reference.
     const revision = findCall(supabase, "client_proposal_revisions", "insert")?.payload as {
       form_data: GeneratorState;
       revision_number: number;
     };
     expect(revision.revision_number).toBe(1);
-    expect(revision.form_data).toEqual(inserted.form_data);
+    expect(revision.form_data).toEqual(numbered.form_data);
+    expect(JSON.stringify(revision.form_data)).not.toMatch(/Acme|Dana|dana@acme/i);
   });
 
   it("leaves the client block empty for an unassigned proposal", async () => {

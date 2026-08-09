@@ -438,8 +438,13 @@ describe("server-side input validation", () => {
 describe("revision 1 form state", () => {
   it("seeds form_data on both the working copy and revision 1, prefilled from the company", async () => {
     const supabase = createSupabaseMock({
-      "company_clients:select": { data: { name: "Acme Co", contact_name: "Dana", email: "dana@acme.test" } },
-      "client_proposals:insert": { data: { id: PROPOSAL_ID } },
+      "company_clients:select": {
+        data: { id: CLIENT_ID, name: "Acme Co", contact_name: "Dana", email: "dana@acme.test" },
+      },
+      // The reference number is allocated by the column default, so the insert
+      // returns it and the action stamps it onto the form state afterwards.
+      "client_proposals:insert": { data: { id: PROPOSAL_ID, proposal_number: "RPS-2026-0007" } },
+      "client_proposals:update": {},
       "client_proposal_revisions:insert": {},
     });
     signIn("employee", supabase);
@@ -447,17 +452,28 @@ describe("revision 1 form state", () => {
     const result = await createProposal({ title: "Acme Rollout", clientId: CLIENT_ID });
 
     expect(result).toEqual({ ok: true, proposalId: PROPOSAL_ID });
-    const workingCopy = supabase.calls.find((c) => c.table === "client_proposals" && c.op === "insert");
+    // form_data lands on the UPDATE, not the insert: the proposal row has to
+    // exist before its number does.
+    const workingCopy = supabase.calls.find((c) => c.table === "client_proposals" && c.op === "update");
     const revision = supabase.calls.find((c) => c.table === "client_proposal_revisions" && c.op === "insert");
 
     expect(workingCopy?.payload?.form_data).toEqual(revision?.payload?.form_data);
     const seeded = workingCopy?.payload?.form_data;
     expect(isGeneratorState(seeded)).toBe(true);
-    expect((seeded as GeneratorState).fields).toEqual({
-      clientCompany: "Acme Co",
-      clientContact: "Dana",
-      clientEmail: "dana@acme.test",
-    });
+
+    const fields = (seeded as GeneratorState).fields;
+    expect(fields.clientCompany).toBe("Acme Co");
+    // No contact rows on this company yet, so the single legacy contact is
+    // folded into the addressee list rather than dropped.
+    expect(fields.clientContacts).toBe("Dana |  | dana@acme.test");
+    expect(fields.proposalNo).toBe("RPS-2026-0007");
+    // The legacy single-contact fields are not written any more: the addressee
+    // list is the only place a person is stored.
+    expect(fields).not.toHaveProperty("clientContact");
+    expect(fields).not.toHaveProperty("clientTitle");
+    expect(fields).not.toHaveProperty("clientEmail");
+    // No address on this company record, so nothing is invented for it.
+    expect(fields).not.toHaveProperty("clientAddress");
   });
 
   // Regression: seeding empty item arrays made a brand-new proposal open with
@@ -476,7 +492,10 @@ describe("revision 1 form state", () => {
     const seeded = revision?.payload?.form_data as GeneratorState;
 
     expect(isGeneratorState(seeded)).toBe(true);
-    expect(seeded.fields).toEqual({});
+    // Unassigned: no company to pull a client block from, so none is invented.
+    expect(seeded.fields).not.toHaveProperty("clientCompany");
+    expect(seeded.fields).not.toHaveProperty("clientContacts");
+    expect(seeded.fields).not.toHaveProperty("clientAddress");
     // The asset seeds three phases and no service rows.
     expect(seeded.phases).toHaveLength(3);
     expect(seeded.services).toEqual([]);
@@ -505,8 +524,8 @@ describe("revision 1 form state", () => {
 
     await createProposal({ title: "Unassigned deal" });
 
-    const insert = supabase.calls.find((c) => c.table === "client_proposals" && c.op === "insert");
-    const totals = computeProposalTotals(insert?.payload?.form_data as GeneratorState);
+    const workingCopy = supabase.calls.find((c) => c.table === "client_proposals" && c.op === "update");
+    const totals = computeProposalTotals(workingCopy?.payload?.form_data as GeneratorState);
     // Zero-priced phases must not move the total off the package fee.
     expect(totals.total).toBe(5000);
     expect(totals.lineItems).toHaveLength(4);
