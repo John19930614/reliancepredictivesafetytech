@@ -14,6 +14,7 @@ import { revalidatePath } from "next/cache";
 import { getProposalAccess } from "@/lib/proposals/access";
 import { isAllowedSignatureType, maxSignatureBytes } from "@/lib/proposals/team-server";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
+import { bioLimits } from "./limits";
 
 export interface BioActionResult {
   ok: boolean;
@@ -22,13 +23,6 @@ export interface BioActionResult {
 }
 
 const SIGNATURE_BUCKET = "employee-signatures";
-
-/** Mirrors the CHECK constraints on proposal_team_bios. */
-export const bioLimits = Object.freeze({
-  displayName: 120,
-  title: 160,
-  bio: 4000,
-});
 
 function revalidateBio() {
   revalidatePath("/employee/proposals/bio");

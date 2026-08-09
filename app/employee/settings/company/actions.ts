@@ -22,8 +22,13 @@ export interface CompanyProfileActionResult {
   fieldErrors?: Record<string, string>;
 }
 
+// Deliberately NOT exported: a "use server" file may only export async
+// functions — any other export makes Next.js throw at module evaluation and
+// takes every action in the file down with it
+// (lib/guardrails/use-server-exports.test.ts enforces this repo-wide).
+
 /** Mirrors the CHECK constraints on platform_company_profile. */
-export const companyProfileLimits = Object.freeze({
+const companyProfileLimits = Object.freeze({
   legal_name: 200,
   display_name: 200,
   address_line1: 200,

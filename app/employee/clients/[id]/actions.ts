@@ -27,8 +27,13 @@ export interface CompanyActionResult {
   contactId?: string;
 }
 
+// Deliberately NOT exported, here and below: a "use server" file may only
+// export async functions — any other export makes Next.js throw at module
+// evaluation and takes every action in the file down with it
+// (lib/guardrails/use-server-exports.test.ts enforces this repo-wide).
+
 /** Mirrors the CHECK constraints on company_client_contacts. */
-export const contactLimits = Object.freeze({
+const contactLimits = Object.freeze({
   name: 160,
   title: 160,
   email: 254,
@@ -37,7 +42,7 @@ export const contactLimits = Object.freeze({
 });
 
 /** Mirrors the practical bounds on the company_clients address columns. */
-export const addressLimits = Object.freeze({
+const addressLimits = Object.freeze({
   line: 200,
   city: 120,
   state: 120,
