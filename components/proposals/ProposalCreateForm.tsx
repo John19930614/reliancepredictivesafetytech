@@ -1,15 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FilePlus2, Loader2 } from "lucide-react";
 import { createProposal } from "@/app/employee/proposals/actions";
 import { createProposalFromTemplate } from "@/app/employee/proposals/templates/actions";
+import { assignClientCode } from "@/app/employee/clients/[id]/actions";
+import {
+  clientCodeRule,
+  formatClientProposalNumber,
+  suggestClientCode,
+} from "@/lib/proposals/client-codes";
 import { ProposalTemplatePicker } from "./ProposalTemplatePicker";
 
 interface ClientOption {
   id: string;
   name: string;
+  /** The proposal moniker (HUN); null until someone assigns it. */
+  client_code?: string | null;
 }
 
 export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
@@ -17,6 +25,29 @@ export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [templateId, setTemplateId] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [codeDraft, setCodeDraft] = useState("");
+
+  const selectedClient = useMemo(
+    () => clients.find((client) => client.id === clientId) ?? null,
+    [clients, clientId],
+  );
+  const existingCode = (selectedClient?.client_code ?? "").trim().toUpperCase();
+  const needsCode = selectedClient !== null && existingCode === "";
+
+  const takenCodes = useMemo(
+    () => clients.map((client) => (client.client_code ?? "").trim()).filter((code) => code !== ""),
+    [clients],
+  );
+
+  function handleClientChange(nextId: string) {
+    setClientId(nextId);
+    const next = clients.find((client) => client.id === nextId) ?? null;
+    const nextCode = (next?.client_code ?? "").trim();
+    // A fresh suggestion per company; anything the user typed for the previous
+    // company was about that company's name, not this one's.
+    setCodeDraft(next && nextCode === "" ? suggestClientCode(next.name, takenCodes) : "");
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,6 +70,20 @@ export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
       proposalValue: parsedValue,
       validUntil: String(formData.get("valid_until") ?? "") || null,
     };
+
+    // "Whoever writes proposal 01 assigns the moniker" (build review,
+    // 2026-08-07): a company without a code gets one HERE, before the insert,
+    // so the number this proposal is allocated is already CODE-01. Assignment
+    // failing (taken, malformed) stops the create — silently falling back to an
+    // RPS number would defeat the decision.
+    if (shared.clientId && needsCode) {
+      const assigned = await assignClientCode(shared.clientId, codeDraft);
+      if (!assigned.ok) {
+        setError(assigned.error ?? "The proposal code could not be assigned.");
+        setSubmitting(false);
+        return;
+      }
+    }
 
     // Two distinct create paths. The blank path still calls createProposal(),
     // which seeds its own default pilot state and is deliberately unchanged; the
@@ -77,15 +122,45 @@ export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
         <ProposalTemplatePicker value={templateId} onChange={setTemplateId} disabled={submitting} />
         <div className="field">
           <label htmlFor="client_id">Company</label>
-          <select id="client_id" name="client_id" defaultValue="">
+          <select
+            id="client_id"
+            name="client_id"
+            value={clientId}
+            onChange={(event) => handleClientChange(event.target.value)}
+          >
             <option value="">Unassigned</option>
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
+                {c.client_code ? ` (${c.client_code})` : ""}
               </option>
             ))}
           </select>
         </div>
+        {needsCode ? (
+          <div className="field">
+            <label htmlFor="client_code">Proposal code for {selectedClient?.name}</label>
+            <input
+              id="client_code"
+              value={codeDraft}
+              onChange={(event) => setCodeDraft(event.target.value.toUpperCase())}
+              maxLength={3}
+              pattern="[A-Za-z]{2,3}"
+              title={clientCodeRule}
+              placeholder="e.g. HUN"
+              style={{ textTransform: "uppercase", letterSpacing: "0.12em" }}
+              required
+            />
+            <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem", marginTop: 4 }}>
+              First proposal for this company — you assign its code ({clientCodeRule}) and this document becomes{" "}
+              {formatClientProposalNumber(codeDraft || "SE", 1)}. The code is checked for uniqueness and stays fixed.
+            </p>
+          </div>
+        ) : existingCode !== "" ? (
+          <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem", marginTop: -6 }}>
+            Numbered under {existingCode} — this document gets the next {existingCode}-number automatically.
+          </p>
+        ) : null}
         <div className="field">
           <label htmlFor="owner">Owner</label>
           <input id="owner" name="owner" placeholder="Who owns this deal?" />

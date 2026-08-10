@@ -15,8 +15,9 @@
 // bounds are enforced server-side too.
 
 import { useState, useTransition } from "react";
-import { MapPin, Plus, Save, Star, Trash2, Users } from "lucide-react";
+import { Hash, MapPin, Plus, Save, Star, Trash2, Users } from "lucide-react";
 import {
+  assignClientCode,
   deleteCompanyContact,
   saveCompanyAddress,
   saveCompanyContact,
@@ -24,6 +25,7 @@ import {
   type CompanyActionResult,
 } from "@/app/employee/clients/[id]/actions";
 import { formatAddressLines } from "@/lib/proposals/client-contacts";
+import { clientCodeRule, formatClientProposalNumber, suggestClientCode } from "@/lib/proposals/client-codes";
 
 export interface CompanyContactRow {
   id: string;
@@ -49,16 +51,23 @@ const emptyDraft = { id: "", name: "", title: "", email: "", phone: "", notes: "
 
 export function CompanyAddressAndContacts({
   clientId,
+  clientName = "",
+  clientCode = null,
   address,
   contacts,
 }: {
   clientId: string;
+  clientName?: string;
+  clientCode?: string | null;
   address: CompanyAddressFields;
   contacts: CompanyContactRow[];
 }) {
   const [isPending, startTransition] = useTransition();
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  const [savedCode, setSavedCode] = useState((clientCode ?? "").trim().toUpperCase());
+  const [codeDraft, setCodeDraft] = useState(() => savedCode || suggestClientCode(clientName));
 
   const [addressDraft, setAddressDraft] = useState({
     address_line1: address.address_line1 ?? "",
@@ -98,6 +107,57 @@ export function CompanyAddressAndContacts({
 
       {error ? <div className="success-box portal-alert portal-alert-error">{error}</div> : null}
       {message ? <div className="success-box portal-alert">{message}</div> : null}
+
+      {/* ---------------------------------------------------------------- */}
+      {/* Proposal code                                                    */}
+      {/* ---------------------------------------------------------------- */}
+      <h3 style={{ fontSize: "1rem", marginTop: 18 }}>
+        <Hash size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />
+        Proposal code
+      </h3>
+      {savedCode ? (
+        <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem", marginTop: 6 }}>
+          Proposals for this company are numbered <strong>{formatClientProposalNumber(savedCode, 1)}</strong>,{" "}
+          {formatClientProposalNumber(savedCode, 2)}, … The code stays fixed once documents are numbered under it.
+        </p>
+      ) : (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            const attempted = codeDraft;
+            run(
+              () => assignClientCode(clientId, attempted),
+              `Code ${attempted.trim().toUpperCase()} assigned — this company's draft proposals now number from ${formatClientProposalNumber(attempted, 1)}.`,
+              () => setSavedCode(attempted.trim().toUpperCase()),
+            );
+          }}
+        >
+          <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem", marginTop: 6 }}>
+            No code yet. Whoever writes this company&apos;s first proposal assigns it — {clientCodeRule} Numbers then run{" "}
+            {formatClientProposalNumber(codeDraft || "SE", 1)}, {formatClientProposalNumber(codeDraft || "SE", 2)}, … per
+            company.
+          </p>
+          <div className="form-grid" style={{ gridTemplateColumns: "minmax(120px, 200px) auto", alignItems: "end" }}>
+            <div className="field">
+              <label htmlFor="company-client-code">Code</label>
+              <input
+                id="company-client-code"
+                value={codeDraft}
+                onChange={(event) => setCodeDraft(event.target.value.toUpperCase())}
+                maxLength={3}
+                pattern="[A-Za-z]{2,3}"
+                title={clientCodeRule}
+                placeholder="e.g. HUN"
+                style={{ textTransform: "uppercase", letterSpacing: "0.12em" }}
+                required
+              />
+            </div>
+            <button className="button button-primary" disabled={isPending} type="submit" style={{ justifySelf: "start" }}>
+              <Save size={16} /> Assign code
+            </button>
+          </div>
+        </form>
+      )}
 
       {/* ---------------------------------------------------------------- */}
       {/* Address                                                          */}
