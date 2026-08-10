@@ -253,7 +253,12 @@ body.embedded .app{grid-template-columns:1fr;max-width:560px;padding:16px}
   <div class="section-card">
     <h3>3. Executive Summary<span class="opt">section 01</span></h3>
     <p class="cardhint">Section 01 of the document — the first thing the client reads.</p>
-  <textarea id="customSummary">Summarize the engagement in two or three sentences: what the client is trying to achieve, what this proposal puts in place, and what happens at the end of the term. The package, term dates, included users and pricing are already stated elsewhere in the document — do not repeat figures here, or they will fall out of date when the numbers change.</textarea>
+  <!-- Guidance lives in the placeholder attribute, NEVER as textarea content:
+       content is autosaved into form_data and printed on the client document as
+       though the seller wrote it (that is how a live proposal shipped with this
+       very paragraph as its Executive Summary). The renderer prints its own
+       neutral fallback when the field is empty. -->
+  <textarea id="customSummary" placeholder="Summarize the engagement in two or three sentences: what the client is trying to achieve, what this proposal puts in place, and what happens at the end of the term. The package, term dates, included users and pricing are already stated elsewhere in the document — do not repeat figures here, or they will fall out of date when the numbers change."></textarea>
   </div>
   <div class="section-card">
     <h3>4. Engagement Term &amp; Package<span class="opt">section 02</span></h3>
