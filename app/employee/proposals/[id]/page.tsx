@@ -18,10 +18,16 @@ import {
   type ShareableRevision,
 } from "@/components/proposals/ProposalSharePanel";
 import {
+  ProposalDocusignPanel,
+  type ProposalDocusignEnvelope,
+} from "@/components/proposals/ProposalDocusignPanel";
+import {
   ProposalTimeline,
   type TimelineAcceptance,
   type TimelineShareLink,
 } from "@/components/proposals/ProposalTimeline";
+import { getDocusignConfigStatus } from "@/lib/docusign/config";
+import { parseClientContacts } from "@/lib/proposals/client-contacts";
 import { resolveDocumentExtras } from "@/lib/proposals/team-server";
 import { canShareProposal } from "@/app/employee/proposals/share-link-policy";
 import type { ProposalRevisionRow, ProposalStatus } from "@/lib/proposals/types";
@@ -77,7 +83,7 @@ export default async function ProposalDetailPage({
   // proposal page down until the migration lands. Instead the feature degrades:
   // the panel says it is unavailable and everything else keeps working.
   // ---------------------------------------------------------------------------
-  const [acceptanceResult, shareLinkResult] = await Promise.all([
+  const [acceptanceResult, shareLinkResult, docusignResult] = await Promise.all([
     supabase
       .from("client_proposals")
       .select(
@@ -90,11 +96,22 @@ export default async function ProposalDetailPage({
       .select("id, revision_id, created_at, expires_at, revoked_at, first_viewed_at, last_viewed_at, view_count")
       .eq("proposal_id", id)
       .order("created_at", { ascending: false }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from("client_proposal_docusign_envelopes")
+      .select(
+        "id, revision_id, envelope_id, status, recipient_name, recipient_email, sent_at, completed_at, completed_file_id",
+      )
+      .eq("proposal_id", id)
+      .order("sent_at", { ascending: false }),
   ]);
 
   const shareFeatureAvailable = !acceptanceResult.error && !shareLinkResult.error;
+  const docusignAvailable = !docusignResult.error;
+  const docusignConfig = getDocusignConfigStatus();
   const acceptanceRow = (acceptanceResult.data ?? null) as Record<string, unknown> | null;
   const shareLinkRows = (shareLinkResult.data ?? []) as Array<Record<string, unknown>>;
+  const docusignRows = (docusignResult.data ?? []) as Array<Record<string, unknown>>;
 
   // The dropdown is capped, so make sure the company this proposal is actually
   // assigned to is always one of the options — otherwise the select would show
@@ -161,6 +178,19 @@ export default async function ProposalDetailPage({
     created_at: (row.created_at ?? null) as string | null,
   }));
 
+  const docusignEnvelopes: ProposalDocusignEnvelope[] = docusignRows.map((row) => ({
+    id: String(row.id),
+    revision_id: (row.revision_id ?? null) as string | null,
+    revision_number: row.revision_id ? revisionNumberById.get(String(row.revision_id)) ?? null : null,
+    envelope_id: String(row.envelope_id),
+    status: String(row.status ?? "unknown"),
+    recipient_name: String(row.recipient_name ?? ""),
+    recipient_email: String(row.recipient_email ?? ""),
+    sent_at: (row.sent_at ?? null) as string | null,
+    completed_at: (row.completed_at ?? null) as string | null,
+    completed_file_id: (row.completed_file_id ?? null) as string | null,
+  }));
+
   const timelineLinks: TimelineShareLink[] = shareLinks.map((link) => ({
     id: link.id,
     revision_number: link.revision_number,
@@ -185,6 +215,7 @@ export default async function ProposalDetailPage({
     : null;
 
   const shareGate = canShareProposal(normalized.status);
+  const primaryRecipient = documentState ? parseClientContacts(documentState.fields).find((contact) => contact.email) : null;
 
   const lockedMessage =
     locked === "permission"
@@ -275,6 +306,18 @@ export default async function ProposalDetailPage({
         canManage={canManage}
         shareGate={shareGate}
         available={shareFeatureAvailable}
+      />
+
+      <ProposalDocusignPanel
+        proposalId={normalized.id}
+        revisions={shareableRevisions}
+        envelopes={docusignEnvelopes}
+        canManage={canManage}
+        available={docusignAvailable}
+        configured={docusignConfig.configured}
+        missing={docusignConfig.enabled ? docusignConfig.missing : ["DOCUSIGN_ENABLED"]}
+        defaultRecipientName={primaryRecipient?.name ?? null}
+        defaultRecipientEmail={primaryRecipient?.email ?? null}
       />
 
       <div style={{ marginTop: 20 }}>

@@ -45,6 +45,7 @@ vi.mock("@/app/employee/proposals/actions", () => ({
   restoreProposalRevision: vi.fn(async () => ({ ok: true })),
   saveProposalDraft: vi.fn(async () => ({ ok: true })),
   saveProposalRevision: vi.fn(async () => ({ ok: true, revisionNumber: 6 })),
+  sendProposalToDocusign: vi.fn(async () => ({ ok: true, envelopeId: "env-1" })),
   setProposalStatus: vi.fn(async () => ({ ok: true })),
   updateProposalMeta: vi.fn(async () => ({ ok: true })),
 }));

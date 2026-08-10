@@ -57,7 +57,7 @@ export function buildAcceptedProposalFileName(
   return `${trimmed || "Proposal"}${suffix}`;
 }
 
-interface FolderResolution {
+export interface FolderResolution {
   ok: boolean;
   folderId?: string;
   error?: string;
@@ -69,7 +69,7 @@ interface FolderResolution {
  * index turns that into a unique violation, after which the folder is simply
  * read back.
  */
-async function findOrCreateProposalsFolder(
+export async function findOrCreateProposalsFolder(
   db: LooseClient,
   scope: FileScope,
   clientId: string | null,

@@ -41,6 +41,7 @@ import type { DocumentSignature, DocumentTeamMember } from "@/components/proposa
 import { computeProposalTotals } from "@/lib/proposals/pricing";
 import { proposalStatuses, type ProposalStatus } from "@/lib/proposals/types";
 import { fileAcceptedProposalPdf } from "@/lib/proposals/acceptance-filing";
+import { sendProposalForDocusign } from "@/lib/proposals/docusign";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
 
 export interface ActionResult {
@@ -845,6 +846,43 @@ export async function revokeProposalShareLink(linkId: string): Promise<ActionRes
 
   revalidateProposals(proposalId);
   return { ok: true };
+}
+
+export async function sendProposalToDocusign(
+  proposalId: string,
+  revisionId: string | null,
+): Promise<ActionResult & { envelopeId?: string }> {
+  const { supabase, userId, canManage, role } = await getProposalAccess();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+  if (!canManage) return { ok: false, error: "You do not have permission to send proposals for signature." };
+  if (!proposalId || !isProposalUuid(proposalId)) return { ok: false, error: "Missing or invalid proposal id." };
+  if (revisionId && !isProposalUuid(revisionId)) return { ok: false, error: "Choose a valid revision to send." };
+
+  const { data: proposal } = await supabase
+    .from("client_proposals")
+    .select("id")
+    .eq("id", proposalId)
+    .maybeSingle();
+  if (!proposal) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  let result: Awaited<ReturnType<typeof sendProposalForDocusign>>;
+  try {
+    result = await sendProposalForDocusign({
+      proposalId,
+      revisionId,
+      actorUserId: userId,
+      actorRole: role,
+    });
+  } catch (caught) {
+    return {
+      ok: false,
+      error: caught instanceof Error ? caught.message : "DocuSign could not send this proposal.",
+    };
+  }
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidateProposals(proposalId);
+  return { ok: true, envelopeId: result.envelopeId };
 }
 
 export interface AcceptViaShareLinkInput {
