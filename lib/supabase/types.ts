@@ -6934,6 +6934,39 @@ export type Database = {
         }
         Relationships: []
       }
+      talent_commission_plans: {
+        Row: {
+          active: boolean
+          base_salary: number
+          commission_pct: number
+          created_at: string
+          id: string
+          updated_at: string
+          updated_by: string | null
+          user_id: string
+        }
+        Insert: {
+          active?: boolean
+          base_salary?: number
+          commission_pct?: number
+          created_at?: string
+          id?: string
+          updated_at?: string
+          updated_by?: string | null
+          user_id: string
+        }
+        Update: {
+          active?: boolean
+          base_salary?: number
+          commission_pct?: number
+          created_at?: string
+          id?: string
+          updated_at?: string
+          updated_by?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       talent_job_orders: {
         Row: {
           bill_rate: number | null
@@ -7138,6 +7171,7 @@ export type Database = {
           job_order_id: string
           match_id: string
           pay_rate: number
+          recruiter_id: string | null
           start_date: string
           status: string
           updated_at: string | null
@@ -7152,6 +7186,7 @@ export type Database = {
           job_order_id: string
           match_id: string
           pay_rate: number
+          recruiter_id?: string | null
           start_date: string
           status?: string
           updated_at?: string | null
@@ -7166,6 +7201,7 @@ export type Database = {
           job_order_id?: string
           match_id?: string
           pay_rate?: number
+          recruiter_id?: string | null
           start_date?: string
           status?: string
           updated_at?: string | null

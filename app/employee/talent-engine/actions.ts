@@ -33,6 +33,7 @@ import {
   requiresHumanApproval,
 } from "@/lib/talent-engine/policy";
 import { defaultVerticalOptions, normalizeVerticalOptions } from "@/lib/talent-engine/verticals";
+import { maxBaseSalary, maxCommissionPct } from "@/lib/talent-engine/commission";
 import {
   computeMatchMoney,
   meetsSpreadFloor,
@@ -91,6 +92,7 @@ const tables = {
   timesheets: "talent_timesheets",
   activity: "talent_activity_log",
   settings: "talent_settings",
+  commissionPlans: "talent_commission_plans",
 } as const;
 
 const talentPath = "/employee/talent-engine";
@@ -263,7 +265,7 @@ const candidateColumns =
 
 const matchColumns =
   "id, job_order_id, candidate_id, status, bill_rate, pay_rate, spread, markup_pct, floor_ok, " +
-  "fit_score, requires_human_review, proposed_pay_rate";
+  "fit_score, requires_human_review, proposed_pay_rate, created_by";
 
 /** The effective spread floor for one order: its override, else the agency floor. */
 function resolveFloor(jobOrderMinSpread: unknown, settings: TalentSettings): number {
@@ -1591,6 +1593,10 @@ export async function createPlacement(
       pay_rate: payRate,
       status: "active",
       created_by: userId,
+      // Commission attribution: the match's proposer made this placement in
+      // the commercial sense. Null for AI-drafted matches — an admin assigns
+      // the recruiter on the desk. Reassignable via setPlacementRecruiter().
+      recruiter_id: (match.created_by as string | null) ?? null,
     })
     .select("id")
     .single();
@@ -1636,6 +1642,55 @@ export async function createPlacement(
 
   revalidateTalent();
   return { ok: true, placementId: created.id };
+}
+
+/**
+ * Reassigns (or clears) the recruiter credited with a placement's commission.
+ *
+ * Admin-tier (`canManagePlacements`): attribution decides who gets paid what,
+ * so it moves with the same authority that opens and ends placements.
+ */
+export async function setPlacementRecruiter(
+  placementId: string,
+  recruiterUserId: string | null,
+): Promise<ActionResult> {
+  const { supabase, userId, canRead, canManagePlacements, role } = await getTalentAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT_MESSAGE };
+  if (!canRead) return { ok: false, error: "You do not have access to the Talent Engine." };
+  if (!canManagePlacements) return { ok: false, error: "You do not have permission to assign recruiters." };
+  if (!isTalentUuid(placementId)) return { ok: false, error: "Missing or invalid placement id." };
+  if (recruiterUserId !== null && !isTalentUuid(recruiterUserId)) {
+    return { ok: false, error: "Missing or invalid recruiter id." };
+  }
+
+  const { data: placement } = await supabase
+    .from(tables.placements)
+    .select("id, recruiter_id, candidate_id")
+    .eq("id", placementId)
+    .maybeSingle();
+  if (!placement) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  const { data: updated, error } = await supabase
+    .from(tables.placements)
+    .update({ recruiter_id: recruiterUserId })
+    .eq("id", placementId)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!updated || updated.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  await recordTalentAudit(
+    role,
+    "update",
+    "talent_placement",
+    placementId,
+    userId,
+    recruiterUserId ? "Assigned the placement's recruiter" : "Cleared the placement's recruiter",
+    { recruiter_id: placement.recruiter_id ?? null },
+    { recruiter_id: recruiterUserId },
+  );
+
+  revalidateTalent();
+  return { ok: true };
 }
 
 /**
@@ -1846,6 +1901,78 @@ export async function updateTalentSettings(patch: TalentSettingsPatch): Promise<
       actorType: "human",
       actorId: userId,
     }),
+  );
+
+  revalidateTalent();
+  return { ok: true };
+}
+
+export interface CommissionPlanInput {
+  /** The compensated person (auth user id). */
+  userId: string;
+  /** Annual base salary, dollars. */
+  baseSalary: number;
+  /** Share of each placement's weekly margin, percent. */
+  commissionPct: number;
+  active?: boolean;
+}
+
+/**
+ * Creates or updates one person's commission plan (build review, 2026-08-07:
+ * base salary configurable per person, commission default 5% of each
+ * placement's weekly margin).
+ *
+ * `isAdmin` — comp is set by the platform owner. RLS enforces the same rule;
+ * this check is the faster, clearer answer.
+ */
+export async function saveCommissionPlan(input: CommissionPlanInput): Promise<ActionResult> {
+  const { supabase, userId, canRead, isAdmin, role } = await getTalentAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT_MESSAGE };
+  if (!canRead) return { ok: false, error: "You do not have access to the Talent Engine." };
+  if (!isAdmin) return { ok: false, error: "Admin role required to set compensation." };
+
+  const target = String(input?.userId ?? "").trim();
+  if (!isTalentUuid(target)) return { ok: false, error: "Pick the person the plan belongs to." };
+
+  const baseSalary = Number(input?.baseSalary);
+  if (!Number.isFinite(baseSalary) || baseSalary < 0 || baseSalary > maxBaseSalary) {
+    return { ok: false, error: `Base salary must be between $0 and $${maxBaseSalary.toLocaleString("en-US")}.` };
+  }
+  const commissionPct = Number(input?.commissionPct);
+  if (!Number.isFinite(commissionPct) || commissionPct < 0 || commissionPct > maxCommissionPct) {
+    return { ok: false, error: `Commission must be between 0 and ${maxCommissionPct}%.` };
+  }
+
+  const { data: before } = await supabase
+    .from(tables.commissionPlans)
+    .select("id, base_salary, commission_pct, active")
+    .eq("user_id", target)
+    .maybeSingle();
+
+  const payload = {
+    user_id: target,
+    base_salary: roundMoney(baseSalary),
+    commission_pct: roundMoney(commissionPct),
+    active: input?.active !== false,
+    updated_by: userId,
+  };
+
+  const { data: saved, error } = await supabase
+    .from(tables.commissionPlans)
+    .upsert(payload, { onConflict: "user_id" })
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!saved || saved.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  await recordTalentAudit(
+    role,
+    before ? "update" : "create",
+    "talent_commission_plan",
+    target,
+    userId,
+    "Set a Talent Engine commission plan",
+    before ? { base_salary: before.base_salary, commission_pct: before.commission_pct, active: before.active } : null,
+    { base_salary: payload.base_salary, commission_pct: payload.commission_pct, active: payload.active },
   );
 
   revalidateTalent();

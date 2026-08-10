@@ -41,9 +41,11 @@ import { defaultVerticalOptions, normalizeVerticalOptions } from "@/lib/talent-e
 import {
   defaultTalentSettings,
   talentAutonomyTiers,
+  type CommissionPlanRow,
   type MatchQueueRow,
   type TalentAutonomyTier,
 } from "@/lib/talent-engine/types";
+import { CommissionPlansPanel } from "@/components/talent-engine/CommissionPlansPanel";
 import { DeskClearedMatch } from "@/components/talent-engine/DeskClearedMatch";
 import { DeskPlacementCard, type DeskPlacementRow, type DeskTimesheetRow } from "@/components/talent-engine/DeskPlacementCard";
 import { DeskSettingsPanel } from "@/components/talent-engine/DeskSettingsPanel";
@@ -162,7 +164,7 @@ export default async function PlacementDeskPage() {
   const weekStarting = currentWeekStarting(now);
   const today = todayKey(now);
 
-  const [settingsResult, clearedResult, placementsResult] = await Promise.all([
+  const [settingsResult, clearedResult, placementsResult, plansResult, profilesResult] = await Promise.all([
     readList<SettingsReadRow>(
       db
         .from("talent_settings")
@@ -190,13 +192,26 @@ export default async function PlacementDeskPage() {
       db
         .from("talent_placements")
         .select(
-          "id, bill_rate, pay_rate, start_date, status, candidate:talent_candidates(id, full_name), job_order:talent_job_orders(id, title, min_spread, client:company_clients(id, name))",
+          "id, bill_rate, pay_rate, start_date, status, recruiter_id, candidate:talent_candidates(id, full_name), job_order:talent_job_orders(id, title, min_spread, client:company_clients(id, name))",
           { count: "exact" },
         )
         .eq("status", "active")
         .order("start_date", { ascending: false })
         .order("id", { ascending: true })
         .limit(placementLimit),
+    ),
+
+    // Commission plans (RLS: admins see all, others their own row) and the
+    // names to label them with. Both power the compensation panel and the
+    // recruiter-assignment control, which render for the oversight tier only.
+    readList<CommissionPlanRow>(
+      db.from("talent_commission_plans").select("*").order("created_at", { ascending: true }).limit(100),
+    ),
+
+    readList<{ user_id: string; display_name: string | null; email: string | null }>(
+      canManagePlacements
+        ? db.from("employee_profiles").select("user_id, display_name, email").limit(300)
+        : db.from("employee_profiles").select("user_id, display_name, email").limit(0),
     ),
   ]);
 
@@ -221,7 +236,7 @@ export default async function PlacementDeskPage() {
         )
       : ({ rows: [], count: 0, error: null } as ListResult<DeskTimesheetRow>);
 
-  const results = [settingsResult, clearedResult, placementsResult, timesheetsResult];
+  const results = [settingsResult, clearedResult, placementsResult, plansResult, profilesResult, timesheetsResult];
 
   // A table that is not in the schema cache yet means "migration not applied";
   // anything else is a real fault and belongs in error.tsx, not swallowed.
@@ -232,6 +247,19 @@ export default async function PlacementDeskPage() {
   }
 
   const settings = settingsResult.rows[0] ?? null;
+
+  const plans = plansResult.rows;
+  const namesById: Record<string, string> = {};
+  for (const profile of profilesResult.rows) {
+    namesById[profile.user_id] = profile.display_name?.trim() || profile.email || "Portal user";
+  }
+  const recruiterOptions = plans
+    .filter((plan) => plan.active)
+    .map((plan) => ({ userId: plan.user_id, name: namesById[plan.user_id] ?? "Portal user" }));
+  const planPeople = profilesResult.rows.map((profile) => ({
+    userId: profile.user_id,
+    name: namesById[profile.user_id] ?? "Portal user",
+  }));
   const minSpread = toNumber(settings?.min_spread_per_hour, defaultTalentSettings.min_spread_per_hour);
   const targetMarkupPct = toNumber(settings?.target_markup_pct, defaultTalentSettings.target_markup_pct);
   const hoursPerWeek =
@@ -337,11 +365,14 @@ export default async function PlacementDeskPage() {
             <div className="talent-desk-list">
               {placements.map((placement) => (
                 <DeskPlacementCard
+                  canManagePlacements={canManagePlacements}
                   canPropose={canPropose}
                   hoursPerWeek={hoursPerWeek}
                   key={placement.id}
                   minSpread={minSpread}
                   placement={placement}
+                  recruiterName={placement.recruiter_id ? (namesById[placement.recruiter_id] ?? null) : null}
+                  recruiterOptions={recruiterOptions}
                   weekStarting={weekStarting}
                   weeks={weeksByPlacement.get(placement.id) ?? []}
                 />
@@ -360,6 +391,12 @@ export default async function PlacementDeskPage() {
             targetMarkupPct={targetMarkupPct}
             verticalOptions={verticalOptions}
           />
+        </TalentCard>
+      ) : null}
+
+      {isAdmin ? (
+        <TalentCard icon={<ClipboardCheck size={15} />} title="Commission plans">
+          <CommissionPlansPanel namesById={namesById} people={planPeople} plans={plans} />
         </TalentCard>
       ) : null}
 

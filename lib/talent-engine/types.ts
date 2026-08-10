@@ -237,7 +237,26 @@ export interface PlacementRow {
   bill_rate: number;
   pay_rate: number;
   status: PlacementStatus;
+  /** Who earns the commission — defaults to the match's proposer. */
+  recruiter_id: string | null;
   created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ============================================================================
+// Commission plans — per-person comp (build review, 2026-08-07)
+// ============================================================================
+
+export interface CommissionPlanRow {
+  id: string;
+  user_id: string;
+  /** Annual base, dollars. */
+  base_salary: number;
+  /** Share of each placement's weekly margin, percent. Default 5. */
+  commission_pct: number;
+  active: boolean;
+  updated_by: string | null;
   created_at: string;
   updated_at: string;
 }

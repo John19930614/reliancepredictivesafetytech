@@ -28,14 +28,20 @@ import {
   defaultMinSpreadPerHour,
   type CandidateRow,
   type CertificationCoverage,
+  type CommissionPlanRow,
   type JobOrderWithClient,
   type LedgerRow,
   type MatchQueueRow,
   type TalentActivityRow,
 } from "@/lib/talent-engine/types";
+import { findDeadTime, utilizationPct } from "@/lib/talent-engine/utilization";
 import { AgentActivityFeed } from "@/components/talent-engine/AgentActivityFeed";
+import { BreakEvenPanel } from "@/components/talent-engine/BreakEvenPanel";
 import { CertificationTracker } from "@/components/talent-engine/CertificationTracker";
 import { JobOrdersCard } from "@/components/talent-engine/JobOrdersCard";
+import { RecruiterKpiRow, RecruiterPlacementsCard } from "@/components/talent-engine/RecruiterView";
+import { TeamEconomicsCard, type TeamEconomicsEntry } from "@/components/talent-engine/TeamEconomicsCard";
+import { UtilizationCard } from "@/components/talent-engine/UtilizationCard";
 import { MarginLedgerCard, type MarginLedgerOverflow } from "@/components/talent-engine/MarginLedgerCard";
 import { MatchQueueCard } from "@/components/talent-engine/MatchQueueCard";
 import { RevenueMarginCard } from "@/components/talent-engine/RevenueMarginCard";
@@ -206,8 +212,15 @@ interface PlacementJoinRow {
   bill_rate: number | null;
   pay_rate: number | null;
   start_date: string | null;
+  recruiter_id: string | null;
   candidate: { id: string; full_name: string } | null;
   job_order: { id: string; title: string; client: { id: string; name: string } | null } | null;
+}
+
+interface ProfileNameRow {
+  user_id: string;
+  display_name: string | null;
+  email: string | null;
 }
 
 interface TimesheetJoinRow {
@@ -224,7 +237,7 @@ interface TimesheetJoinRow {
 
 export default async function TalentEnginePage() {
   const access = await getTalentAccess();
-  const { supabase, userId, canRead, canApprove, canSetRate, canPropose } = access;
+  const { supabase, userId, canRead, canApprove, canSetRate, canPropose, canManagePlacements } = access;
 
   if (!canRead) {
     return (
@@ -233,6 +246,16 @@ export default async function TalentEnginePage() {
       </div>
     );
   }
+
+  /**
+   * The two dashboards from the 2026-08-07 build review. Recruiter tier
+   * (employee / internal_reviewer: proposes, cannot manage placements) gets
+   * their own desk — placements, hours, commission — and none of the company
+   * revenue rollups. The oversight tier (and the read-only account manager)
+   * keeps the full money console. Decided server-side, so the money numbers
+   * for the recruiter view are never even queried into the page.
+   */
+  const recruiterView = canPropose && !canManagePlacements;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any;
@@ -304,7 +327,7 @@ export default async function TalentEnginePage() {
       db
         .from("talent_placements")
         .select(
-          "id, bill_rate, pay_rate, start_date, candidate:talent_candidates(id, full_name), job_order:talent_job_orders(id, title, client:company_clients(id, name))",
+          "id, bill_rate, pay_rate, start_date, recruiter_id, candidate:talent_candidates(id, full_name), job_order:talent_job_orders(id, title, client:company_clients(id, name))",
           { count: "exact" },
         )
         .eq("status", "active")
@@ -437,9 +460,9 @@ export default async function TalentEnginePage() {
   // week that actually has rows. A Monday-morning render, or a book that bills
   // a week in arrears, would otherwise show an empty ledger under a non-zero
   // placement count — and the card names the week it settled on.
-  const timesheetsResult =
+  const [timesheetsResult, plansResult, profilesResult] = await Promise.all([
     placementIds.length > 0
-      ? await readList<TimesheetJoinRow>(
+      ? readList<TimesheetJoinRow>(
           db
             .from("talent_timesheets")
             .select("placement_id, week_starting, hours, bill_rate, pay_rate")
@@ -449,10 +472,29 @@ export default async function TalentEnginePage() {
             .order("placement_id", { ascending: true })
             .limit(placementIds.length * 4),
         )
-      : ({ rows: [], count: 0, error: null } as ListResult<TimesheetJoinRow>);
+      : Promise.resolve({ rows: [], count: 0, error: null } as ListResult<TimesheetJoinRow>),
+
+    // Commission plans. RLS scopes this to the viewer: an admin reads every
+    // plan (Team Economics), a recruiter reads only their own (their KPI row).
+    readList<CommissionPlanRow>(
+      db.from("talent_commission_plans").select("*").order("created_at", { ascending: true }).limit(100),
+    ),
+
+    // Names for the Team Economics card. Only the oversight view renders them.
+    recruiterView
+      ? Promise.resolve({ rows: [], count: 0, error: null } as ListResult<ProfileNameRow>)
+      : readList<ProfileNameRow>(
+          db.from("employee_profiles").select("user_id, display_name, email").limit(300),
+        ),
+  ]);
 
   if (timesheetsResult.error && !isMissingSchemaRelationError(timesheetsResult.error)) {
     throw new Error("The Talent Engine console could not read its timesheets.");
+  }
+  const planFault = plansResult.error && !isMissingSchemaRelationError(plansResult.error);
+  const profileFault = profilesResult.error && !isMissingSchemaRelationError(profilesResult.error);
+  if (planFault || profileFault) {
+    throw new Error("The Talent Engine console could not read its compensation data.");
   }
 
   const ledgerWeek = timesheetsResult.rows[0]?.week_starting ?? weekStarting;
@@ -500,6 +542,52 @@ export default async function TalentEnginePage() {
     pendingApprovals: matchesResult.count,
   });
 
+  /* ---- Role-scoped economics --------------------------------------------- */
+
+  const plans = plansResult.rows;
+  const myPlan = userId ? (plans.find((plan) => plan.user_id === userId) ?? null) : null;
+  // The recruiter's own slice of the settled week, by placement attribution.
+  const recruiterLedger =
+    recruiterView && userId
+      ? ledgerRows.filter((row) => placementsById.get(row.placement_id)?.recruiter_id === userId)
+      : [];
+
+  const marginByRecruiter = new Map<string, number>();
+  for (const row of ledgerRows) {
+    const recruiter = placementsById.get(row.placement_id)?.recruiter_id;
+    if (recruiter) marginByRecruiter.set(recruiter, (marginByRecruiter.get(recruiter) ?? 0) + row.weekly_margin);
+  }
+  const activeByRecruiter = new Map<string, number>();
+  for (const placement of placements) {
+    if (placement.recruiter_id) {
+      activeByRecruiter.set(placement.recruiter_id, (activeByRecruiter.get(placement.recruiter_id) ?? 0) + 1);
+    }
+  }
+  const namesById: Record<string, string> = {};
+  for (const profile of profilesResult.rows) {
+    namesById[profile.user_id] = profile.display_name?.trim() || profile.email || "Portal user";
+  }
+  const teamEconomics: TeamEconomicsEntry[] = recruiterView
+    ? []
+    : plans.map((plan) => ({
+        plan,
+        name: namesById[plan.user_id] ?? "Portal user",
+        activePlacements: activeByRecruiter.get(plan.user_id) ?? 0,
+        weeklyMargin: marginByRecruiter.get(plan.user_id) ?? 0,
+      }));
+
+  /* ---- Dead time: the settled week's hours against the active book ------- */
+
+  const hoursByPlacement = new Map(ledgerRows.map((row) => [row.placement_id, row.hours]));
+  const utilizationRows = placements.map((placement) => ({
+    placement_id: placement.id,
+    candidate_name: placement.candidate?.full_name ?? "Unnamed placement",
+    client_name: placement.job_order?.client?.name ?? placement.job_order?.title ?? "Unassigned client",
+    logged_hours: hoursByPlacement.get(placement.id) ?? 0,
+  }));
+  const deadTime = findDeadTime(utilizationRows, hoursPerWeek);
+  const bookUtilization = utilizationPct(utilizationRows, hoursPerWeek);
+
   /* ---- Certification coverage -------------------------------------------- */
 
   const certRows = certScanResult.rows;
@@ -546,7 +634,11 @@ export default async function TalentEnginePage() {
         </p>
       ) : null}
 
-      <TalentKpiRow minSpread={minSpread} summary={summary} />
+      {recruiterView ? (
+        <RecruiterKpiRow plan={myPlan} rows={recruiterLedger} />
+      ) : (
+        <TalentKpiRow minSpread={minSpread} summary={summary} />
+      )}
 
       <div className="talent-grid">
         <div className="talent-col">
@@ -615,21 +707,34 @@ export default async function TalentEnginePage() {
             orderOptions={orderOptions}
             pendingCount={matchesResult.count}
           />
-          <MarginLedgerCard
-            overflow={overflow}
-            rows={visibleLedger}
-            totals={{
-              placements: ledgerRows.length,
-              hours: ledgerTotals.totalHours,
-              avgSpread: ledgerTotals.avgSpread,
-              weeklyMargin: ledgerTotals.totalMargin,
-            }}
-            weekLabel={weekLabelFor(ledgerWeek)}
-          />
+          {recruiterView ? (
+            <RecruiterPlacementsCard plan={myPlan} rows={recruiterLedger} weekLabel={weekLabelFor(ledgerWeek)} />
+          ) : (
+            <>
+              <MarginLedgerCard
+                overflow={overflow}
+                rows={visibleLedger}
+                totals={{
+                  placements: ledgerRows.length,
+                  hours: ledgerTotals.totalHours,
+                  avgSpread: ledgerTotals.avgSpread,
+                  weeklyMargin: ledgerTotals.totalMargin,
+                }}
+                weekLabel={weekLabelFor(ledgerWeek)}
+              />
+              <TeamEconomicsCard entries={teamEconomics} />
+            </>
+          )}
         </div>
 
         <div className="talent-col">
-          <RevenueMarginCard summary={summary} />
+          {recruiterView ? null : (
+            <>
+              <RevenueMarginCard summary={summary} />
+              <UtilizationCard flags={deadTime} pct={bookUtilization} weekLabel={weekLabelFor(ledgerWeek)} />
+              <BreakEvenPanel defaultHours={hoursPerWeek} defaultSpread={minSpread} />
+            </>
+          )}
           <AgentActivityFeed events={activityResult.rows} />
           <CertificationTracker coverage={coverage} expiringCount={expiringCount} poolSize={certRows.length} />
         </div>
