@@ -37,6 +37,7 @@ import { ArrowLeft, CalendarClock, ClipboardCheck, Send, SlidersHorizontal } fro
 import { getTalentAccess } from "@/lib/talent-engine/access";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
 import { missingRequiredCerts } from "@/lib/talent-engine/policy";
+import { defaultVerticalOptions, normalizeVerticalOptions } from "@/lib/talent-engine/verticals";
 import {
   defaultTalentSettings,
   talentAutonomyTiers,
@@ -136,6 +137,7 @@ interface SettingsReadRow {
   target_markup_pct: number | null;
   default_hours_per_week: number | null;
   pay_rate_autonomy_tier: number | null;
+  vertical_options: string[] | null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -164,7 +166,7 @@ export default async function PlacementDeskPage() {
     readList<SettingsReadRow>(
       db
         .from("talent_settings")
-        .select("min_spread_per_hour, target_markup_pct, default_hours_per_week, pay_rate_autonomy_tier")
+        .select("min_spread_per_hour, target_markup_pct, default_hours_per_week, pay_rate_autonomy_tier, vertical_options")
         .limit(1),
     ),
 
@@ -236,6 +238,8 @@ export default async function PlacementDeskPage() {
     toNumber(settings?.default_hours_per_week, defaultTalentSettings.default_hours_per_week) ||
     defaultTalentSettings.default_hours_per_week;
   const autonomyTier = toAutonomyTier(settings?.pay_rate_autonomy_tier);
+  const configuredVerticals = normalizeVerticalOptions(settings?.vertical_options ?? []);
+  const verticalOptions = configuredVerticals.length > 0 ? configuredVerticals : [...defaultVerticalOptions];
 
   /* ---- Timesheet weeks, grouped per placement ---------------------------- */
 
@@ -354,6 +358,7 @@ export default async function PlacementDeskPage() {
             minSpreadPerHour={minSpread}
             payRateAutonomyTier={autonomyTier}
             targetMarkupPct={targetMarkupPct}
+            verticalOptions={verticalOptions}
           />
         </TalentCard>
       ) : null}

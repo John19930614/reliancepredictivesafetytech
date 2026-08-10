@@ -43,6 +43,7 @@ import {
   type CandidateStatus,
 } from "@/lib/talent-engine/types";
 import { splitList, parseOptionalNumber } from "./intake";
+import { VerticalChecklist, readVerticalsFromForm } from "./VerticalSelect";
 
 const noApproveReason =
   "Verifying a certification is the human gate that unblocks submittal — your role can see the claim but not confirm it.";
@@ -66,16 +67,30 @@ function sameList(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((entry, index) => entry === b[index]);
 }
 
+/**
+ * Order-insensitive compare for the vertical picker: the checklist renders in
+ * the configured list's order, so an untouched record would otherwise read as
+ * changed whenever its stored order differs.
+ */
+function sameSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const keys = new Set(a.map((entry) => entry.toLowerCase()));
+  return b.every((entry) => keys.has(entry.toLowerCase()));
+}
+
 export function CandidateManagePanel({
   candidate,
   canPropose,
   canApprove,
+  verticalOptions,
 }: {
   candidate: CandidateRow;
   /** Gates the edit fields — updateCandidate re-checks this on the server. */
   canPropose: boolean;
   /** Gates certification verification — verifyCandidateCertification re-checks it. */
   canApprove: boolean;
+  /** Configured trade list from talent_settings, for the vertical picker. */
+  verticalOptions?: string[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -150,8 +165,8 @@ export function CandidateManagePanel({
     const certifications = splitList(data.get("certifications"));
     if (!sameList(certifications, candidate.certifications)) patch.certifications = certifications;
 
-    const verticals = splitList(data.get("verticals"));
-    if (!sameList(verticals, candidate.verticals)) patch.verticals = verticals;
+    const verticals = readVerticalsFromForm(data);
+    if (!sameSet(verticals, candidate.verticals)) patch.verticals = verticals;
 
     const willingToRelocate = data.get("willing_to_relocate") === "on";
     if (willingToRelocate !== candidate.willing_to_relocate) patch.willingToRelocate = willingToRelocate;
@@ -348,16 +363,7 @@ export function CandidateManagePanel({
                 placeholder="CSP, CHST (comma-separated)"
               />
             </label>
-            <label className="talent-field" title={editTitle}>
-              <span>Verticals</span>
-              <input
-                defaultValue={candidate.verticals.join(", ")}
-                disabled={fieldsDisabled}
-                maxLength={300}
-                name="verticals"
-                placeholder="Pharma, Solar (comma-separated)"
-              />
-            </label>
+            <VerticalChecklist disabled={fieldsDisabled} options={verticalOptions} selected={candidate.verticals} />
             <label className="talent-field" title={editTitle}>
               <span>Location</span>
               <input

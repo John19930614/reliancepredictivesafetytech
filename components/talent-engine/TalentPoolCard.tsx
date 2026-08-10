@@ -15,12 +15,15 @@ export function TalentPoolCard({
   activeCount,
   canPropose,
   canApprove,
+  verticalOptions,
 }: {
   candidates: CandidateRow[];
   activeCount: number;
   canPropose: boolean;
   /** Verifying a certification is the gate that unblocks submittal. */
   canApprove: boolean;
+  /** Configured trade list from talent_settings, for the vertical pickers. */
+  verticalOptions?: string[];
 }) {
   return (
     <TalentCard
@@ -29,7 +32,7 @@ export function TalentPoolCard({
       tag={<TalentAiTag label="AI screening" />}
       title="EHS Talent Pool"
     >
-      {canPropose ? <CandidateCreateForm /> : null}
+      {canPropose ? <CandidateCreateForm verticalOptions={verticalOptions} /> : null}
       {candidates.length === 0 ? (
         <TalentEmpty
           hint="Sourced and screened EHS professionals land here with the hourly rate they are asking for."
@@ -69,7 +72,12 @@ export function TalentPoolCard({
                   </span>
                 </span>
                 {canPropose ? (
-                  <CandidateManagePanel candidate={candidate} canApprove={canApprove} canPropose={canPropose} />
+                  <CandidateManagePanel
+                    candidate={candidate}
+                    canApprove={canApprove}
+                    canPropose={canPropose}
+                    verticalOptions={verticalOptions}
+                  />
                 ) : null}
               </li>
             );

@@ -25,6 +25,11 @@ import { Loader2, Save } from "lucide-react";
 import { updateTalentSettings } from "@/app/employee/talent-engine/actions";
 import { validateHoursInput, validateRateInput } from "@/lib/talent-engine/pricing";
 import {
+  defaultVerticalOptions,
+  formatVerticalOptionsText,
+  parseVerticalOptionsText,
+} from "@/lib/talent-engine/verticals";
+import {
   talentAutonomyTierLabels,
   talentAutonomyTiers,
   type TalentAutonomyTier,
@@ -55,11 +60,14 @@ export function DeskSettingsPanel({
   targetMarkupPct,
   defaultHoursPerWeek,
   payRateAutonomyTier,
+  verticalOptions = defaultVerticalOptions as string[],
 }: {
   minSpreadPerHour: number;
   targetMarkupPct: number;
   defaultHoursPerWeek: number;
   payRateAutonomyTier: TalentAutonomyTier;
+  /** The vertical/trade list the intake pickers offer, one per line here. */
+  verticalOptions?: string[];
 }) {
   const router = useRouter();
   const fieldId = useId();
@@ -70,6 +78,7 @@ export function DeskSettingsPanel({
   const [markup, setMarkup] = useState(String(targetMarkupPct));
   const [hours, setHours] = useState(String(defaultHoursPerWeek));
   const [tier, setTier] = useState<TalentAutonomyTier>(payRateAutonomyTier);
+  const [verticalsText, setVerticalsText] = useState(formatVerticalOptionsText(verticalOptions));
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -98,12 +107,19 @@ export function DeskSettingsPanel({
       return;
     }
 
+    const verticals = parseVerticalOptionsText(verticalsText);
+    if (verticals.length === 0) {
+      setError("Keep at least one vertical — the pickers need something to offer.");
+      return;
+    }
+
     startTransition(async () => {
       const result: ActionResult = await updateTalentSettings({
         minSpreadPerHour: Number(minSpread.trim()),
         targetMarkupPct: markupValue,
         defaultHoursPerWeek: Number(hours.trim()),
         payRateAutonomyTier: tier,
+        verticalOptions: verticals,
       });
       if (!result?.ok) {
         setError(result?.error || firstFieldError(result) || "The settings could not be saved.");
@@ -176,6 +192,19 @@ export function DeskSettingsPanel({
               </option>
             ))}
           </select>
+        </label>
+
+        <label className="talent-field talent-field-wide" htmlFor={`${fieldId}-verticals`}>
+          <span>Verticals / trades (one per line)</span>
+          <textarea
+            className="talent-desk-verticals"
+            disabled={isPending}
+            id={`${fieldId}-verticals`}
+            onChange={(event) => setVerticalsText(event.target.value)}
+            placeholder={"Electrician\nCarpenter\nSolar"}
+            rows={6}
+            value={verticalsText}
+          />
         </label>
 
         <button

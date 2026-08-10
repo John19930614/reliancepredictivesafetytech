@@ -15,12 +15,15 @@ export function JobOrdersCard({
   canPropose,
   canSetRate,
   clients,
+  verticalOptions,
 }: {
   orders: JobOrderWithClient[];
   openCount: number;
   canPropose: boolean;
   canSetRate: boolean;
   clients: { id: string; name: string }[];
+  /** Configured trade list from talent_settings, for the vertical pickers. */
+  verticalOptions?: string[];
 }) {
   return (
     <TalentCard
@@ -29,7 +32,7 @@ export function JobOrdersCard({
       tag={<TalentAiTag label="AI scouting" />}
       title="Client Job Orders"
     >
-      {canPropose ? <JobOrderCreateForm canSetRate={canSetRate} clients={clients} /> : null}
+      {canPropose ? <JobOrderCreateForm canSetRate={canSetRate} clients={clients} verticalOptions={verticalOptions} /> : null}
       {orders.length === 0 ? (
         <TalentEmpty
           hint="Open requisitions appear here with the client's bill rate, which is what every spread is measured against."
@@ -61,7 +64,13 @@ export function JobOrdersCard({
                 </span>
               </span>
               {canPropose ? (
-                <JobOrderManagePanel canPropose={canPropose} canSetRate={canSetRate} clients={clients} order={order} />
+                <JobOrderManagePanel
+                  canPropose={canPropose}
+                  canSetRate={canSetRate}
+                  clients={clients}
+                  order={order}
+                  verticalOptions={verticalOptions}
+                />
               ) : null}
             </li>
           ))}

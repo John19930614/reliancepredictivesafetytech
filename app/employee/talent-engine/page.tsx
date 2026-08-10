@@ -20,6 +20,7 @@ import Link from "next/link";
 import { ClipboardCheck, Radar } from "lucide-react";
 import { buildConsoleSummary, computeSpread, computeWeeklyMargin, summariseLedger } from "@/lib/talent-engine/pricing";
 import { getTalentAccess, type TalentAccess } from "@/lib/talent-engine/access";
+import { defaultVerticalOptions, normalizeVerticalOptions } from "@/lib/talent-engine/verticals";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
 import {
   certExpiryWarningDays,
@@ -231,7 +232,13 @@ export default async function TalentEnginePage() {
       min_spread_per_hour: number | null;
       target_markup_pct: number | null;
       default_hours_per_week: number | null;
-    }>(db.from("talent_settings").select("min_spread_per_hour, target_markup_pct, default_hours_per_week").limit(1)),
+      vertical_options: string[] | null;
+    }>(
+      db
+        .from("talent_settings")
+        .select("min_spread_per_hour, target_markup_pct, default_hours_per_week, vertical_options")
+        .limit(1),
+    ),
 
     readList<JobOrderWithClient>(
       db
@@ -380,6 +387,10 @@ export default async function TalentEnginePage() {
   const settings = settingsResult.rows[0] ?? null;
   const minSpread = toNumber(settings?.min_spread_per_hour, defaultMinSpreadPerHour);
   const hoursPerWeek = toNumber(settings?.default_hours_per_week, defaultHoursPerWeek) || defaultHoursPerWeek;
+  // The configured trade list for the vertical pickers; the seeded defaults
+  // cover an environment where the 20260809210000 migration has not landed.
+  const configuredVerticals = normalizeVerticalOptions(settings?.vertical_options ?? []);
+  const verticalOptions = configuredVerticals.length > 0 ? configuredVerticals : [...defaultVerticalOptions];
 
   /* ---- Ledger: this week's timesheets against the active placements ------ */
 
@@ -503,12 +514,14 @@ export default async function TalentEnginePage() {
             clients={clientOptions}
             openCount={jobOrdersResult.count}
             orders={jobOrdersResult.rows}
+            verticalOptions={verticalOptions}
           />
           <TalentPoolCard
             activeCount={poolCountResult.count}
             canApprove={canApprove}
             canPropose={canPropose}
             candidates={candidatesResult.rows}
+            verticalOptions={verticalOptions}
           />
           <Link className="talent-leadlink" href="/employee/talent-engine/leads">
             <span aria-hidden="true" className="talent-leadlink-mark">

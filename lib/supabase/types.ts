@@ -7166,6 +7166,7 @@ export type Database = {
           target_markup_pct: number
           updated_at: string | null
           updated_by: string | null
+          vertical_options: string[]
         }
         Insert: {
           created_at?: string | null
@@ -7176,6 +7177,7 @@ export type Database = {
           target_markup_pct?: number
           updated_at?: string | null
           updated_by?: string | null
+          vertical_options?: string[]
         }
         Update: {
           created_at?: string | null
@@ -7186,6 +7188,7 @@ export type Database = {
           target_markup_pct?: number
           updated_at?: string | null
           updated_by?: string | null
+          vertical_options?: string[]
         }
         Relationships: []
       }

@@ -7795,6 +7795,38 @@ a.platform-card:hover {
   text-transform: none;
 }
 
+/* The Money floor panel's vertical-list editor (one option per line). */
+.talent-desk-verticals {
+  border: 1px solid var(--talent-line);
+  border-radius: 7px;
+  font-size: 0.85rem;
+  min-width: 0;
+  padding: 7px 9px;
+  resize: vertical;
+}
+
+/* Vertical / trade picker (VerticalSelect.tsx) — checkbox chips over the
+   configured options list, with an "other" input underneath. */
+.talent-vertical-grid {
+  display: grid;
+  gap: 4px 10px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.talent-vertical-option {
+  align-items: center;
+  display: flex;
+  font-size: 0.8rem;
+  gap: 6px;
+  min-width: 0;
+}
+
+.talent-vertical-option > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .talent-intake-submit {
   flex: 0 0 auto;
   grid-column: 1 / -1;

@@ -32,6 +32,7 @@ import {
   missingRequiredCerts,
   requiresHumanApproval,
 } from "@/lib/talent-engine/policy";
+import { defaultVerticalOptions, normalizeVerticalOptions } from "@/lib/talent-engine/verticals";
 import {
   computeMatchMoney,
   meetsSpreadFloor,
@@ -210,6 +211,7 @@ interface TalentSettings {
   targetMarkupPct: number;
   defaultHoursPerWeek: number;
   payRateAutonomyTier: TalentAutonomyTier;
+  verticalOptions: string[];
 }
 
 /**
@@ -221,11 +223,12 @@ interface TalentSettings {
 async function loadTalentSettings(supabase: any): Promise<TalentSettings> {
   const { data } = await supabase
     .from(tables.settings)
-    .select("id, min_spread_per_hour, target_markup_pct, default_hours_per_week, pay_rate_autonomy_tier")
+    .select("id, min_spread_per_hour, target_markup_pct, default_hours_per_week, pay_rate_autonomy_tier, vertical_options")
     .limit(1);
 
   const row = Array.isArray(data) ? data[0] : data;
   const tier = Number(row?.pay_rate_autonomy_tier);
+  const verticals = normalizeVerticalOptions(row?.vertical_options);
   return {
     id: typeof row?.id === "string" ? row.id : null,
     minSpreadPerHour: Number.isFinite(Number(row?.min_spread_per_hour))
@@ -241,6 +244,7 @@ async function loadTalentSettings(supabase: any): Promise<TalentSettings> {
     payRateAutonomyTier: (talentAutonomyTiers as readonly number[]).includes(tier)
       ? (tier as TalentAutonomyTier)
       : defaultTalentSettings.pay_rate_autonomy_tier,
+    verticalOptions: verticals.length > 0 ? verticals : [...defaultVerticalOptions],
   };
 }
 
@@ -1610,6 +1614,8 @@ export interface TalentSettingsPatch {
   targetMarkupPct?: number;
   defaultHoursPerWeek?: number;
   payRateAutonomyTier?: TalentAutonomyTier;
+  /** Replaces the vertical/trade list the intake pickers offer. */
+  verticalOptions?: string[];
 }
 
 /**
@@ -1651,6 +1657,18 @@ export async function updateTalentSettings(patch: TalentSettingsPatch): Promise<
       errors.payRateAutonomyTier = "Autonomy tier must be 1, 2, or 3.";
     } else update.pay_rate_autonomy_tier = Number(input.payRateAutonomyTier);
   }
+  if (input.verticalOptions !== undefined) {
+    if (!Array.isArray(input.verticalOptions)) {
+      errors.verticalOptions = "The vertical list must be a list.";
+    } else {
+      const options = normalizeVerticalOptions(input.verticalOptions);
+      if (options.length === 0) {
+        errors.verticalOptions = "Keep at least one vertical — the pickers need something to offer.";
+      } else {
+        update.vertical_options = options;
+      }
+    }
+  }
 
   const first = firstError(errors);
   if (first) return { ok: false, error: first, fieldErrors: errors };
@@ -1687,6 +1705,7 @@ export async function updateTalentSettings(patch: TalentSettingsPatch): Promise<
       target_markup_pct: before.targetMarkupPct,
       default_hours_per_week: before.defaultHoursPerWeek,
       pay_rate_autonomy_tier: before.payRateAutonomyTier,
+      vertical_options: before.verticalOptions,
     },
     update,
   );
