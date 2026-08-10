@@ -126,7 +126,7 @@ describe("portal module access", () => {
   });
 
   it("grants enough default visibility for invited employees to enter onboarding and mail", () => {
-    expect(defaultEmployeePortalModuleKeys).toEqual(["dashboard", "mobile_app", "employee_mail", "hr_onboarding", "hr_documents", "time_cards", "employee_time_off", "employee_calendar"]);
+    expect(defaultEmployeePortalModuleKeys).toEqual(["dashboard", "mobile_app", "employee_mail", "hr_onboarding", "hr_documents", "time_cards", "employee_time_off", "employee_calendar", "file_center"]);
     expect(canAccessEmployeePath("employee", "active", "/employee", defaultEmployeePortalModuleKeys)).toBe(true);
     expect(canAccessEmployeePath("employee", "active", "/employee/mail", defaultEmployeePortalModuleKeys)).toBe(true);
     expect(canAccessEmployeePath("employee", "active", "/employee/hr-onboarding", defaultEmployeePortalModuleKeys)).toBe(true);
@@ -136,6 +136,9 @@ describe("portal module access", () => {
     // New employees get the phone app by default; the data-bearing tabs inside
     // it still need their own grants, so this hands out no extra records.
     expect(canAccessEmployeePath("employee", "active", "/m", defaultEmployeePortalModuleKeys)).toBe(true);
+    // The File Center is default-visible: filing is whole-team infrastructure,
+    // and the tables' RLS already reads at portal-employee level.
+    expect(canAccessEmployeePath("employee", "active", "/employee/files", defaultEmployeePortalModuleKeys)).toBe(true);
     expect(canAccessEmployeePath("employee", "active", "/employee/sales", defaultEmployeePortalModuleKeys)).toBe(false);
     expect(canAccessEmployeePath("employee", "active", "/employee/parking-lots", defaultEmployeePortalModuleKeys)).toBe(false);
   });
