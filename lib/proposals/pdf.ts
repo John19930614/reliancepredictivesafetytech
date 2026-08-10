@@ -34,18 +34,20 @@ import { proposalFooterText } from "./types";
 
 const PAGE_WIDTH = 612; // US Letter at 72dpi
 const PAGE_HEIGHT = 792;
-const MARGIN_X = 46;
-const MARGIN_TOP = 46;
+const MARGIN_X = 44;
+const MARGIN_TOP = 42;
 /** Deep enough to clear the footer rule and its text on every page. */
-const MARGIN_BOTTOM = 46;
+const MARGIN_BOTTOM = 50;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN_X * 2;
 
 const NAVY = rgb(0.047, 0.204, 0.314);
+const NAVY_2 = rgb(0.086, 0.384, 0.498);
 const GOLD = rgb(0.788, 0.576, 0.169);
 const INK = rgb(0.086, 0.141, 0.184);
 const MUTED = rgb(0.35, 0.42, 0.49);
 const RULE = rgb(0.78, 0.82, 0.855);
 const BAND = rgb(0.945, 0.965, 0.98);
+const GOLD_TINT = rgb(0.984, 0.949, 0.867);
 
 /** Two columns for the commercial terms — the same shape the print CSS uses. */
 const COLUMN_GAP = 14;
@@ -199,29 +201,29 @@ class Layout {
 /* -------------------------------------------------------------------------- */
 
 function drawSectionHeading(layout: Layout, number: string, title: string): void {
-  const size = 10.5;
+  const size = 12.2;
   // Keep the heading with at least the first line of whatever follows.
   layout.ensure(size * 3);
-  layout.space(9);
+  layout.space(10);
   layout.y -= size;
 
-  const badgeWidth = 17;
+  const badgeWidth = 24;
   layout.page.drawRectangle({
     x: MARGIN_X,
-    y: layout.y - 2.5,
+    y: layout.y - 5,
     width: badgeWidth,
-    height: size + 3,
+    height: 21,
     color: NAVY,
   });
   layout.page.drawText(number, {
-    x: MARGIN_X + 3.5,
-    y: layout.y + 0.5,
-    size: 7.5,
+    x: MARGIN_X + 5.5,
+    y: layout.y,
+    size: 8.8,
     font: layout.fonts.bold,
-    color: rgb(1, 1, 1),
+    color: GOLD,
   });
   layout.page.drawText(toPdfText(title), {
-    x: MARGIN_X + badgeWidth + 7,
+    x: MARGIN_X + badgeWidth + 10,
     y: layout.y,
     size,
     font: layout.fonts.bold,
@@ -321,7 +323,13 @@ function drawBullets(layout: Layout, items: readonly string[]): void {
       layout.ensure(8.6 * 1.32);
       layout.y -= 8.6 * 1.32;
       if (first) {
-        layout.page.drawText("-", { x: MARGIN_X + 2, y: layout.y, size: 8.6, font: layout.fonts.regular, color: GOLD });
+        layout.page.drawRectangle({
+          x: MARGIN_X + 3,
+          y: layout.y + 2.5,
+          width: 4.5,
+          height: 4.5,
+          color: GOLD,
+        });
         first = false;
       }
       layout.page.drawText(line, {
@@ -563,46 +571,44 @@ export async function renderProposalPdf({ model, documentTitle }: ProposalPdfOpt
 
   /* --- Masthead --------------------------------------------------------- */
   const mastheadTop = layout.y;
-  const sealSize = 46;
+  const sealSize = 58;
   if (seal) {
     layout.page.drawImage(seal, {
       x: MARGIN_X,
-      y: mastheadTop - sealSize + 3,
+      y: mastheadTop - sealSize,
       width: sealSize,
       height: sealSize,
     });
   }
-  const textX = seal ? MARGIN_X + sealSize + 11 : MARGIN_X;
+  const textX = seal ? MARGIN_X + sealSize + 14 : MARGIN_X;
   layout.page.drawText(toPdfText(model.wordmark), {
     x: textX,
-    y: mastheadTop - 17,
-    size: 13,
+    y: mastheadTop - 21,
+    size: 15.2,
     font: fonts.bold,
     color: NAVY,
   });
-  const stamp = toPdfText(`${model.revisionLabel ?? model.currentRevisionLabel} - ${model.statusLabel}`);
-  const stampWidth = fonts.regular.widthOfTextAtSize(stamp, 7.5);
-  const stampX = PAGE_WIDTH - MARGIN_X - Math.max(stampWidth + 12, 72);
+  const stamp = "PROPOSAL";
+  const stampWidth = fonts.bold.widthOfTextAtSize(stamp, 8.8);
+  const stampX = PAGE_WIDTH - MARGIN_X - Math.max(stampWidth + 18, 78);
   layout.page.drawRectangle({
     x: stampX,
-    y: mastheadTop - 19,
+    y: mastheadTop - 23,
     width: Math.max(stampWidth + 12, 72),
-    height: 18,
-    color: rgb(1, 1, 1),
-    borderColor: RULE,
-    borderWidth: 0.4,
+    height: 22,
+    color: NAVY,
   });
   layout.page.drawText(stamp, {
-    x: stampX + 6,
-    y: mastheadTop - 13,
-    size: 7.5,
-    font: fonts.regular,
-    color: MUTED,
+    x: stampX + 9,
+    y: mastheadTop - 16.2,
+    size: 8.8,
+    font: fonts.bold,
+    color: rgb(1, 1, 1),
   });
   layout.page.drawText(toPdfText(model.docline.toUpperCase()), {
     x: textX,
-    y: mastheadTop - 31,
-    size: 7.2,
+    y: mastheadTop - 37,
+    size: 7.8,
     font: fonts.regular,
     color: MUTED,
   });
@@ -610,24 +616,49 @@ export async function renderProposalPdf({ model, documentTitle }: ProposalPdfOpt
   const confWidth = fonts.bold.widthOfTextAtSize(conf, 7.2);
   layout.page.drawText(conf, {
     x: PAGE_WIDTH - MARGIN_X - confWidth,
-    y: mastheadTop - 31,
+    y: mastheadTop - 37,
     size: 7.2,
     font: fonts.bold,
     color: GOLD,
   });
-  layout.y = mastheadTop - sealSize - 7;
+  const revisionTag = toPdfText(`${model.revisionLabel ?? model.currentRevisionLabel} - ${model.statusLabel}`);
+  const revisionTagWidth = fonts.regular.widthOfTextAtSize(revisionTag, 7.2);
+  layout.page.drawRectangle({
+    x: PAGE_WIDTH - MARGIN_X - revisionTagWidth - 14,
+    y: mastheadTop - 56,
+    width: revisionTagWidth + 14,
+    height: 16,
+    color: rgb(1, 1, 1),
+    borderColor: RULE,
+    borderWidth: 0.4,
+  });
+  layout.page.drawText(revisionTag, {
+    x: PAGE_WIDTH - MARGIN_X - revisionTagWidth - 7,
+    y: mastheadTop - 51,
+    size: 7.2,
+    font: fonts.bold,
+    color: NAVY,
+  });
+  layout.y = mastheadTop - sealSize - 9;
   layout.page.drawRectangle({
     x: MARGIN_X,
     y: layout.y,
     width: CONTENT_WIDTH,
-    height: 2,
+    height: 3,
+    color: NAVY,
+  });
+  layout.page.drawRectangle({
+    x: MARGIN_X,
+    y: layout.y,
+    width: 128,
+    height: 3,
     color: GOLD,
   });
   layout.space(14);
 
-  layout.text(model.headline, { font: fonts.bold, size: 15, color: NAVY, lineHeight: 18 });
+  layout.text(model.headline, { font: fonts.bold, size: 19.2, color: NAVY, lineHeight: 22.4 });
   layout.space(2);
-  layout.text(model.subtitle, { size: 8.4, color: MUTED });
+  layout.text(model.subtitle, { size: 9.2, color: MUTED });
   layout.space(8);
 
   /* --- Party / meta table ----------------------------------------------- */
@@ -653,14 +684,14 @@ export async function renderProposalPdf({ model, documentTitle }: ProposalPdfOpt
       y: layout.y,
       width: labelWidth,
       height: rowHeight,
-      color: BAND,
+      color: NAVY,
     });
     layout.page.drawText(toPdfText(label), {
       x: MARGIN_X + 5,
       y: top - 12,
       size: 7.6,
       font: fonts.bold,
-      color: NAVY,
+      color: rgb(1, 1, 1),
     });
     valueLines.forEach((line, index) => {
       layout.page.drawText(line, {
@@ -729,7 +760,8 @@ export async function renderProposalPdf({ model, documentTitle }: ProposalPdfOpt
   for (const row of model.totalRows) {
     drawFeeRow(layout, ["", "", "", row.label, row.value], {
       bold: row.emphasis === "total",
-      background: row.emphasis === "total" ? BAND : undefined,
+      background: row.emphasis === "total" ? NAVY : row.emphasis === "deposit" ? GOLD_TINT : BAND,
+      color: row.emphasis === "total" ? rgb(1, 1, 1) : INK,
     });
   }
 
@@ -801,7 +833,7 @@ async function drawSignatureBlocks(
   doc: PDFDocument,
   model: ProposalDocumentModel,
 ): Promise<void> {
-  const boxHeight = 92;
+  const boxHeight = 112;
   layout.ensure(boxHeight + 6);
   const top = layout.y;
   layout.y -= boxHeight;
@@ -834,7 +866,7 @@ async function drawSignatureBlocks(
       color: NAVY,
     });
 
-    let lineY = top - 42;
+    let lineY = top - 44;
     for (const label of box.lines) {
       layout.page.drawLine({
         start: { x: x + 8, y: lineY },
@@ -849,7 +881,7 @@ async function drawSignatureBlocks(
         font: layout.fonts.regular,
         color: MUTED,
       });
-      lineY -= 22;
+      lineY -= 25;
     }
 
     if (index !== 1) continue;

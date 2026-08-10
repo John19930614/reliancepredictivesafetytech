@@ -7,12 +7,15 @@
 
 import "server-only";
 
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import {
   AlignmentType,
   BorderStyle,
   Document,
   Footer,
   HeadingLevel,
+  ImageRun,
   Packer,
   Paragraph,
   ShadingType,
@@ -24,6 +27,7 @@ import {
   VerticalAlignTable,
   WidthType,
   convertInchesToTwip,
+  type IParagraphOptions,
   type ITableCellOptions,
 } from "docx";
 import type {
@@ -43,9 +47,13 @@ const MUTED = "5D6F7D";
 const LINE = "DBE2E9";
 const BAND = "F1F6FA";
 const BAND_2 = "EEF3F8";
+const GOLD_TINT = "FBF2DD";
 const WHITE = "FFFFFF";
 
-const TABLE_WIDTH = 9020;
+// Matches the generated PDF / print layout: Letter page, narrow proposal
+// margins, and full-width business tables rather than Word's roomier memo
+// default. This is a named proposal-export override to the 9360-DXA baseline.
+const TABLE_WIDTH = 10680;
 
 type Block = Paragraph | Table;
 
@@ -74,11 +82,13 @@ function para(
     alignment?: (typeof AlignmentType)[keyof typeof AlignmentType];
     spacingAfter?: number;
     spacingBefore?: number;
+    border?: IParagraphOptions["border"];
   } = {},
 ): Paragraph {
   return new Paragraph({
     heading: options.heading,
     alignment: options.alignment,
+    border: options.border,
     spacing: { before: options.spacingBefore ?? 0, after: options.spacingAfter ?? 120 },
     children: [textRun(text, options)],
   });
@@ -99,11 +109,12 @@ function bullet(text: string): Paragraph {
 function heading(number: string, title: string): Paragraph {
   return new Paragraph({
     heading: HeadingLevel.HEADING_2,
-    spacing: { before: 260, after: 120 },
+    border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: LINE, space: 4 } },
+    spacing: { before: 240, after: 120 },
     keepNext: true,
     children: [
-      textRun(`${number}  `, { bold: true, color: GOLD, size: 25 }),
-      textRun(title, { bold: true, color: NAVY, size: 25 }),
+      textRun(`${number}  `, { bold: true, color: GOLD, size: 27 }),
+      textRun(title, { bold: true, color: NAVY, size: 27 }),
     ],
   });
 }
@@ -135,6 +146,21 @@ function noBorders(): ITableCellOptions["borders"] {
   return { top: line, bottom: line, left: line, right: line };
 }
 
+function border(color = LINE, size = 6): ITableCellOptions["borders"] {
+  const line = { style: BorderStyle.SINGLE, size, color };
+  return { top: line, bottom: line, left: line, right: line };
+}
+
+function topAccentBorders(): ITableCellOptions["borders"] {
+  const quiet = { style: BorderStyle.SINGLE, size: 4, color: LINE };
+  return {
+    top: { style: BorderStyle.SINGLE, size: 14, color: NAVY_2 },
+    bottom: quiet,
+    left: quiet,
+    right: quiet,
+  };
+}
+
 function table(rows: TableRow[], widths?: number[]): Table {
   return new Table({
     width: { size: TABLE_WIDTH, type: WidthType.DXA },
@@ -142,6 +168,73 @@ function table(rows: TableRow[], widths?: number[]): Table {
     columnWidths: widths,
     rows,
   });
+}
+
+async function sealImageRun(): Promise<ImageRun | null> {
+  try {
+    const bytes = await readFile(path.join(process.cwd(), "public", "reliance-seal-transparent.png"));
+    return new ImageRun({
+      type: "png",
+      data: bytes,
+      transformation: { width: 72, height: 72 },
+      altText: { title: "Reliance seal", description: "Reliance seal", name: "Reliance seal" },
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function masthead(model: ProposalDocumentModel): Promise<Block[]> {
+  const seal = await sealImageRun();
+  const widths = [1000, 6500, TABLE_WIDTH - 7500];
+  const row = new TableRow({
+    children: [
+      cell(
+        [new Paragraph({ alignment: AlignmentType.LEFT, spacing: { after: 0 }, children: seal ? [seal] : [] })],
+        { width: widths[0], borders: noBorders(), verticalAlign: VerticalAlignTable.CENTER, margins: { top: 0, bottom: 0, left: 0, right: 80 } },
+      ),
+      cell(
+        [
+          para(model.wordmark, { bold: true, color: NAVY, size: 35, spacingAfter: 40 }),
+          para(model.docline.toUpperCase(), { color: MUTED, size: 18, spacingAfter: 0 }),
+        ],
+        { width: widths[1], borders: noBorders(), verticalAlign: VerticalAlignTable.CENTER },
+      ),
+      cell(
+        [
+          para("PROPOSAL", { bold: true, color: WHITE, size: 18, alignment: AlignmentType.CENTER, spacingAfter: 35 }),
+          para("CONFIDENTIAL", { bold: true, color: GOLD, size: 16, alignment: AlignmentType.RIGHT, spacingAfter: 35 }),
+          para(`${model.revisionLabel ?? model.currentRevisionLabel} · ${model.statusLabel}`, {
+            bold: true,
+            color: WHITE,
+            size: 16,
+            alignment: AlignmentType.RIGHT,
+            spacingAfter: 0,
+          }),
+        ],
+        { width: widths[2], fill: NAVY, borders: noBorders(), verticalAlign: VerticalAlignTable.CENTER },
+      ),
+    ],
+  });
+
+  const divider = new TableRow({
+    children: [
+      cell([blank()], { width: 1900, fill: GOLD, borders: noBorders(), margins: { top: 20, bottom: 20, left: 0, right: 0 } }),
+      cell([blank()], {
+        width: TABLE_WIDTH - 1900,
+        columnSpan: 2,
+        fill: NAVY,
+        borders: noBorders(),
+        margins: { top: 20, bottom: 20, left: 0, right: 0 },
+      }),
+    ],
+  });
+
+  return [
+    table([row], widths),
+    table([divider], [1900, TABLE_WIDTH - 1900]),
+    new Paragraph({ text: "", spacing: { after: 180 } }),
+  ];
 }
 
 function partyParagraphs(block: DocumentPartyBlock): Paragraph[] {
@@ -167,15 +260,15 @@ function metaTable(model: ProposalDocumentModel): Table {
         new TableRow({
           children: [
             cell([para(label, { bold: true, color: WHITE, size: 17, spacingAfter: 0 })], {
-              width: 2300,
+              width: 2500,
               fill: NAVY,
               verticalAlign: VerticalAlignTable.CENTER,
             }),
-            cell(value, { width: TABLE_WIDTH - 2300 }),
+            cell(value, { width: TABLE_WIDTH - 2500 }),
           ],
         }),
     ),
-    [2300, TABLE_WIDTH - 2300],
+    [2500, TABLE_WIDTH - 2500],
   );
 }
 
@@ -189,7 +282,7 @@ function pillsTable(model: ProposalDocumentModel): Table {
           const pill = group[offset];
           return cell(
             pill ? [para(`${pill.label}: ${pill.value}`, { bold: true, color: NAVY, size: 18, spacingAfter: 0 })] : [blank()],
-            { width: TABLE_WIDTH / 3, fill: BAND, borders: noBorders() },
+            { width: TABLE_WIDTH / 3, fill: WHITE, borders: border(), margins: { top: 70, bottom: 70, left: 120, right: 120 } },
           );
         }),
       }),
@@ -199,7 +292,7 @@ function pillsTable(model: ProposalDocumentModel): Table {
 }
 
 function feeTable(groups: DocumentFeeGroup[], totals: ProposalDocumentModel["totalRows"]): Table {
-  const widths = [2100, 3500, 760, 1240, 1420];
+  const widths = [2400, 4300, 760, 1540, 1680];
   const rows: TableRow[] = [
     new TableRow({
       tableHeader: true,
@@ -230,7 +323,7 @@ function feeTable(groups: DocumentFeeGroup[], totals: ProposalDocumentModel["tot
   }
 
   for (const total of totals) {
-    const fill = total.emphasis === "total" ? NAVY : total.emphasis === "deposit" ? "FBF2DD" : BAND_2;
+    const fill = total.emphasis === "total" ? NAVY : total.emphasis === "deposit" ? GOLD_TINT : BAND_2;
     const color = total.emphasis === "total" ? WHITE : NAVY;
     rows.push(
       new TableRow({
@@ -278,7 +371,7 @@ function termTable(terms: DocumentTerm[]): Table {
                   para(term.body, { color: INK, size: 17, spacingAfter: 0 }),
                 ]
               : [blank()],
-            { width: TABLE_WIDTH / 2, fill: WHITE },
+            { width: TABLE_WIDTH / 2, fill: WHITE, borders: topAccentBorders(), margins: { top: 100, bottom: 100, left: 120, right: 120 } },
           );
         }),
       }),
@@ -298,12 +391,21 @@ function pushScope(children: Block[], entries: ProposalDocumentModel["phaseScope
   }
 }
 
+function signatureLine(label: string, spacingBefore: number, color = MUTED): Paragraph {
+  return para(label, {
+    color,
+    size: 18,
+    spacingBefore,
+    spacingAfter: 80,
+    border: { top: { style: BorderStyle.SINGLE, size: 6, color: "4A5A6A", space: 4 } },
+  });
+}
+
 export async function renderProposalDocx(model: ProposalDocumentModel): Promise<Buffer> {
   const children: Block[] = [
-    para(model.wordmark, { bold: true, color: NAVY, size: 34, spacingAfter: 30 }),
-    para(model.docline.toUpperCase(), { color: MUTED, size: 18, spacingAfter: 120 }),
-    para(model.headline, { heading: HeadingLevel.TITLE, bold: true, color: NAVY, size: 42, spacingAfter: 80 }),
-    para(model.subtitle, { color: MUTED, size: 21, spacingAfter: 150 }),
+    ...(await masthead(model)),
+    para(model.headline, { bold: true, color: NAVY, size: 52, spacingAfter: 80 }),
+    para(model.subtitle, { color: MUTED, size: 23, spacingAfter: 160 }),
     metaTable(model),
     heading("01", "Executive Summary"),
     para(model.summary, { size: 21 }),
@@ -320,7 +422,16 @@ export async function renderProposalDocx(model: ProposalDocumentModel): Promise<
                 ],
               }),
             ],
-            { width: TABLE_WIDTH, fill: BAND },
+            {
+              width: TABLE_WIDTH,
+              fill: BAND,
+              borders: {
+                top: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+                bottom: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+                left: { style: BorderStyle.SINGLE, size: 18, color: GOLD },
+                right: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+              },
+            },
           ),
         ],
       }),
@@ -372,15 +483,15 @@ export async function renderProposalDocx(model: ProposalDocumentModel): Promise<
           children: [
             cell([
               para("Client Acceptance", { bold: true, color: NAVY, size: 22 }),
-              para("Authorized Signature / Date", { color: MUTED, size: 18, spacingBefore: 260 }),
-              para("Printed Name / Title", { color: MUTED, size: 18, spacingBefore: 180 }),
-              para("Purchase Order Number, if applicable", { color: MUTED, size: 18, spacingBefore: 180 }),
-            ]),
+              signatureLine("Authorized Signature / Date", 260),
+              signatureLine("Printed Name / Title", 180),
+              signatureLine("Purchase Order Number, if applicable", 180),
+            ], { margins: { top: 180, bottom: 180, left: 180, right: 180 } }),
             cell([
               para("Seller Acceptance", { bold: true, color: NAVY, size: 22 }),
-              para(signer, { color: INK, size: 19, spacingBefore: 260 }),
+              signatureLine(signer, 260, INK),
               ...(model.signature?.signedOn ? [para(`Signed ${model.signature.signedOn}`, { color: MUTED, size: 17 })] : []),
-            ]),
+            ], { margins: { top: 180, bottom: 180, left: 180, right: 180 } }),
           ],
         }),
       ],
