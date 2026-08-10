@@ -83,6 +83,7 @@ export const portalModuleCatalog = [
   { key: "employee_time_off", label: "Time Off", group: "People", pathPrefixes: ["/employee/time-off"] },
   { key: "employee_calendar", label: "Calendar", group: "People", pathPrefixes: ["/employee/calendar"] },
   { key: "master_document_library", label: "Master Document Library", group: "Governance", pathPrefixes: ["/employee/documents"] },
+  { key: "file_center", label: "File Center", group: "Governance", pathPrefixes: ["/employee/files"] },
   { key: "ai_document_builder", label: "Document Builder", group: "Governance", pathPrefixes: ["/employee/document-builder"] },
   { key: "legal_issues", label: "Legal Issues", group: "Governance", pathPrefixes: ["/employee/legal-issues"] },
   { key: "legal_register", label: "Legal Register", group: "Governance", pathPrefixes: ["/employee/legal-register"] },
@@ -107,7 +108,7 @@ export type PortalModule = (typeof portalModuleCatalog)[number];
 export type PortalModuleKey = PortalModule["key"];
 
 export const portalModuleKeys = portalModuleCatalog.map((module) => module.key);
-export const defaultEmployeePortalModuleKeys = ["dashboard", "mobile_app", "employee_mail", "hr_onboarding", "hr_documents", "time_cards", "employee_time_off", "employee_calendar"] as const satisfies readonly PortalModuleKey[];
+export const defaultEmployeePortalModuleKeys = ["dashboard", "mobile_app", "employee_mail", "hr_onboarding", "hr_documents", "time_cards", "employee_time_off", "employee_calendar", "file_center"] as const satisfies readonly PortalModuleKey[];
 
 function normalizePortalPath(pathname: string) {
   const [pathWithoutHash] = pathname.split("#", 1);

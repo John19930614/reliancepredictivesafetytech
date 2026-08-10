@@ -1,6 +1,7 @@
 import { computeMarkupPct, computeSpread, computeWeeklyMargin, meetsSpreadFloor } from "@/lib/talent-engine/pricing";
 import { DeskTimesheetForm } from "./DeskTimesheetForm";
 import { MatchRateStrip } from "./MatchRateStrip";
+import { RecruiterAssign, type RecruiterOption } from "./RecruiterAssign";
 import { formatCurrency, formatDay, formatNumber, joinMeta, toNumber } from "./format";
 
 /**
@@ -23,6 +24,7 @@ export interface DeskPlacementRow {
   pay_rate: number | null;
   start_date: string | null;
   status: string;
+  recruiter_id: string | null;
   candidate: { id: string; full_name: string } | null;
   job_order: {
     id: string;
@@ -55,6 +57,9 @@ export function DeskPlacementCard({
   hoursPerWeek,
   canPropose,
   weekStarting,
+  canManagePlacements = false,
+  recruiterOptions = [],
+  recruiterName = null,
 }: {
   placement: DeskPlacementRow;
   /** Recent timesheets for this placement, newest week first. */
@@ -66,6 +71,12 @@ export function DeskPlacementCard({
   canPropose: boolean;
   /** The current ISO Monday, computed on the server so the form never hydrates differently. */
   weekStarting: string;
+  /** Gates the recruiter-assignment control. */
+  canManagePlacements?: boolean;
+  /** People with commission plans, assignable as this placement's recruiter. */
+  recruiterOptions?: RecruiterOption[];
+  /** Resolved display name of the current recruiter, for the read-only line. */
+  recruiterName?: string | null;
 }) {
   const billRate = toNumber(placement.bill_rate);
   const payRate = toNumber(placement.pay_rate);
@@ -118,7 +129,17 @@ export function DeskPlacementCard({
         {belowFloor ? (
           <span className="talent-desk-badge talent-desk-badge-flag">Placed below the agency floor</span>
         ) : null}
+        {/* Dead-time flag (build review, 2026-08-07): an active placement with
+            no hours for the current week is being paid for without billing. */}
+        {weeks.some((sheet) => sheet.week_starting === weekStarting) ? null : (
+          <span className="talent-desk-badge talent-desk-badge-flag">No hours this week — dead time</span>
+        )}
+        {recruiterName ? <span className="talent-desk-badge">Recruiter: {recruiterName}</span> : null}
       </p>
+
+      {canManagePlacements ? (
+        <RecruiterAssign current={placement.recruiter_id} options={recruiterOptions} placementId={placement.id} />
+      ) : null}
 
       <MatchRateStrip
         belowFloor={belowFloor}

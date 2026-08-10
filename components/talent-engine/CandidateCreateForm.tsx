@@ -16,8 +16,9 @@ import { useRouter } from "next/navigation";
 import { Loader2, UserPlus } from "lucide-react";
 import { createCandidate } from "@/app/employee/talent-engine/actions";
 import { splitList, parseOptionalNumber } from "./intake";
+import { VerticalChecklist, readVerticalsFromForm } from "./VerticalSelect";
 
-export function CandidateCreateForm() {
+export function CandidateCreateForm({ verticalOptions }: { verticalOptions?: string[] } = {}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -43,7 +44,7 @@ export function CandidateCreateForm() {
         phone: String(data.get("phone") ?? "").trim() || null,
         yearsExperience: yearsExperience === null ? null : Math.trunc(yearsExperience),
         certifications: splitList(data.get("certifications")),
-        verticals: splitList(data.get("verticals")),
+        verticals: readVerticalsFromForm(data),
         location: String(data.get("location") ?? "").trim() || null,
         willingToRelocate: data.get("willing_to_relocate") === "on",
         payExpectation,
@@ -98,10 +99,7 @@ export function CandidateCreateForm() {
             <span>Certifications</span>
             <input name="certifications" placeholder="CSP, CHST (comma-separated)" maxLength={300} />
           </label>
-          <label className="talent-field">
-            <span>Verticals</span>
-            <input name="verticals" placeholder="Pharma, Solar (comma-separated)" maxLength={300} />
-          </label>
+          <VerticalChecklist options={verticalOptions} />
           <label className="talent-field">
             <span>Location</span>
             <input name="location" placeholder="e.g. Phoenix, AZ" maxLength={120} />

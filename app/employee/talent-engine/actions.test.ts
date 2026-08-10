@@ -30,6 +30,9 @@ import {
   restoreSourcingLead,
   runSourcingNow,
   setJobOrderStatus,
+  saveCommissionPlan,
+  setCandidateCertificationDates,
+  setPlacementRecruiter,
   submitMatch,
   updateCandidate,
   updateJobOrder,
@@ -58,7 +61,7 @@ const LEAD_ID = "77777777-7777-4777-8777-777777777777";
 // ---------------------------------------------------------------------------
 interface QueryRecord {
   table: string;
-  op: "select" | "insert" | "update" | "delete";
+  op: "select" | "insert" | "update" | "upsert" | "delete";
   payload?: Record<string, unknown>;
   selected?: string;
   filters: Array<[string, unknown]>;
@@ -97,12 +100,25 @@ function createSupabaseMock(routes: Record<string, Route>) {
         record.payload = payload;
         return api;
       },
+      upsert(payload: Record<string, unknown>) {
+        record.op = "upsert";
+        record.payload = payload;
+        return api;
+      },
       delete() {
         record.op = "delete";
         return api;
       },
       eq(column: string, value: unknown) {
         record.filters.push([column, value]);
+        return api;
+      },
+      ilike(column: string, value: unknown) {
+        record.filters.push([column, value]);
+        return api;
+      },
+      in(column: string, values: unknown) {
+        record.filters.push([column, values]);
         return api;
       },
       is: () => api,
@@ -326,6 +342,38 @@ describe("permission matrix — createPlacement", () => {
     });
   });
 
+  it("credits the match's proposer as the placement's recruiter", async () => {
+    const proposer = "7b9a1c34-52de-4f8a-9c01-3e4f5a6b7c8d";
+    const supabase = createSupabaseMock({
+      "talent_matches:select": { data: match({ status: "submitted", created_by: proposer }) },
+      "talent_candidates:select": {
+        data: candidate({ certifications: ["CSP"], verified_certifications: ["CSP"] }),
+      },
+      "talent_job_orders:select": { data: jobOrder() },
+      "talent_settings:select": { data: settingsRow() },
+      "talent_placements:insert": { data: { id: PLACEMENT_ID } },
+      "talent_matches:update": { data: [{ id: MATCH_ID }] },
+      "talent_activity_log:insert": {},
+    });
+    signIn("company_admin", supabase);
+
+    await createPlacement(MATCH_ID, "2026-09-01");
+
+    expect(findCall(supabase, "talent_placements", "insert")?.payload).toMatchObject({ recruiter_id: proposer });
+  });
+
+  it("reassigns a placement's recruiter with canManagePlacements", async () => {
+    const nextRecruiter = "7b9a1c34-52de-4f8a-9c01-3e4f5a6b7c8d";
+    const supabase = createSupabaseMock({
+      "talent_placements:select": { data: { id: PLACEMENT_ID, recruiter_id: null, candidate_id: CANDIDATE_ID } },
+      "talent_placements:update": { data: [{ id: PLACEMENT_ID }] },
+    });
+    signIn("company_admin", supabase);
+
+    expect(await setPlacementRecruiter(PLACEMENT_ID, nextRecruiter)).toEqual({ ok: true });
+    expect(findCall(supabase, "talent_placements", "update")?.payload).toEqual({ recruiter_id: nextRecruiter });
+  });
+
   it("DENIES createPlacement to a recruiter without canManagePlacements", async () => {
     const supabase = createSupabaseMock({});
     signIn("employee", supabase);
@@ -475,6 +523,9 @@ describe("permission matrix — the read-only account manager", () => {
     expect((await createPlacement(MATCH_ID, "2026-09-01")).ok).toBe(false);
     expect((await logTimesheet(PLACEMENT_ID, "2026-09-07", 40)).ok).toBe(false);
     expect((await updateTalentSettings({ minSpreadPerHour: 1 })).ok).toBe(false);
+    expect((await setCandidateCertificationDates(CANDIDATE_ID, "CSP", "2026-01-01", "2027-01-01")).ok).toBe(false);
+    expect((await setPlacementRecruiter(PLACEMENT_ID, CANDIDATE_ID)).ok).toBe(false);
+    expect((await saveCommissionPlan({ userId: CANDIDATE_ID, baseSalary: 52000, commissionPct: 5 })).ok).toBe(false);
 
     expect(supabase.calls).toHaveLength(0);
     expect(auditMock).not.toHaveBeenCalled();
@@ -1016,6 +1067,113 @@ describe("verifyCandidateCertification", () => {
     await createCandidate({ fullName: "Dana Reyes", certifications: ["CSP"], ...({ verified_certifications: ["CSP"] } as any) });
 
     expect(findCall(supabase, "talent_candidates", "insert")?.payload?.verified_certifications).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// Commission plans — compensation is platform-owner territory
+// ===========================================================================
+
+describe("saveCommissionPlan", () => {
+  const TARGET_USER = "7b9a1c34-52de-4f8a-9c01-3e4f5a6b7c8d";
+
+  it("upserts a plan for the platform owner", async () => {
+    const supabase = createSupabaseMock({
+      "talent_commission_plans:select": { data: null },
+      "talent_commission_plans:upsert": { data: [{ id: SETTINGS_ID }] },
+    });
+    signIn("platform_admin", supabase);
+
+    expect(await saveCommissionPlan({ userId: TARGET_USER, baseSalary: 70000, commissionPct: 5 })).toEqual({
+      ok: true,
+    });
+    expect(findCall(supabase, "talent_commission_plans", "upsert")?.payload).toMatchObject({
+      user_id: TARGET_USER,
+      base_salary: 70000,
+      commission_pct: 5,
+      active: true,
+    });
+  });
+
+  it("DENIES compensation writes to a company_admin — owner territory", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("company_admin", supabase);
+
+    const result = await saveCommissionPlan({ userId: TARGET_USER, baseSalary: 70000, commissionPct: 5 });
+
+    expect(result).toEqual({ ok: false, error: "Admin role required to set compensation." });
+    expect(supabase.calls).toHaveLength(0);
+  });
+
+  it("bounds the salary and the percentage before any write", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("platform_admin", supabase);
+
+    expect((await saveCommissionPlan({ userId: TARGET_USER, baseSalary: -5, commissionPct: 5 })).ok).toBe(false);
+    expect((await saveCommissionPlan({ userId: TARGET_USER, baseSalary: 70000, commissionPct: 80 })).ok).toBe(false);
+    expect(supabase.calls).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// Certification dates — the ledger behind the 60-day expiry flag
+// ===========================================================================
+
+describe("setCandidateCertificationDates", () => {
+  it("records dates for a claimed certification", async () => {
+    const supabase = createSupabaseMock({
+      "talent_candidates:select": { data: candidate({ certifications: ["CSP", "OSHA 30"] }) },
+      "talent_candidate_certifications:select": { data: null },
+      "talent_candidate_certifications:insert": {},
+    });
+    signIn("employee", supabase);
+
+    const result = await setCandidateCertificationDates(CANDIDATE_ID, "csp", "2025-02-01", "2027-02-01");
+
+    expect(result).toEqual({ ok: true });
+    expect(findCall(supabase, "talent_candidate_certifications", "insert")?.payload).toEqual({
+      candidate_id: CANDIDATE_ID,
+      certification: "CSP",
+      issued_on: "2025-02-01",
+      expires_on: "2027-02-01",
+    });
+  });
+
+  it("refuses dates for a certification the candidate does not claim", async () => {
+    const supabase = createSupabaseMock({
+      "talent_candidates:select": { data: candidate({ certifications: ["CSP"] }) },
+    });
+    signIn("employee", supabase);
+
+    const result = await setCandidateCertificationDates(CANDIDATE_ID, "CIH", "2025-02-01", null);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("not on this candidate's certification list");
+    expect(supabase.calls.some((c) => c.op === "insert")).toBe(false);
+  });
+
+  it("rejects an issue date after the expiry date before touching the database", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("employee", supabase);
+
+    const result = await setCandidateCertificationDates(CANDIDATE_ID, "CSP", "2027-01-01", "2026-01-01");
+
+    expect(result.ok).toBe(false);
+    expect(supabase.calls).toHaveLength(0);
+  });
+
+  it("clearing both dates deletes the ledger row rather than storing nulls", async () => {
+    const supabase = createSupabaseMock({
+      "talent_candidates:select": { data: candidate({ certifications: ["CSP"] }) },
+      "talent_candidate_certifications:select": {
+        data: { id: "5d1d0f52-2f3c-4d2e-9a76-0f5f8a3f9b21", issued_on: "2025-02-01", expires_on: "2027-02-01" },
+      },
+      "talent_candidate_certifications:delete": { data: [] },
+    });
+    signIn("employee", supabase);
+
+    expect((await setCandidateCertificationDates(CANDIDATE_ID, "CSP", null, null)).ok).toBe(true);
+    expect(supabase.calls.some((c) => c.table === "talent_candidate_certifications" && c.op === "delete")).toBe(true);
   });
 });
 

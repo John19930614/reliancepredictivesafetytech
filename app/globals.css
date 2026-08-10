@@ -7795,6 +7795,128 @@ a.platform-card:hover {
   text-transform: none;
 }
 
+/* Recruiter-assignment island on a desk placement card. */
+.talent-recruiter-assign {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0 2px;
+}
+
+.talent-recruiter-assign > label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.7rem;
+  gap: 2px;
+  min-width: 220px;
+}
+
+.talent-recruiter-assign > label > span {
+  color: var(--portal-muted);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.talent-recruiter-assign select {
+  border: 1px solid var(--talent-line);
+  border-radius: 7px;
+  font-size: 0.8rem;
+  padding: 5px 7px;
+}
+
+/* Break-even model output on the owner console. */
+.talent-breakeven-result {
+  border-top: 1px dashed var(--talent-line);
+  font-size: 0.85rem;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.talent-breakeven-answer {
+  background: var(--talent-paper);
+  border: 1px solid var(--talent-line);
+  border-radius: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+}
+
+/* Per-certification dates row in the candidate manage panel. */
+.talent-cert-dates {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.talent-cert-dates > label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.7rem;
+  gap: 2px;
+}
+
+.talent-cert-dates > label > span {
+  color: var(--portal-muted);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.talent-cert-dates input[type="date"] {
+  border: 1px solid var(--talent-line);
+  border-radius: 7px;
+  font-size: 0.8rem;
+  padding: 5px 7px;
+}
+
+.talent-cert-expiring {
+  background: #fff2f0;
+  border: 1px solid #f3c4bc;
+  border-radius: 999px;
+  color: #9c3a28;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* The Money floor panel's vertical-list editor (one option per line). */
+.talent-desk-verticals {
+  border: 1px solid var(--talent-line);
+  border-radius: 7px;
+  font-size: 0.85rem;
+  min-width: 0;
+  padding: 7px 9px;
+  resize: vertical;
+}
+
+/* Vertical / trade picker (VerticalSelect.tsx) — checkbox chips over the
+   configured options list, with an "other" input underneath. */
+.talent-vertical-grid {
+  display: grid;
+  gap: 4px 10px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.talent-vertical-option {
+  align-items: center;
+  display: flex;
+  font-size: 0.8rem;
+  gap: 6px;
+  min-width: 0;
+}
+
+.talent-vertical-option > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .talent-intake-submit {
   flex: 0 0 auto;
   grid-column: 1 / -1;

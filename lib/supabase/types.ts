@@ -6833,6 +6833,44 @@ export type Database = {
           },
         ]
       }
+      talent_candidate_certifications: {
+        Row: {
+          candidate_id: string
+          certification: string
+          created_at: string
+          expires_on: string | null
+          id: string
+          issued_on: string | null
+          updated_at: string
+        }
+        Insert: {
+          candidate_id: string
+          certification: string
+          created_at?: string
+          expires_on?: string | null
+          id?: string
+          issued_on?: string | null
+          updated_at?: string
+        }
+        Update: {
+          candidate_id?: string
+          certification?: string
+          created_at?: string
+          expires_on?: string | null
+          id?: string
+          issued_on?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "talent_candidate_certifications_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "talent_candidates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       talent_candidates: {
         Row: {
           availability_date: string | null
@@ -6893,6 +6931,39 @@ export type Database = {
           verticals?: string[]
           willing_to_relocate?: boolean
           years_experience?: number | null
+        }
+        Relationships: []
+      }
+      talent_commission_plans: {
+        Row: {
+          active: boolean
+          base_salary: number
+          commission_pct: number
+          created_at: string
+          id: string
+          updated_at: string
+          updated_by: string | null
+          user_id: string
+        }
+        Insert: {
+          active?: boolean
+          base_salary?: number
+          commission_pct?: number
+          created_at?: string
+          id?: string
+          updated_at?: string
+          updated_by?: string | null
+          user_id: string
+        }
+        Update: {
+          active?: boolean
+          base_salary?: number
+          commission_pct?: number
+          created_at?: string
+          id?: string
+          updated_at?: string
+          updated_by?: string | null
+          user_id?: string
         }
         Relationships: []
       }
@@ -7100,6 +7171,7 @@ export type Database = {
           job_order_id: string
           match_id: string
           pay_rate: number
+          recruiter_id: string | null
           start_date: string
           status: string
           updated_at: string | null
@@ -7114,6 +7186,7 @@ export type Database = {
           job_order_id: string
           match_id: string
           pay_rate: number
+          recruiter_id?: string | null
           start_date: string
           status?: string
           updated_at?: string | null
@@ -7128,6 +7201,7 @@ export type Database = {
           job_order_id?: string
           match_id?: string
           pay_rate?: number
+          recruiter_id?: string | null
           start_date?: string
           status?: string
           updated_at?: string | null
@@ -7166,6 +7240,7 @@ export type Database = {
           target_markup_pct: number
           updated_at: string | null
           updated_by: string | null
+          vertical_options: string[]
         }
         Insert: {
           created_at?: string | null
@@ -7176,6 +7251,7 @@ export type Database = {
           target_markup_pct?: number
           updated_at?: string | null
           updated_by?: string | null
+          vertical_options?: string[]
         }
         Update: {
           created_at?: string | null
@@ -7186,6 +7262,7 @@ export type Database = {
           target_markup_pct?: number
           updated_at?: string | null
           updated_by?: string | null
+          vertical_options?: string[]
         }
         Relationships: []
       }

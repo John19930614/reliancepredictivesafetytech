@@ -19,6 +19,7 @@ import { ClipboardPlus, Loader2 } from "lucide-react";
 import { createJobOrder } from "@/app/employee/talent-engine/actions";
 import { jobOrderPriorities, type JobOrderPriority } from "@/lib/talent-engine/types";
 import { splitList, parseOptionalNumber } from "./intake";
+import { VerticalDropdown, readVerticalFromForm } from "./VerticalSelect";
 
 interface ClientOption {
   id: string;
@@ -27,7 +28,15 @@ interface ClientOption {
 
 const noRateReason = "Setting the client bill rate requires rate-setting permission — leave it blank and an approver will price it.";
 
-export function JobOrderCreateForm({ clients, canSetRate }: { clients: ClientOption[]; canSetRate: boolean }) {
+export function JobOrderCreateForm({
+  clients,
+  canSetRate,
+  verticalOptions,
+}: {
+  clients: ClientOption[];
+  canSetRate: boolean;
+  verticalOptions?: string[];
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -56,7 +65,7 @@ export function JobOrderCreateForm({ clients, canSetRate }: { clients: ClientOpt
       const result = await createJobOrder({
         title: String(data.get("title") ?? "").trim(),
         clientId: String(data.get("client_id") ?? "") || null,
-        vertical: String(data.get("vertical") ?? "").trim() || null,
+        vertical: readVerticalFromForm(data),
         location: String(data.get("location") ?? "").trim() || null,
         certRequirements: splitList(data.get("cert_requirements")),
         billRate: canSetRate ? billRate : null,
@@ -109,10 +118,7 @@ export function JobOrderCreateForm({ clients, canSetRate }: { clients: ClientOpt
             <span>Location</span>
             <input name="location" placeholder="e.g. Austin, TX" maxLength={120} />
           </label>
-          <label className="talent-field">
-            <span>Vertical</span>
-            <input name="vertical" placeholder="e.g. Pharma" maxLength={80} />
-          </label>
+          <VerticalDropdown options={verticalOptions} />
           <label className="talent-field">
             <span>Required certs</span>
             <input name="cert_requirements" placeholder="CSP, CHST (comma-separated)" maxLength={300} />

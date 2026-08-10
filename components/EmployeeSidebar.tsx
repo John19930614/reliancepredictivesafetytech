@@ -20,6 +20,7 @@ import {
   FilePlus2,
   FileSignature,
   FileText,
+  FolderOpen,
   Gauge,
   Globe2,
   GraduationCap,
@@ -101,6 +102,7 @@ const navGroups = [
     label: "Governance",
     items: [
       { href: "/employee/documents", label: "Master Document Library", icon: UploadCloud },
+      { href: "/employee/files", label: "File Center", icon: FolderOpen },
       { href: "/employee/document-builder", label: "Document Builder", icon: FilePlus2 },
       { href: "/employee/legal-issues", label: "Legal Issues", icon: Scale },
       { href: "/employee/legal-register", label: "Legal Register", icon: ShieldCheck },

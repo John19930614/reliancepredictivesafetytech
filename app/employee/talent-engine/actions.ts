@@ -32,6 +32,8 @@ import {
   missingRequiredCerts,
   requiresHumanApproval,
 } from "@/lib/talent-engine/policy";
+import { defaultVerticalOptions, normalizeVerticalOptions } from "@/lib/talent-engine/verticals";
+import { maxBaseSalary, maxCommissionPct } from "@/lib/talent-engine/commission";
 import {
   computeMatchMoney,
   meetsSpreadFloor,
@@ -83,12 +85,14 @@ const UNIQUE_VIOLATION = "23505";
 const tables = {
   jobOrders: "talent_job_orders",
   candidates: "talent_candidates",
+  candidateCertifications: "talent_candidate_certifications",
   matches: "talent_matches",
   approvals: "talent_match_approvals",
   placements: "talent_placements",
   timesheets: "talent_timesheets",
   activity: "talent_activity_log",
   settings: "talent_settings",
+  commissionPlans: "talent_commission_plans",
 } as const;
 
 const talentPath = "/employee/talent-engine";
@@ -210,6 +214,7 @@ interface TalentSettings {
   targetMarkupPct: number;
   defaultHoursPerWeek: number;
   payRateAutonomyTier: TalentAutonomyTier;
+  verticalOptions: string[];
 }
 
 /**
@@ -221,11 +226,12 @@ interface TalentSettings {
 async function loadTalentSettings(supabase: any): Promise<TalentSettings> {
   const { data } = await supabase
     .from(tables.settings)
-    .select("id, min_spread_per_hour, target_markup_pct, default_hours_per_week, pay_rate_autonomy_tier")
+    .select("id, min_spread_per_hour, target_markup_pct, default_hours_per_week, pay_rate_autonomy_tier, vertical_options")
     .limit(1);
 
   const row = Array.isArray(data) ? data[0] : data;
   const tier = Number(row?.pay_rate_autonomy_tier);
+  const verticals = normalizeVerticalOptions(row?.vertical_options);
   return {
     id: typeof row?.id === "string" ? row.id : null,
     minSpreadPerHour: Number.isFinite(Number(row?.min_spread_per_hour))
@@ -241,6 +247,7 @@ async function loadTalentSettings(supabase: any): Promise<TalentSettings> {
     payRateAutonomyTier: (talentAutonomyTiers as readonly number[]).includes(tier)
       ? (tier as TalentAutonomyTier)
       : defaultTalentSettings.pay_rate_autonomy_tier,
+    verticalOptions: verticals.length > 0 ? verticals : [...defaultVerticalOptions],
   };
 }
 
@@ -258,7 +265,7 @@ const candidateColumns =
 
 const matchColumns =
   "id, job_order_id, candidate_id, status, bill_rate, pay_rate, spread, markup_pct, floor_ok, " +
-  "fit_score, requires_human_review, proposed_pay_rate";
+  "fit_score, requires_human_review, proposed_pay_rate, created_by";
 
 /** The effective spread floor for one order: its override, else the agency floor. */
 function resolveFloor(jobOrderMinSpread: unknown, settings: TalentSettings): number {
@@ -643,6 +650,24 @@ export async function updateCandidate(candidateId: string, patch: CandidatePatch
   if (error) return { ok: false, error: error.message };
   if (!updated || updated.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
 
+  // The dates ledger only holds rows for CLAIMED certifications. Removing a
+  // claim removes its dates too — the ledger must never resurrect a cert the
+  // candidate no longer carries. Delete-by-difference rather than delete-all:
+  // dates on certs that remain claimed survive an unrelated list edit.
+  if (Array.isArray(validation.update.certifications)) {
+    const claimed = new Set((validation.update.certifications as string[]).map((c) => c.trim().toLowerCase()));
+    const { data: certRows } = await supabase
+      .from(tables.candidateCertifications)
+      .select("id, certification")
+      .eq("candidate_id", candidateId);
+    const stale = (Array.isArray(certRows) ? certRows : [])
+      .filter((row) => !claimed.has(String(row.certification ?? "").trim().toLowerCase()))
+      .map((row) => row.id as string);
+    if (stale.length > 0) {
+      await supabase.from(tables.candidateCertifications).delete().in("id", stale);
+    }
+  }
+
   await recordTalentAudit(
     role,
     "update",
@@ -736,6 +761,118 @@ export async function verifyCandidateCertification(
       actorId: userId,
       candidateId,
     }),
+  );
+
+  revalidateTalent();
+  return { ok: true };
+}
+
+/** YYYY-MM-DD or empty/null. Anything else is rejected, not coerced. */
+function cleanDateInput(value: unknown): { ok: boolean; date: string | null } {
+  if (value === null || value === undefined) return { ok: true, date: null };
+  if (typeof value !== "string") return { ok: false, date: null };
+  const text = value.trim();
+  if (text === "") return { ok: true, date: null };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return { ok: false, date: null };
+  return Number.isNaN(Date.parse(`${text}T00:00:00Z`)) ? { ok: false, date: null } : { ok: true, date: text };
+}
+
+/**
+ * Records (or clears) the issue/expiry dates for one CLAIMED certification —
+ * the dates ledger behind the tracker's 60-day expiry flag (build-review spec,
+ * 2026-08-07).
+ *
+ * `canPropose`, not `canApprove`: dates are intake data. Verification stays
+ * its own gated act because it unblocks submittal; a date never does.
+ */
+export async function setCandidateCertificationDates(
+  candidateId: string,
+  certification: string,
+  issuedOn: string | null,
+  expiresOn: string | null,
+): Promise<ActionResult> {
+  const { supabase, userId, canRead, canPropose, role } = await getTalentAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT_MESSAGE };
+  if (!canRead) return { ok: false, error: "You do not have access to the Talent Engine." };
+  if (!canPropose) return { ok: false, error: "You do not have permission to edit candidates." };
+  if (!isTalentUuid(candidateId)) return { ok: false, error: "Missing or invalid candidate id." };
+
+  const cert = cleanText(certification, certMaxLength);
+  if (!cert) return { ok: false, error: "Name the certification the dates belong to." };
+
+  const issued = cleanDateInput(issuedOn);
+  const expires = cleanDateInput(expiresOn);
+  if (!issued.ok || !expires.ok) return { ok: false, error: "Dates must be calendar dates (YYYY-MM-DD)." };
+  if (issued.date && expires.date && issued.date > expires.date) {
+    return { ok: false, error: "The issue date cannot be after the expiry date." };
+  }
+
+  const { data: candidate } = await supabase
+    .from(tables.candidates)
+    .select("id, full_name, certifications")
+    .eq("id", candidateId)
+    .maybeSingle();
+  if (!candidate) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  // Dates hang off a claim. An unclaimed cert gets its claim added in the edit
+  // fields first — the ledger must not invent claims as a side effect.
+  const claimed: string[] = Array.isArray(candidate.certifications) ? candidate.certifications : [];
+  const key = cert.toLowerCase();
+  const claimedMatch = claimed.find((entry) => typeof entry === "string" && entry.trim().toLowerCase() === key);
+  if (!claimedMatch) {
+    return { ok: false, error: `${cert} is not on this candidate's certification list — add the claim first.` };
+  }
+
+  const { data: existing } = await supabase
+    .from(tables.candidateCertifications)
+    .select("id, issued_on, expires_on")
+    .eq("candidate_id", candidateId)
+    .ilike("certification", claimedMatch.trim())
+    .maybeSingle();
+
+  const beforeAudit = existing
+    ? { certification: claimedMatch.trim(), issued_on: existing.issued_on, expires_on: existing.expires_on }
+    : null;
+  const afterAudit = { certification: claimedMatch.trim(), issued_on: issued.date, expires_on: expires.date };
+
+  if (!issued.date && !expires.date) {
+    // Clearing both dates removes the row — an all-null row reads as data.
+    if (existing?.id) {
+      const { error } = await supabase.from(tables.candidateCertifications).delete().eq("id", existing.id);
+      if (error) return { ok: false, error: error.message };
+    }
+  } else if (existing?.id) {
+    const { error } = await supabase
+      .from(tables.candidateCertifications)
+      .update({ issued_on: issued.date, expires_on: expires.date })
+      .eq("id", existing.id);
+    if (error) return { ok: false, error: error.message };
+  } else {
+    const { error } = await supabase.from(tables.candidateCertifications).insert({
+      candidate_id: candidateId,
+      certification: claimedMatch.trim(),
+      issued_on: issued.date,
+      expires_on: expires.date,
+    });
+    // 23505 = the per-cert unique index: a concurrent save won the insert.
+    // Their dates land; re-saving from a refreshed panel is the honest retry.
+    if (error) {
+      if ((error as { code?: string }).code === "23505") {
+        return { ok: false, error: "Someone else just saved dates for this certification — reload and try again." };
+      }
+      return { ok: false, error: error.message };
+    }
+  }
+
+  await recordTalentAudit(
+    role,
+    existing ? "update" : "create",
+    "talent_candidate_certification",
+    candidateId,
+    userId,
+    `Set ${claimedMatch.trim()} dates for candidate ${candidate.full_name}`,
+    beforeAudit,
+    afterAudit,
   );
 
   revalidateTalent();
@@ -1456,6 +1593,10 @@ export async function createPlacement(
       pay_rate: payRate,
       status: "active",
       created_by: userId,
+      // Commission attribution: the match's proposer made this placement in
+      // the commercial sense. Null for AI-drafted matches — an admin assigns
+      // the recruiter on the desk. Reassignable via setPlacementRecruiter().
+      recruiter_id: (match.created_by as string | null) ?? null,
     })
     .select("id")
     .single();
@@ -1501,6 +1642,55 @@ export async function createPlacement(
 
   revalidateTalent();
   return { ok: true, placementId: created.id };
+}
+
+/**
+ * Reassigns (or clears) the recruiter credited with a placement's commission.
+ *
+ * Admin-tier (`canManagePlacements`): attribution decides who gets paid what,
+ * so it moves with the same authority that opens and ends placements.
+ */
+export async function setPlacementRecruiter(
+  placementId: string,
+  recruiterUserId: string | null,
+): Promise<ActionResult> {
+  const { supabase, userId, canRead, canManagePlacements, role } = await getTalentAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT_MESSAGE };
+  if (!canRead) return { ok: false, error: "You do not have access to the Talent Engine." };
+  if (!canManagePlacements) return { ok: false, error: "You do not have permission to assign recruiters." };
+  if (!isTalentUuid(placementId)) return { ok: false, error: "Missing or invalid placement id." };
+  if (recruiterUserId !== null && !isTalentUuid(recruiterUserId)) {
+    return { ok: false, error: "Missing or invalid recruiter id." };
+  }
+
+  const { data: placement } = await supabase
+    .from(tables.placements)
+    .select("id, recruiter_id, candidate_id")
+    .eq("id", placementId)
+    .maybeSingle();
+  if (!placement) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  const { data: updated, error } = await supabase
+    .from(tables.placements)
+    .update({ recruiter_id: recruiterUserId })
+    .eq("id", placementId)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!updated || updated.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  await recordTalentAudit(
+    role,
+    "update",
+    "talent_placement",
+    placementId,
+    userId,
+    recruiterUserId ? "Assigned the placement's recruiter" : "Cleared the placement's recruiter",
+    { recruiter_id: placement.recruiter_id ?? null },
+    { recruiter_id: recruiterUserId },
+  );
+
+  revalidateTalent();
+  return { ok: true };
 }
 
 /**
@@ -1610,6 +1800,8 @@ export interface TalentSettingsPatch {
   targetMarkupPct?: number;
   defaultHoursPerWeek?: number;
   payRateAutonomyTier?: TalentAutonomyTier;
+  /** Replaces the vertical/trade list the intake pickers offer. */
+  verticalOptions?: string[];
 }
 
 /**
@@ -1651,6 +1843,18 @@ export async function updateTalentSettings(patch: TalentSettingsPatch): Promise<
       errors.payRateAutonomyTier = "Autonomy tier must be 1, 2, or 3.";
     } else update.pay_rate_autonomy_tier = Number(input.payRateAutonomyTier);
   }
+  if (input.verticalOptions !== undefined) {
+    if (!Array.isArray(input.verticalOptions)) {
+      errors.verticalOptions = "The vertical list must be a list.";
+    } else {
+      const options = normalizeVerticalOptions(input.verticalOptions);
+      if (options.length === 0) {
+        errors.verticalOptions = "Keep at least one vertical — the pickers need something to offer.";
+      } else {
+        update.vertical_options = options;
+      }
+    }
+  }
 
   const first = firstError(errors);
   if (first) return { ok: false, error: first, fieldErrors: errors };
@@ -1687,6 +1891,7 @@ export async function updateTalentSettings(patch: TalentSettingsPatch): Promise<
       target_markup_pct: before.targetMarkupPct,
       default_hours_per_week: before.defaultHoursPerWeek,
       pay_rate_autonomy_tier: before.payRateAutonomyTier,
+      vertical_options: before.verticalOptions,
     },
     update,
   );
@@ -1696,6 +1901,78 @@ export async function updateTalentSettings(patch: TalentSettingsPatch): Promise<
       actorType: "human",
       actorId: userId,
     }),
+  );
+
+  revalidateTalent();
+  return { ok: true };
+}
+
+export interface CommissionPlanInput {
+  /** The compensated person (auth user id). */
+  userId: string;
+  /** Annual base salary, dollars. */
+  baseSalary: number;
+  /** Share of each placement's weekly margin, percent. */
+  commissionPct: number;
+  active?: boolean;
+}
+
+/**
+ * Creates or updates one person's commission plan (build review, 2026-08-07:
+ * base salary configurable per person, commission default 5% of each
+ * placement's weekly margin).
+ *
+ * `isAdmin` — comp is set by the platform owner. RLS enforces the same rule;
+ * this check is the faster, clearer answer.
+ */
+export async function saveCommissionPlan(input: CommissionPlanInput): Promise<ActionResult> {
+  const { supabase, userId, canRead, isAdmin, role } = await getTalentAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT_MESSAGE };
+  if (!canRead) return { ok: false, error: "You do not have access to the Talent Engine." };
+  if (!isAdmin) return { ok: false, error: "Admin role required to set compensation." };
+
+  const target = String(input?.userId ?? "").trim();
+  if (!isTalentUuid(target)) return { ok: false, error: "Pick the person the plan belongs to." };
+
+  const baseSalary = Number(input?.baseSalary);
+  if (!Number.isFinite(baseSalary) || baseSalary < 0 || baseSalary > maxBaseSalary) {
+    return { ok: false, error: `Base salary must be between $0 and $${maxBaseSalary.toLocaleString("en-US")}.` };
+  }
+  const commissionPct = Number(input?.commissionPct);
+  if (!Number.isFinite(commissionPct) || commissionPct < 0 || commissionPct > maxCommissionPct) {
+    return { ok: false, error: `Commission must be between 0 and ${maxCommissionPct}%.` };
+  }
+
+  const { data: before } = await supabase
+    .from(tables.commissionPlans)
+    .select("id, base_salary, commission_pct, active")
+    .eq("user_id", target)
+    .maybeSingle();
+
+  const payload = {
+    user_id: target,
+    base_salary: roundMoney(baseSalary),
+    commission_pct: roundMoney(commissionPct),
+    active: input?.active !== false,
+    updated_by: userId,
+  };
+
+  const { data: saved, error } = await supabase
+    .from(tables.commissionPlans)
+    .upsert(payload, { onConflict: "user_id" })
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!saved || saved.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  await recordTalentAudit(
+    role,
+    before ? "update" : "create",
+    "talent_commission_plan",
+    target,
+    userId,
+    "Set a Talent Engine commission plan",
+    before ? { base_salary: before.base_salary, commission_pct: before.commission_pct, active: before.active } : null,
+    { base_salary: payload.base_salary, commission_pct: payload.commission_pct, active: payload.active },
   );
 
   revalidateTalent();

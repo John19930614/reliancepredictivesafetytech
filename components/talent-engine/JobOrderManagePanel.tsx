@@ -39,6 +39,7 @@ import {
   type JobOrderWithClient,
 } from "@/lib/talent-engine/types";
 import { splitList, parseOptionalNumber } from "./intake";
+import { VerticalDropdown, readVerticalFromForm } from "./VerticalSelect";
 
 const noProposeReason = "Editing a job order requires proposing permission.";
 const noStatusReason = "Moving a job order's status requires proposing permission.";
@@ -71,6 +72,7 @@ export function JobOrderManagePanel({
   clients,
   canPropose,
   canSetRate,
+  verticalOptions,
 }: {
   order: JobOrderWithClient;
   clients: ClientOption[];
@@ -78,6 +80,8 @@ export function JobOrderManagePanel({
   canPropose: boolean;
   /** Gates the bill rate and spread floor only. */
   canSetRate: boolean;
+  /** Configured trade list from talent_settings, for the vertical picker. */
+  verticalOptions?: string[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -140,7 +144,7 @@ export function JobOrderManagePanel({
     const clientId = String(data.get("client_id") ?? "");
     if (clientId !== (order.client_id ?? "")) patch.clientId = clientId || null;
 
-    const vertical = String(data.get("vertical") ?? "").trim();
+    const vertical = readVerticalFromForm(data) ?? "";
     if (vertical !== (order.vertical ?? "")) patch.vertical = vertical || null;
 
     const location = String(data.get("location") ?? "").trim();
@@ -288,16 +292,7 @@ export function JobOrderManagePanel({
                 placeholder="e.g. Austin, TX"
               />
             </label>
-            <label className="talent-field" title={editTitle}>
-              <span>Vertical</span>
-              <input
-                defaultValue={order.vertical ?? ""}
-                disabled={fieldsDisabled}
-                maxLength={80}
-                name="vertical"
-                placeholder="e.g. Pharma"
-              />
-            </label>
+            <VerticalDropdown disabled={fieldsDisabled} options={verticalOptions} value={order.vertical} />
             <label className="talent-field" title={editTitle}>
               <span>Required certs</span>
               <input
