@@ -2,9 +2,12 @@
 
 // The one interactive surface of the File Center. Every mutation goes through
 // the Server Actions in app/employee/files/actions.ts (no Supabase client in
-// the browser bundle — CLAUDE.md, no client-side mutation), and every
-// navigation is a URL change so the server component re-queries the folder:
-// ?scope=client&client=<id>&folder=<id>.
+// the browser bundle — CLAUDE.md, no client-side mutation), with one carve-out:
+// upload BYTES are PUT directly to a server-issued, one-time signed storage
+// URL, because Server Action request bodies are capped far below the 25 MB
+// upload limit (1 MB Next.js default, ~4.5 MB on Vercel). Every ROW write
+// still happens server-side. Navigation is a URL change so the server
+// component re-queries the folder: ?scope=client&client=<id>&folder=<id>.
 
 import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
@@ -31,8 +34,10 @@ import {
 import {
   archiveFile,
   createFolder,
+  createUploadTicket,
   deleteFile,
   deleteFolder,
+  finalizeUpload,
   getFileDownloadUrl,
   moveFile,
   moveFolder,
@@ -40,7 +45,6 @@ import {
   renameFolder,
   restoreFile,
   setFileDescription,
-  uploadFile,
 } from "@/app/employee/files/actions";
 
 export interface FileCenterPageData {
@@ -191,25 +195,70 @@ export function FileCenterManager({ data }: { data: FileCenterPageData }) {
       return;
     }
     setUploadError("");
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("scope", data.scope);
-    if (data.clientId) formData.append("clientId", data.clientId);
-    if (data.folderId) formData.append("folderId", data.folderId);
-    formData.append("description", description.trim());
     setPendingKey("upload");
     startTransition(async () => {
-      let result: ActionResult | null;
+      // 1. Ask the server for a one-time signed destination. No bytes yet, so
+      // a failure here has saved nothing and is always safe to retry.
+      let ticketResult: Awaited<ReturnType<typeof createUploadTicket>> | null;
       try {
-        result = await uploadFile(formData);
+        ticketResult = await createUploadTicket({
+          scope: data.scope,
+          clientId: data.clientId,
+          folderId: data.folderId,
+          fileName: file.name,
+          sizeBytes: file.size,
+          mimeType: file.type,
+          description: description.trim(),
+        });
       } catch {
         setPendingKey("");
-        setUploadError("The server did not answer, so it is not known whether the upload landed. Reload before retrying.");
+        setUploadError("The server did not answer. Nothing was uploaded — try again.");
+        return;
+      }
+      if (!ticketResult?.ok || !ticketResult.ticket) {
+        setPendingKey("");
+        setUploadError(messageFor(ticketResult, "The upload could not be prepared."));
+        return;
+      }
+
+      // 2. The bytes go straight to storage — a Server Action body would be
+      // capped far below the advertised size limit.
+      try {
+        const putResponse = await fetch(ticketResult.ticket.signedUrl, {
+          method: "PUT",
+          headers: { "content-type": file.type || "application/octet-stream" },
+          body: file,
+        });
+        if (!putResponse.ok) {
+          setPendingKey("");
+          setUploadError(`File storage rejected the upload (HTTP ${putResponse.status}). Nothing was saved — try again.`);
+          return;
+        }
+      } catch {
+        setPendingKey("");
+        setUploadError("The upload could not reach file storage. Check your connection and try again — nothing was saved.");
+        return;
+      }
+
+      // 3. The server verifies the bytes landed and files the row.
+      let result: ActionResult | null;
+      try {
+        result = await finalizeUpload({
+          fileId: ticketResult.ticket.fileId,
+          scope: data.scope,
+          clientId: data.clientId,
+          folderId: data.folderId,
+          fileName: file.name,
+          description: description.trim(),
+        });
+      } catch {
+        setPendingKey("");
+        setUploadError("The file reached storage but the server did not answer while filing it. Reload to see whether it landed.");
         return;
       }
       setPendingKey("");
       if (!result?.ok) {
-        setUploadError(messageFor(result, "The file could not be uploaded."));
+        setUploadError(messageFor(result, "The file could not be saved."));
         return;
       }
       setDescription("");
