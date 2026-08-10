@@ -174,6 +174,14 @@ body.embedded [data-action="download"]{display:none!important}
    data side by side, which is how they drifted apart. */
 body.embedded .proposal{display:none!important}
 body.embedded .app{grid-template-columns:1fr;max-width:560px;padding:16px}
+
+/* Embedded: the panel flows at its natural height instead of being its own
+   sticky scroll area. The bridge reports the document height and the parent
+   sizes the iframe to it, so the ONLY scrollbar the form participates in is
+   the page's own — a sticky panel here would nest a third scroll context
+   inside the workspace (page → iframe → panel), which is exactly the
+   "too many scroll controls" report from the 2026-08-07 review. */
+body.embedded .panel{position:static;max-height:none;overflow:visible}
 </style>
 </head>
 <body>
