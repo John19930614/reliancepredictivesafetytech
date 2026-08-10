@@ -809,8 +809,8 @@ export function CalendarManager({ currentUserId, isAdmin, events: initialEvents,
       <div className="cal-toolbar">
         <div className="cal-toolbar-left">
           <button className="btn btn-secondary cal-today-btn" onClick={goToday}>Today</button>
-          <button className="btn-icon" onClick={prev}><ChevronLeft size={18} /></button>
-          <button className="btn-icon" onClick={next}><ChevronRight size={18} /></button>
+          <button className="btn-icon" type="button" aria-label={`Previous ${view}`} title={`Previous ${view}`} onClick={prev}><ChevronLeft size={18} /></button>
+          <button className="btn-icon" type="button" aria-label={`Next ${view}`} title={`Next ${view}`} onClick={next}><ChevronRight size={18} /></button>
           <h2 className="cal-header-label">{headerLabel()}</h2>
         </div>
 

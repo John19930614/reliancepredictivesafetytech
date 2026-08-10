@@ -10,6 +10,7 @@ import {
   type PerformanceReview,
   type PerformanceReviewCycle,
 } from "@/lib/company-data";
+import { friendlyError } from "@/lib/friendly-error";
 import { createClient } from "@/lib/supabase/client";
 
 type PerformanceReviewManagerProps = {
@@ -78,6 +79,7 @@ export function PerformanceReviewManager({
   const [cycles, setCycles] = useState(initialCycles);
   const [reviews, setReviews] = useState(initialReviews);
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [view, setView] = useState<View>("cycles");
   const [selectedCycleId, setSelectedCycleId] = useState<string | null>(null);
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
@@ -103,9 +105,14 @@ export function PerformanceReviewManager({
   // control itself — see lib/performance/policy.ts.
   const myReviews = visiblePerformanceReviews(reviews, currentUserId, false);
 
+  function showMessage(text: string, tone: "success" | "error" = "success") {
+    setMessage(text);
+    setMessageTone(tone);
+  }
+
   function getSupabase() {
     const sb = createClient();
-    if (!sb) setMessage("Supabase connection required.");
+    if (!sb) showMessage("Supabase connection required.", "error");
     return sb;
   }
 
@@ -113,7 +120,7 @@ export function PerformanceReviewManager({
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const title = cleanText(fd.get("title"));
-    if (!title) { setMessage("Cycle title is required."); return; }
+    if (!title) { showMessage("Cycle title is required.", "error"); return; }
 
     const supabase = getSupabase();
     if (!supabase) return;
@@ -136,10 +143,10 @@ export function PerformanceReviewManager({
       .single();
 
     setPending(false);
-    if (error || !data) { setMessage(error?.message ?? "Could not create cycle."); return; }
+    if (error || !data) { console.error(error); showMessage(friendlyError(error, "Could not create cycle."), "error"); return; }
     setCycles((c) => [data as PerformanceReviewCycle, ...c]);
     (e.target as HTMLFormElement).reset();
-    setMessage("Review cycle created.");
+    showMessage("Review cycle created.");
   }
 
   async function openCycle(cycle: PerformanceReviewCycle) {
@@ -154,7 +161,7 @@ export function PerformanceReviewManager({
       .select("*")
       .single();
 
-    if (statusError || !updated) { setMessage(statusError?.message ?? "Could not open cycle."); return; }
+    if (statusError || !updated) { console.error(statusError); showMessage(friendlyError(statusError, "Could not open cycle."), "error"); return; }
 
     // Create a review record for every active employee that doesn't have one yet
     const activeProfiles = profiles.filter((p) => p.profile_status === "active" || !p.profile_status);
@@ -167,12 +174,12 @@ export function PerformanceReviewManager({
         .insert(toCreate.map((p) => ({ cycle_id: cycle.id, employee_user_id: p.user_id })))
         .select("*");
 
-      if (insertError) { setMessage(insertError.message); return; }
+      if (insertError) { console.error(insertError); showMessage(friendlyError(insertError, "Could not assign reviews for this cycle."), "error"); return; }
       setReviews((r) => [...r, ...((newReviews ?? []) as PerformanceReview[])]);
     }
 
     setCycles((c) => c.map((item) => (item.id === cycle.id ? (updated as PerformanceReviewCycle) : item)));
-    setMessage(`Cycle opened — ${toCreate.length} review${toCreate.length === 1 ? "" : "s"} assigned.`);
+    showMessage(`Cycle opened — ${toCreate.length} review${toCreate.length === 1 ? "" : "s"} assigned.`);
   }
 
   async function closeCycle(cycle: PerformanceReviewCycle) {
@@ -186,9 +193,9 @@ export function PerformanceReviewManager({
       .select("*")
       .single();
 
-    if (error || !updated) { setMessage(error?.message ?? "Could not close cycle."); return; }
+    if (error || !updated) { console.error(error); showMessage(friendlyError(error, "Could not close cycle."), "error"); return; }
     setCycles((c) => c.map((item) => (item.id === cycle.id ? (updated as PerformanceReviewCycle) : item)));
-    setMessage("Cycle closed.");
+    showMessage("Cycle closed.");
   }
 
   async function submitSelfAssessment(e: React.FormEvent<HTMLFormElement>, review: PerformanceReview) {
@@ -214,9 +221,9 @@ export function PerformanceReviewManager({
       .single();
 
     setPending(false);
-    if (error || !data) { setMessage(error?.message ?? "Could not save self-assessment."); return; }
+    if (error || !data) { console.error(error); showMessage(friendlyError(error, "Could not save self-assessment."), "error"); return; }
     setReviews((r) => r.map((item) => (item.id === review.id ? (data as PerformanceReview) : item)));
-    setMessage("Self-assessment submitted.");
+    showMessage("Self-assessment submitted.");
     setView("cycle-detail");
   }
 
@@ -245,9 +252,9 @@ export function PerformanceReviewManager({
       .single();
 
     setPending(false);
-    if (error || !data) { setMessage(error?.message ?? "Could not save manager review."); return; }
+    if (error || !data) { console.error(error); showMessage(friendlyError(error, "Could not save manager review."), "error"); return; }
     setReviews((r) => r.map((item) => (item.id === review.id ? (data as PerformanceReview) : item)));
-    setMessage("Manager review submitted.");
+    showMessage("Manager review submitted.");
     setView("cycle-detail");
   }
 
@@ -257,6 +264,14 @@ export function PerformanceReviewManager({
     setManagerRating(review.overall_manager_rating ?? null);
     setView("review-form");
   }
+
+  const messageBox = message ? (
+    messageTone === "error" ? (
+      <div className="success-box portal-alert portal-alert-error" role="alert">{message}</div>
+    ) : (
+      <div className="success-box" role="status">{message}</div>
+    )
+  ) : null;
 
   // ── Review form view ───────────────────────────────────────────────
   if (view === "review-form" && selectedReview) {
@@ -273,7 +288,7 @@ export function PerformanceReviewManager({
           Back to cycle
         </button>
 
-        {message ? <div className="success-box">{message}</div> : null}
+        {messageBox}
 
         <div className="review-form-grid">
           {/* Self-assessment */}
@@ -415,7 +430,7 @@ export function PerformanceReviewManager({
           </div>
         </div>
 
-        {message ? <div className="success-box">{message}</div> : null}
+        {messageBox}
 
         <div className="portal-topline">
           <div>
@@ -538,7 +553,7 @@ export function PerformanceReviewManager({
   // ── Cycles list view ───────────────────────────────────────────────
   return (
     <div className="review-cycles-layout">
-      {message ? <div className="success-box">{message}</div> : null}
+      {messageBox}
 
       <div className="review-cycles-grid">
         {isAdmin && (

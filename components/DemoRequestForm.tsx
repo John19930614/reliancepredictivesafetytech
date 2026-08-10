@@ -14,10 +14,11 @@ export function DemoRequestForm() {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     setState("submitting");
     setMessage("");
 
-    const formData = new FormData(event.currentTarget);
+    const formData = new FormData(form);
     const interestedProducts = formData.getAll("interested_products").map(String);
     const payload = {
       name: String(formData.get("name") ?? ""),
@@ -35,13 +36,14 @@ export function DemoRequestForm() {
     if (!supabase) {
       setState("success");
       setMessage("Demo request captured in preview mode. Connect Supabase to store requests automatically.");
-      event.currentTarget.reset();
+      form.reset();
       return;
     }
 
     const { error } = await supabase.from("demo_requests").insert(payload);
 
     if (error) {
+      console.error(error);
       setState("error");
       setMessage("We could not save the request yet. Please try again or email the Reliance team directly.");
       return;
@@ -49,13 +51,13 @@ export function DemoRequestForm() {
 
     setState("success");
     setMessage("Thank you. Your request was received and the Reliance team will follow up.");
-    event.currentTarget.reset();
+    form.reset();
   }
 
   return (
     <form className="form-panel" onSubmit={handleSubmit}>
-      {state === "success" ? <div className="success-box">{message}</div> : null}
-      {state === "error" ? <div className="success-box">{message}</div> : null}
+      {state === "success" ? <div className="success-box" role="status">{message}</div> : null}
+      {state === "error" ? <div className="success-box portal-alert portal-alert-error" role="alert">{message}</div> : null}
 
       <div className="form-grid" style={{ marginTop: state === "idle" ? 0 : 16 }}>
         <div className="field">
@@ -113,7 +115,7 @@ export function DemoRequestForm() {
         <div className="field-full">
           <button className="button button-primary" disabled={state === "submitting"} type="submit">
             <Send size={18} />
-            {state === "submitting" ? "Submitting..." : "Submit Demo Request"}
+            {state === "submitting" ? "Submitting…" : "Submit Demo Request"}
           </button>
         </div>
       </div>

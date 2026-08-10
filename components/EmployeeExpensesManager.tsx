@@ -9,6 +9,7 @@ import {
   type EmployeeExpenseReport,
   type EmployeeProfile,
 } from "@/lib/company-data";
+import { friendlyError } from "@/lib/friendly-error";
 import { createClient } from "@/lib/supabase/client";
 import {
   cancelEmployeeExpenseReport,
@@ -242,7 +243,10 @@ export function EmployeeExpensesManager({
     if (!supabase) return setStatusMessage("Supabase is required to view receipts.", "error");
 
     const { data, error } = await supabase.storage.from("employee-expense-receipts").createSignedUrl(receipt.file_path, 60);
-    if (error || !data?.signedUrl) return setStatusMessage(error?.message ?? "Receipt link could not be created.", "error");
+    if (error || !data?.signedUrl) {
+      console.error(error);
+      return setStatusMessage(friendlyError(error, "Receipt link could not be created."), "error");
+    }
 
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   }
@@ -401,7 +405,7 @@ export function EmployeeExpensesManager({
             <input aria-label={`Upload receipt for ${report.title}`} name="receipt" type="file" />
             <button className="button button-secondary" disabled={pendingAction === `receipt-${report.id}`} type="submit">
               <UploadCloud size={16} />
-              {pendingAction === `receipt-${report.id}` ? "Uploading..." : "Upload Receipt"}
+              {pendingAction === `receipt-${report.id}` ? "Uploading…" : "Upload Receipt"}
             </button>
           </form>
         ) : null}
@@ -433,12 +437,12 @@ export function EmployeeExpensesManager({
             </div>
             <button className="button button-primary" disabled={pendingAction === `review-${report.id}`} type="submit">
               <CheckCircle2 size={16} />
-              {pendingAction === `review-${report.id}` ? "Saving..." : "Save Review"}
+              {pendingAction === `review-${report.id}` ? "Saving…" : "Save Review"}
             </button>
           </form>
         ) : null}
 
-        {pendingAction === `report-${report.id}` ? <small>Saving...</small> : null}
+        {pendingAction === `report-${report.id}` ? <small>Saving…</small> : null}
       </article>
     );
   }
@@ -520,7 +524,7 @@ export function EmployeeExpensesManager({
               </div>
               <button className="button button-primary" disabled={pendingAction === "create-report"} type="submit">
                 <Plus size={18} />
-                {pendingAction === "create-report" ? "Submitting..." : "Submit Expense"}
+                {pendingAction === "create-report" ? "Submitting…" : "Submit Expense"}
               </button>
             </div>
           </form>

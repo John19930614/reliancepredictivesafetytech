@@ -13,6 +13,12 @@ import {
   type CompanySalesActivity,
 } from "@/lib/company-data";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyError } from "@/lib/friendly-error";
+
+function todayIsoDate() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
 
 type ClientDetailManagerProps = {
   client: CompanyClient;
@@ -50,7 +56,9 @@ export function ClientDetailManager({
   const [currentItems, setCurrentItems] = useState(onboardingItems);
   const [currentDocuments, setCurrentDocuments] = useState(documents);
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [savingProfile, setSavingProfile] = useState(false);
+  const [addingActivity, setAddingActivity] = useState(false);
   const [uploadingRequirementId, setUploadingRequirementId] = useState<string | null>(null);
 
   const activeApprovalComplete = currentItems.some((item) => item.title === "Active company approval complete" && item.completed);
@@ -67,6 +75,11 @@ export function ClientDetailManager({
     }, {});
   }, [currentItems]);
 
+  function setStatusMessage(text: string, tone: "success" | "error" = "success") {
+    setMessage(text);
+    setMessageTone(tone);
+  }
+
   async function saveClientProfile(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage("");
@@ -75,7 +88,7 @@ export function ClientDetailManager({
     const supabase = createClient();
     if (!supabase) {
       setSavingProfile(false);
-      setMessage("Supabase is required to update company information.");
+      setStatusMessage("Company data is unavailable right now. Refresh the page, or contact an administrator.", "error");
       return;
     }
 
@@ -94,7 +107,7 @@ export function ClientDetailManager({
 
     if (!patch.name) {
       setSavingProfile(false);
-      setMessage("Company name is required.");
+      setStatusMessage("Company name is required.", "error");
       return;
     }
 
@@ -103,7 +116,8 @@ export function ClientDetailManager({
     setSavingProfile(false);
 
     if (error || !data) {
-      setMessage(error?.message ?? "Could not update company information.");
+      console.error(error);
+      setStatusMessage(friendlyError(error, "Could not update company information."), "error");
       return;
     }
 
@@ -120,7 +134,7 @@ export function ClientDetailManager({
       source: data.source ?? "",
       notes: data.notes ?? "",
     });
-    setMessage("Company information saved.");
+    setStatusMessage("Company information saved.");
   }
 
   function findClientDocument(requirement: CompanyDocumentRequirement) {
@@ -145,19 +159,20 @@ export function ClientDetailManager({
 
   async function downloadDocument(document: CompanyDocument | undefined) {
     if (!document?.file_path) {
-      setMessage("No file is attached to that document yet.");
+      setStatusMessage("No file is attached to that document yet.", "error");
       return;
     }
 
     const supabase = createClient();
     if (!supabase) {
-      setMessage("Supabase is required to view documents.");
+      setStatusMessage("Company data is unavailable right now. Refresh the page, or contact an administrator.", "error");
       return;
     }
 
     const { data, error } = await supabase.storage.from("company-documents").createSignedUrl(document.file_path, 60);
     if (error || !data?.signedUrl) {
-      setMessage(error?.message ?? "Could not create a document download link.");
+      console.error(error);
+      setStatusMessage(friendlyError(error, "Could not create a document download link."), "error");
       return;
     }
 
@@ -166,23 +181,24 @@ export function ClientDetailManager({
 
   async function uploadRequirementDocument(event: React.FormEvent<HTMLFormElement>, requirement: CompanyDocumentRequirement) {
     event.preventDefault();
+    const form = event.currentTarget;
     setMessage("");
     setUploadingRequirementId(requirement.id);
 
-    const formData = new FormData(event.currentTarget);
+    const formData = new FormData(form);
     const file = formData.get("file");
     const notes = String(formData.get("notes") ?? "");
 
     if (!(file instanceof File) || !file.name) {
       setUploadingRequirementId(null);
-      setMessage("Choose a document copy to upload.");
+      setStatusMessage("Choose a document copy to upload.", "error");
       return;
     }
 
     const supabase = createClient();
     if (!supabase) {
       setUploadingRequirementId(null);
-      setMessage("Supabase is required to upload documents.");
+      setStatusMessage("Company data is unavailable right now. Refresh the page, or contact an administrator.", "error");
       return;
     }
 
@@ -192,7 +208,7 @@ export function ClientDetailManager({
 
     if (!user) {
       setUploadingRequirementId(null);
-      setMessage("Please sign in again before uploading.");
+      setStatusMessage("Please sign in again before uploading.", "error");
       return;
     }
 
@@ -201,8 +217,9 @@ export function ClientDetailManager({
     const { error: uploadError } = await supabase.storage.from("company-documents").upload(filePath, file);
 
     if (uploadError) {
+      console.error(uploadError);
       setUploadingRequirementId(null);
-      setMessage(uploadError.message);
+      setStatusMessage(friendlyError(uploadError, "The file could not be uploaded. Try again."), "error");
       return;
     }
 
@@ -230,13 +247,14 @@ export function ClientDetailManager({
     setUploadingRequirementId(null);
 
     if (error || !data) {
-      setMessage(error?.message ?? "Could not register the uploaded document.");
+      console.error(error);
+      setStatusMessage(friendlyError(error, "Could not register the uploaded document."), "error");
       return;
     }
 
     setCurrentDocuments((current) => [data as CompanyDocument, ...current]);
-    event.currentTarget.reset();
-    setMessage(`${requirement.title} uploaded for ${currentClient.lifecycle_stage}.`);
+    form.reset();
+    setStatusMessage(`${requirement.title} uploaded for ${currentClient.lifecycle_stage}.`);
   }
 
   async function updateDocument(document: CompanyDocument, patch: Partial<CompanyDocument>) {
@@ -247,13 +265,14 @@ export function ClientDetailManager({
     }
     const { error } = await supabase.from("company_documents").update(patch).eq("id", document.id);
     if (error) {
-      setMessage(error.message);
+      console.error(error);
+      setStatusMessage(friendlyError(error, "The document changes could not be saved."), "error");
     }
   }
 
   async function markSigned(document: CompanyDocument | undefined) {
     if (!document) {
-      setMessage("Upload the signed copy before marking this document executed.");
+      setStatusMessage("Upload the signed copy before marking this document executed.", "error");
       return;
     }
 
@@ -261,17 +280,20 @@ export function ClientDetailManager({
       status: "Signed / Executed",
       executed_date: new Date().toISOString().slice(0, 10),
     });
-    setMessage(`${document.title} marked signed / executed.`);
+    setStatusMessage(`${document.title} marked signed / executed.`);
   }
 
   async function addActivity(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     const supabase = createClient();
     if (!supabase) {
-      setMessage("Supabase is required to add activities.");
+      setStatusMessage("Company data is unavailable right now. Refresh the page, or contact an administrator.", "error");
       return;
     }
+
+    setAddingActivity(true);
 
     const { data, error } = await supabase
       .from("company_sales_activities")
@@ -287,14 +309,17 @@ export function ClientDetailManager({
       .select("*")
       .single();
 
+    setAddingActivity(false);
+
     if (error || !data) {
-      setMessage(error?.message ?? "Could not add activity.");
+      console.error(error);
+      setStatusMessage(friendlyError(error, "Could not add activity."), "error");
       return;
     }
 
     setCurrentActivities((current) => [data as CompanySalesActivity, ...current]);
-    event.currentTarget.reset();
-    setMessage("Activity added.");
+    form.reset();
+    setStatusMessage("Activity added.");
   }
 
   async function updateOnboardingItem(item: ClientOnboardingItem, patch: Partial<ClientOnboardingItem>) {
@@ -314,7 +339,13 @@ export function ClientDetailManager({
     <div className="client-detail-grid">
       <form className="form-panel" onSubmit={saveClientProfile}>
         <h2>Company profile</h2>
-        {message ? <div className="success-box">{message}</div> : null}
+        {message ? (
+          messageTone === "error" ? (
+            <div className="success-box portal-alert portal-alert-error" role="alert">{message}</div>
+          ) : (
+            <div className="success-box" role="status">{message}</div>
+          )
+        ) : null}
         <div className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 16 }}>
           <div className="field">
             <label htmlFor="client-name">Company name</label>
@@ -404,7 +435,7 @@ export function ClientDetailManager({
           </div>
           <button className="button button-primary" disabled={savingProfile} type="submit">
             <Save size={18} />
-            {savingProfile ? "Saving..." : "Save Company Info"}
+            {savingProfile ? "Saving…" : "Save Company Info"}
           </button>
           <div className="success-box">
             Active readiness: {readyForActive ? "Ready for active company status" : "Contract signed and active approval are still required"}
@@ -504,7 +535,7 @@ export function ClientDetailManager({
                           <input aria-label="Document notes" name="notes" placeholder="Notes" />
                           <button className="button button-primary" disabled={uploadingRequirementId === requirement.id} type="submit">
                             <UploadCloud size={16} />
-                            {uploadingRequirementId === requirement.id ? "Uploading..." : "Upload Copy"}
+                            {uploadingRequirementId === requirement.id ? "Uploading…" : "Upload Copy"}
                           </button>
                         </form>
                       </article>
@@ -529,7 +560,7 @@ export function ClientDetailManager({
             </div>
             <div className="field">
               <label>Date</label>
-              <input name="activity_date" type="date" />
+              <input name="activity_date" type="date" defaultValue={todayIsoDate()} />
             </div>
             <div className="field">
               <label>Owner</label>
@@ -543,9 +574,9 @@ export function ClientDetailManager({
               <label>Notes</label>
               <textarea name="notes" />
             </div>
-            <button className="button button-primary" type="submit">
+            <button className="button button-primary" disabled={addingActivity} type="submit">
               <Plus size={18} />
-              Add Activity
+              {addingActivity ? "Adding…" : "Add Activity"}
             </button>
           </form>
           <div className="doc-list" style={{ marginTop: 16 }}>

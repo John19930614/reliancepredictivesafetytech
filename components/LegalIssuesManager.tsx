@@ -10,6 +10,7 @@ import {
   type CompanyLegalIssue,
 } from "@/lib/company-data";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyError } from "@/lib/friendly-error";
 
 type LegalIssuesManagerProps = {
   clients: CompanyClient[];
@@ -21,19 +22,26 @@ export function LegalIssuesManager({ clients, documents, initialIssues }: LegalI
   const [issues, setIssues] = useState(initialIssues);
   const [filters, setFilters] = useState({ severity: "", status: "" });
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const clientsById = useMemo(() => Object.fromEntries(clients.map((client) => [client.id, client])), [clients]);
 
   const filteredIssues = issues.filter((issue) => {
     return (!filters.severity || issue.severity === filters.severity) && (!filters.status || issue.status === filters.status);
   });
 
+  function setStatusMessage(text: string, tone: "success" | "error" = "success") {
+    setMessage(text);
+    setMessageTone(tone);
+  }
+
   async function createIssue(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     setMessage("");
-    const formData = new FormData(event.currentTarget);
+    const formData = new FormData(form);
     const supabase = createClient();
     if (!supabase) {
-      setMessage("Supabase is required to create legal issues.");
+      setStatusMessage("Company data is unavailable right now. Refresh the page, or contact an administrator.", "error");
       return;
     }
 
@@ -50,13 +58,14 @@ export function LegalIssuesManager({ clients, documents, initialIssues }: LegalI
 
     const { data, error } = await supabase.from("company_legal_issues").insert(payload).select("*").single();
     if (error || !data) {
-      setMessage(error?.message ?? "Could not create legal issue.");
+      console.error(error);
+      setStatusMessage(friendlyError(error, "Could not create legal issue."), "error");
       return;
     }
 
     setIssues((current) => [data as CompanyLegalIssue, ...current]);
-    event.currentTarget.reset();
-    setMessage("Legal issue logged.");
+    form.reset();
+    setStatusMessage("Legal issue logged.");
   }
 
   async function updateIssue(issue: CompanyLegalIssue, patch: Partial<CompanyLegalIssue>) {
@@ -71,7 +80,13 @@ export function LegalIssuesManager({ clients, documents, initialIssues }: LegalI
     <div className="document-grid">
       <form className="form-panel" onSubmit={createIssue}>
         <h2>Log issue</h2>
-        {message ? <div className="success-box">{message}</div> : null}
+        {message ? (
+          messageTone === "error" ? (
+            <div className="success-box portal-alert portal-alert-error" role="alert">{message}</div>
+          ) : (
+            <div className="success-box" role="status">{message}</div>
+          )
+        ) : null}
         <div className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 16 }}>
           <div className="field">
             <label>Title</label>

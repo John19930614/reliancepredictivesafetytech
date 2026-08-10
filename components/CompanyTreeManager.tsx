@@ -26,6 +26,7 @@ import {
   companyPositionStatuses,
   type CompanyPosition,
 } from "@/lib/company-data";
+import { friendlyError } from "@/lib/friendly-error";
 import { createClient } from "@/lib/supabase/client";
 
 type CompanyTreeManagerProps = {
@@ -97,6 +98,7 @@ function getEmployeeLabel(employee: CurrentEmployeeOption) {
 export function CompanyTreeManager({ canManagePositions, canViewCompensation, employeeOptions, initialPositions }: CompanyTreeManagerProps) {
   const [positions, setPositions] = useState(initialPositions);
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [statusFilter, setStatusFilter] = useState<PositionStatusFilter>("All");
   const [query, setQuery] = useState("");
   const [orgMapMode, setOrgMapMode] = useState<OrgMapMode>("chart");
@@ -228,6 +230,11 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
     });
   }
 
+  function showMessage(text: string, tone: "success" | "error" = "success") {
+    setMessage(text);
+    setMessageTone(tone);
+  }
+
   function getEmployeeAssignmentPatch(selectedUserId: string) {
     return {
       portal_user_id: employeesByUserId.get(selectedUserId)?.user_id ?? null,
@@ -268,7 +275,7 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
     setMessage("");
     const supabase = createClient();
     if (!supabase || !canManagePositions) {
-      setMessage("Admin access and Supabase are required to manage positions.");
+      showMessage("Admin access and Supabase are required to manage positions.", "error");
       return;
     }
 
@@ -299,19 +306,20 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
     }
 
     if (!payload.title) {
-      setMessage("Position title is required.");
+      showMessage("Position title is required.", "error");
       return;
     }
 
     const { data, error } = await supabase.from("company_positions").insert(payload).select("*").single();
     if (error) {
-      setMessage(error.message);
+      console.error(error);
+      showMessage(friendlyError(error, "Could not add the position."), "error");
       return;
     }
 
     if (data) {
       setPositions((current) => [...current, buildCompanyTreePosition(data as CompanyPosition, selectedUserId)]);
-      setMessage("Position added.");
+      showMessage("Position added.");
     }
   }
 
@@ -319,7 +327,7 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
     setMessage("");
     const supabase = createClient();
     if (!supabase || !canManagePositions) {
-      setMessage("Admin access and Supabase are required to manage positions.");
+      showMessage("Admin access and Supabase are required to manage positions.", "error");
       return;
     }
 
@@ -342,7 +350,8 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
 
     const { data, error } = await supabase.from("company_positions").update(patch).eq("id", position.id).select("*").single();
     if (error) {
-      setMessage(error.message);
+      console.error(error);
+      showMessage(friendlyError(error, "Could not update the position."), "error");
       return;
     }
 
@@ -352,7 +361,7 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
           item.id === position.id ? buildCompanyTreePosition(data as CompanyPosition, selectedUserId) : item,
         ),
       );
-      setMessage("Position updated.");
+      showMessage("Position updated.");
     }
   }
 
@@ -558,7 +567,13 @@ export function CompanyTreeManager({ canManagePositions, canViewCompensation, em
             <h2>Add position</h2>
           </div>
         </div>
-        {message ? <div className="success-box">{message}</div> : null}
+        {message ? (
+          messageTone === "error" ? (
+            <div className="success-box portal-alert portal-alert-error" role="alert">{message}</div>
+          ) : (
+            <div className="success-box" role="status">{message}</div>
+          )
+        ) : null}
         <div className="form-grid add-position-grid">
           <div className="field">
             <label htmlFor="title">Title</label>

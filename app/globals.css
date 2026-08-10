@@ -459,6 +459,16 @@ textarea {
   color: #3b2b0c;
 }
 
+/* Error twin of .success-box, matching .portal-alert-error's palette. Some
+   components (Document Builder) already reference this class — it must exist. */
+.error-box {
+  border: 1px solid rgba(138, 31, 31, 0.34);
+  border-radius: 8px;
+  padding: 18px;
+  background: #fff0f0;
+  color: #5e1111;
+}
+
 .form-title-row {
   display: flex;
   align-items: flex-start;

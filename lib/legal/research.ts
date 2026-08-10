@@ -1,5 +1,6 @@
 import "server-only";
 import OpenAI from "openai";
+import { checkAiBudget, recordAiUsage } from "@/lib/ai/metering";
 import type { ResearchRunInput, StructuredResearchResult } from "./types";
 import { DEFAULT_LEGAL_DISCLAIMER } from "./types";
 import { buildStructuredResearchPrompt, normalizeStructuredResult, structuredResponseSchema } from "./structured-research";
@@ -67,8 +68,15 @@ export async function runStructuredLegalResearch(input: ResearchRunInput | strin
     throw new Error("OPENAI_API_KEY is not configured. Add it to your environment variables.");
   }
 
+  // Budget gate: a denial surfaces through the same thrown-Error path the rest
+  // of this function uses, so the route reports decision.message to the user.
+  const budget = await checkAiBudget("legal_research");
+  if (!budget.allowed) {
+    throw new Error(budget.message);
+  }
+
   const client = new OpenAI({ apiKey });
-  const model = process.env.OPENAI_RESEARCH_MODEL || "gpt-4o-mini";
+  const model = budget.modelOverride || process.env.OPENAI_RESEARCH_MODEL || "gpt-4o-mini";
   const query = typeof input === "string" ? input : input.question || input.title || input.program || "";
 
   const response = await client.responses.create({
@@ -85,6 +93,16 @@ export async function runStructuredLegalResearch(input: ResearchRunInput | strin
       },
     },
     input: buildStructuredResearchPrompt(input),
+  });
+
+  // Metered before the incomplete check — a cut-off run still spent the tokens.
+  await recordAiUsage({
+    featureKey: "legal_research",
+    runSource: "user",
+    model,
+    inputTokens: response.usage?.input_tokens ?? 0,
+    outputTokens: response.usage?.output_tokens ?? 0,
+    webSearchCalls: response.output.filter((item) => item.type === "web_search_call").length,
   });
 
   if (response.status === "incomplete") {

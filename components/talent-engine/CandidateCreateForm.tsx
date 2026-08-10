@@ -77,7 +77,7 @@ export function CandidateCreateForm({ verticalOptions }: { verticalOptions?: str
           {error ? <p className="talent-intake-error" role="alert">{error}</p> : null}
           <label className="talent-field talent-field-wide">
             <span>Full name</span>
-            <input name="full_name" placeholder="e.g. Maria Reyes" required maxLength={200} />
+            <input autoFocus name="full_name" placeholder="e.g. Maria Reyes" required maxLength={200} />
           </label>
           <label className="talent-field">
             <span>Email</span>

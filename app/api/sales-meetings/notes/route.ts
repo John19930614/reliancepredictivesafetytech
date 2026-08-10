@@ -8,10 +8,12 @@ import {
   Paragraph,
   TextRun,
 } from "docx";
+import { validateAIOutput } from "@/lib/ai/gateway";
+import { checkAiBudget, recordAiUsage } from "@/lib/ai/metering";
 import { createClient } from "@/lib/supabase/server";
 import { COMPANY_NAME } from "@/lib/company-data";
 
-const notesModel = process.env.AI_COMMAND_MODEL || "openai/gpt-4o";
+const notesModel = process.env.AI_COMMAND_MODEL || "openai/gpt-4o-mini";
 
 function hasAiGatewayAuth() {
   return Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || process.env.VERCEL === "1");
@@ -204,9 +206,21 @@ function safeFileName(title: string) {
   return `${base || "meeting-notes"}.docx`;
 }
 
+/** Every model-authored string in the notes, flattened for the AI gateway. */
+function notesToText(notes: MeetingNotes): string {
+  return [
+    notes.summary,
+    ...notes.keyPoints,
+    ...notes.decisions,
+    ...notes.actionItems.map((item) => [item.task, item.owner, item.due].filter(Boolean).join(" — ")),
+    ...notes.questionsRaised,
+    ...notes.nextSteps,
+  ].join("\n");
+}
+
 export async function POST(req: Request) {
   try {
-    await getAuthorizedEmployee();
+    const { user } = await getAuthorizedEmployee();
 
     if (!hasAiGatewayAuth()) {
       return Response.json(
@@ -225,8 +239,14 @@ export async function POST(req: Request) {
     const transcript = parsed.data.transcript.trim();
     const participants = (parsed.data.participants ?? []).map((name) => name.trim()).filter(Boolean);
 
-    const { object: notes } = await generateObject({
-      model: notesModel,
+    const budget = await checkAiBudget("sales_meeting_notes");
+    if (!budget.allowed) {
+      return Response.json({ error: budget.message }, { status: 429 });
+    }
+    const model = budget.modelOverride ?? notesModel;
+
+    const { object: notes, usage } = await generateObject({
+      model,
       schema: notesSchema,
       system:
         "You are a precise meeting-notes assistant for a B2B safety-technology sales team. " +
@@ -237,6 +257,32 @@ export async function POST(req: Request) {
         (participants.length > 0 ? `Participants: ${participants.join(", ")}\n` : "") +
         `\nTranscript (speaker-labeled, in order):\n${transcript}`,
     });
+
+    await recordAiUsage({
+      featureKey: "sales_meeting_notes",
+      runSource: "user",
+      userId: user.id,
+      model,
+      inputTokens: usage.inputTokens ?? 0,
+      outputTokens: usage.outputTokens ?? 0,
+    });
+
+    // AI Gateway — this output enters an official workflow, so it must pass
+    // validateAIOutput() before the document is assembled. A block or fail
+    // (injection pattern, PII) never reaches the docx; a warn proceeds because
+    // the notes are human-reviewed by nature, and the verdict travels on the
+    // response header since the payload itself is the binary document.
+    const gateway = validateAIOutput({ rawOutput: notesToText(notes), promptKey: "sales_meeting_notes" });
+    if (gateway.status === "blocked" || gateway.status === "fail") {
+      const reason =
+        gateway.blockedReason ||
+        gateway.checks.find((check) => check.status === "fail")?.detail ||
+        "AI gateway rejected the generated notes.";
+      return Response.json(
+        { error: `Meeting notes were blocked by the AI safety gateway: ${reason}` },
+        { status: 422 },
+      );
+    }
 
     const generatedAt = new Intl.DateTimeFormat("en-US", {
       dateStyle: "full",
@@ -253,6 +299,7 @@ export async function POST(req: Request) {
         "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "Content-Disposition": `attachment; filename="${safeFileName(title)}"`,
         "Cache-Control": "no-store",
+        "X-AI-Gateway-Status": gateway.status,
       },
     });
   } catch (error) {

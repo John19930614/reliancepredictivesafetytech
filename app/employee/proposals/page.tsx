@@ -211,11 +211,17 @@ export default async function ProposalsPage({
                         <td>{proposal.owner ?? "—"}</td>
                         <td>
                           {proposal.proposal_value != null
-                            ? `$${Number(proposal.proposal_value).toLocaleString()}`
+                            ? `$${Number(proposal.proposal_value).toLocaleString("en-US")}`
                             : "—"}
                         </td>
                         <td>v{proposal.current_revision}</td>
-                        <td>{new Date(proposal.updated_at).toLocaleDateString()}</td>
+                        <td>
+                          {new Date(proposal.updated_at).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

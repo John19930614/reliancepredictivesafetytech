@@ -1,4 +1,5 @@
-import { getPromptTemplates, getModelRegistry, getGatewayLog, getFeedbackEntries, createPromptTemplate, updateModelStatus, submitFeedback } from "./actions";
+import { getPromptTemplates, getModelRegistry, getGatewayLog, getFeedbackEntries, getAiUsageSummary, createPromptTemplate, updateModelStatus, submitFeedback } from "./actions";
+import AiUsageBudgetSection from "@/components/platform/AiUsageBudgetSection";
 
 const MODEL_STATUS_COLORS: Record<string, string> = {
   production: "#42d392",
@@ -16,11 +17,12 @@ const VALIDATION_COLORS: Record<string, string> = {
 };
 
 export default async function AIServicesPage() {
-  const [templates, models, gatewayLog, feedback] = await Promise.all([
+  const [templates, models, gatewayLog, feedback, usage] = await Promise.all([
     getPromptTemplates(),
     getModelRegistry(),
     getGatewayLog(20),
     getFeedbackEntries(20),
+    getAiUsageSummary(),
   ]);
 
   return (
@@ -31,6 +33,9 @@ export default async function AIServicesPage() {
           <p>Prompt registry, model pipeline, AI gateway log, and feedback improvement loop.</p>
         </div>
       </div>
+
+      {/* Usage & Budget */}
+      <AiUsageBudgetSection usage={usage} />
 
       {/* Prompt Registry */}
       <section style={{ marginBottom: 28 }}>

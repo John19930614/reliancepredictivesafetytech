@@ -17,7 +17,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ClipboardPlus, Loader2 } from "lucide-react";
 import { createJobOrder } from "@/app/employee/talent-engine/actions";
-import { jobOrderPriorities, type JobOrderPriority } from "@/lib/talent-engine/types";
+import { jobOrderPriorities, jobOrderPriorityLabels, type JobOrderPriority } from "@/lib/talent-engine/types";
 import { splitList, parseOptionalNumber } from "./intake";
 import { VerticalDropdown, readVerticalFromForm } from "./VerticalSelect";
 
@@ -101,7 +101,7 @@ export function JobOrderCreateForm({
           {error ? <p className="talent-intake-error" role="alert">{error}</p> : null}
           <label className="talent-field talent-field-wide">
             <span>Title</span>
-            <input name="title" placeholder="e.g. Sr. EHS Manager — Data Center" required maxLength={200} />
+            <input autoFocus name="title" placeholder="e.g. Sr. EHS Manager — Data Center" required maxLength={200} />
           </label>
           <label className="talent-field">
             <span>Client</span>
@@ -140,7 +140,7 @@ export function JobOrderCreateForm({
             <select defaultValue="normal" name="priority">
               {jobOrderPriorities.map((value) => (
                 <option key={value} value={value}>
-                  {value}
+                  {jobOrderPriorityLabels[value]}
                 </option>
               ))}
             </select>

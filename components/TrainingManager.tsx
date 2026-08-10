@@ -15,6 +15,7 @@ import {
   type TrainingModule,
   type TrainingModuleFile,
 } from "@/lib/company-data";
+import { friendlyError } from "@/lib/friendly-error";
 import { createClient } from "@/lib/supabase/client";
 
 type TrainingManagerProps = {
@@ -200,7 +201,8 @@ export function TrainingManager({
       .single();
 
     if (error || !data) {
-      setMessage(error?.message ?? "Could not create the training module.");
+      console.error(error);
+      setMessage(friendlyError(error, "Could not create the training module."));
       return;
     }
 
@@ -232,7 +234,8 @@ export function TrainingManager({
     const { data, error } = await session.supabase.from("training_modules").update(patch).eq("id", module.id).select("*").single();
 
     if (error || !data) {
-      setMessage(error?.message ?? "Could not save module metadata.");
+      console.error(error);
+      setMessage(friendlyError(error, "Could not save module metadata."));
       return;
     }
 
@@ -272,7 +275,8 @@ export function TrainingManager({
 
     if (uploadError) {
       setPendingModuleId(null);
-      setMessage(uploadError.message);
+      console.error(uploadError);
+      setMessage(friendlyError(uploadError, "Could not upload the training file."));
       return;
     }
 
@@ -294,7 +298,8 @@ export function TrainingManager({
     setPendingModuleId(null);
 
     if (error || !data) {
-      setMessage(error?.message ?? "File uploaded, but the training record could not be saved.");
+      console.error(error);
+      setMessage(friendlyError(error, "File uploaded, but the training record could not be saved."));
       return;
     }
 
@@ -311,7 +316,8 @@ export function TrainingManager({
 
     const { data, error } = await supabase.storage.from(file.file_bucket).createSignedUrl(file.file_path, 60);
     if (error || !data?.signedUrl) {
-      setMessage(error?.message ?? "Could not create a signed training file link.");
+      console.error(error);
+      setMessage(friendlyError(error, "Could not create a signed training file link."));
       return;
     }
 
@@ -353,7 +359,8 @@ export function TrainingManager({
       .single();
 
     if (error || !data) {
-      setMessage(error?.message ?? "Could not create the training event.");
+      console.error(error);
+      setMessage(friendlyError(error, "Could not create the training event."));
       return;
     }
 
@@ -378,7 +385,8 @@ export function TrainingManager({
       .single();
 
     if (error || !data) {
-      setMessage(error?.message ?? "Could not update event status.");
+      console.error(error);
+      setMessage(friendlyError(error, "Could not update event status."));
       return;
     }
 
@@ -417,7 +425,8 @@ export function TrainingManager({
     setPendingEventId(null);
 
     if (error || !data) {
-      setMessage(error?.message ?? "Could not add that module to the event.");
+      console.error(error);
+      setMessage(friendlyError(error, "Could not add that module to the event."));
       return;
     }
 
@@ -882,7 +891,7 @@ export function TrainingManager({
                       <input aria-label="File sort order" min="0" name="sort_order" placeholder="Order" type="number" />
                       <button className="button button-primary" disabled={pendingModuleId === module.id} type="submit">
                         <UploadCloud size={16} />
-                        {pendingModuleId === module.id ? "Uploading..." : "Upload File"}
+                        {pendingModuleId === module.id ? "Uploading…" : "Upload File"}
                       </button>
                     </form>
 

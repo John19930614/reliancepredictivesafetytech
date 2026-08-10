@@ -1,5 +1,6 @@
 import { ArrowUpRight, Bell, Lightbulb, MessageCircle, Plus, Target, TrendingUp } from "lucide-react";
 import Link from "next/link";
+import { logout } from "@/app/employee-login/actions";
 import { MobileAvatar } from "@/components/mobile/MobileAvatar";
 import { MobileHeader } from "@/components/mobile/MobileHeader";
 import { MobileInstallPrompt } from "@/components/mobile/MobileInstallPrompt";
@@ -92,10 +93,21 @@ export default async function MobileHomePage() {
   return (
     <>
       <MobileHeader
+        backHref="/employee"
+        backLabel="Full portal"
         eyebrow={getGreeting(now)}
         subtitle="Here is what needs you today."
         title={firstName}
-        action={<MobileAvatar name={displayName} seed={session.userId} size="lg" />}
+        action={
+          <>
+            <MobileAvatar name={displayName} seed={session.userId} size="lg" />
+            <form action={logout}>
+              <button className="m-section-link" type="submit">
+                Sign out
+              </button>
+            </form>
+          </>
+        }
       />
 
       <MobileInstallPrompt />

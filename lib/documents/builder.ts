@@ -1,5 +1,6 @@
 import "server-only";
 import OpenAI from "openai";
+import { checkAiBudget, recordAiUsage } from "@/lib/ai/metering";
 import type { DocumentBuilderInput, GeneratedDocument } from "./types";
 import { buildDocumentPrompt, documentResponseSchema, parseDocumentOutput } from "./schema";
 
@@ -15,8 +16,16 @@ export async function generateSafetyDocument(input: DocumentBuilderInput): Promi
     throw new Error("OPENAI_API_KEY is not configured. Add it to your environment variables.");
   }
 
+  // Budget gate: a denial surfaces through the same thrown-Error path the rest
+  // of this function uses, so the route reports decision.message to the user.
+  const budget = await checkAiBudget("document_builder");
+  if (!budget.allowed) {
+    throw new Error(budget.message);
+  }
+
   const client = new OpenAI({ apiKey });
-  const model = process.env.OPENAI_DOCUMENT_MODEL || process.env.OPENAI_RESEARCH_MODEL || "gpt-4o-mini";
+  const model =
+    budget.modelOverride || process.env.OPENAI_DOCUMENT_MODEL || process.env.OPENAI_RESEARCH_MODEL || "gpt-4o-mini";
 
   const response = await client.responses.create({
     model,
@@ -31,6 +40,15 @@ export async function generateSafetyDocument(input: DocumentBuilderInput): Promi
       },
     },
     input: buildDocumentPrompt(input),
+  });
+
+  // Metered before the incomplete check — a cut-off run still spent the tokens.
+  await recordAiUsage({
+    featureKey: "document_builder",
+    runSource: "user",
+    model,
+    inputTokens: response.usage?.input_tokens ?? 0,
+    outputTokens: response.usage?.output_tokens ?? 0,
   });
 
   if (response.status === "incomplete") {

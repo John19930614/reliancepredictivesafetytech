@@ -1,5 +1,7 @@
 import "server-only";
 import OpenAI from "openai";
+import { checkAiBudget, recordAiUsage } from "@/lib/ai/metering";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   buildLeadTriagePrompt,
   leadTriageResponseSchema,
@@ -29,8 +31,33 @@ export async function runLeadTriage(leads: readonly TriageLeadInput[], today: st
     return { result: { findings: [], summary: "No new leads to triage." }, model: "none" };
   }
 
+  // Budget gate. A denial is a normal daily outcome, not a cron failure: close
+  // out the route's run row (unique per run_date, which is `today`) as completed
+  // with a skip note, and hand back an empty result so the caller finishes clean.
+  const decision = await checkAiBudget("lead_triage");
+  if (!decision.allowed) {
+    try {
+      const admin = createAdminClient();
+      if (admin) {
+        await admin
+          .from("lead_triage_runs")
+          .update({
+            status: "completed",
+            leads_analyzed: 0,
+            error_message: "Skipped — AI budget reached for today",
+            completed_at: new Date().toISOString(),
+          })
+          .eq("run_date", today);
+      }
+    } catch {
+      // Metering bookkeeping must never fail the cron.
+    }
+    return { result: { findings: [], summary: "Skipped — AI budget reached for today" }, model: "none" };
+  }
+
   const client = new OpenAI({ apiKey });
-  const model = process.env.OPENAI_LEAD_TRIAGE_MODEL || process.env.OPENAI_RESEARCH_MODEL || "gpt-4o-mini";
+  const model =
+    decision.modelOverride || process.env.OPENAI_LEAD_TRIAGE_MODEL || process.env.OPENAI_RESEARCH_MODEL || "gpt-4o-mini";
 
   const response = await client.responses.create({
     model,
@@ -45,6 +72,15 @@ export async function runLeadTriage(leads: readonly TriageLeadInput[], today: st
       },
     },
     input: buildLeadTriagePrompt(leads, today),
+  });
+
+  // Metered before the incomplete check — a cut-off run still spent the tokens.
+  await recordAiUsage({
+    featureKey: "lead_triage",
+    runSource: "cron",
+    model,
+    inputTokens: response.usage?.input_tokens ?? 0,
+    outputTokens: response.usage?.output_tokens ?? 0,
   });
 
   if (response.status === "incomplete") {

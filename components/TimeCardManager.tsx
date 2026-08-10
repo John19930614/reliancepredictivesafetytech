@@ -205,6 +205,7 @@ export function TimeCardManager({
 
   async function addEntry(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     setMessage("");
     if (!currentCard || !canEditCurrentCard) {
       return;
@@ -214,7 +215,7 @@ export function TimeCardManager({
       return;
     }
 
-    const formData = new FormData(event.currentTarget);
+    const formData = new FormData(form);
     const workDate = String(formData.get("work_date") ?? "");
     const hours = Number(formData.get("hours") ?? 0);
     const notes = String(formData.get("notes") ?? "").trim();
@@ -238,7 +239,7 @@ export function TimeCardManager({
     if (data) {
       setEntries((current) => [...current, data as EmployeeTimeEntry]);
       setMessage("Entry added.");
-      event.currentTarget.reset();
+      form.reset();
     }
   }
 
@@ -420,7 +421,7 @@ export function TimeCardManager({
               </button>
               <button className="button button-primary" disabled={pendingAction === "create-week" || !timeEntrySetupReady} onClick={createWeeklyCard} type="button">
                 <Plus size={17} />
-                {pendingAction === "create-week" ? "Creating..." : "Create Week"}
+                {pendingAction === "create-week" ? "Creating…" : "Create Week"}
               </button>
             </div>
           </div>
@@ -430,7 +431,7 @@ export function TimeCardManager({
               <span>Create this week&apos;s time card to start logging hours.</span>
               <button className="button button-primary" disabled={pendingAction === "create-week" || !timeEntrySetupReady} onClick={createWeeklyCard} type="button">
                 <Plus size={17} />
-                {pendingAction === "create-week" ? "Creating..." : "Create Week"}
+                {pendingAction === "create-week" ? "Creating…" : "Create Week"}
               </button>
             </div>
           ) : (
@@ -503,7 +504,7 @@ export function TimeCardManager({
                     </div>
                     <button className="button button-primary" disabled={pendingAction === "add-entry" || !selectedTaskId || !timeEntrySetupReady} type="submit">
                       <Plus size={17} />
-                      {pendingAction === "add-entry" ? "Adding..." : "Add Entry"}
+                      {pendingAction === "add-entry" ? "Adding…" : "Add Entry"}
                     </button>
                   </div>
                 </form>
@@ -520,7 +521,7 @@ export function TimeCardManager({
                   type="button"
                 >
                   <Send size={17} />
-                  {pendingAction === `submit-${currentCard.id}` ? "Submitting..." : "Submit Time Card"}
+                  {pendingAction === `submit-${currentCard.id}` ? "Submitting…" : "Submit Time Card"}
                 </button>
               </div>
             </>
@@ -688,7 +689,7 @@ export function TimeCardManager({
                             onClick={(event) => reviewCard(card, "approved", event.currentTarget.form!)}
                           >
                             <CheckCircle2 size={17} />
-                            {pendingAction === `approved-${card.id}` ? "Approving..." : "Approve"}
+                            {pendingAction === `approved-${card.id}` ? "Approving…" : "Approve"}
                         </button>
                           <button
                             className="button button-danger"
@@ -697,7 +698,7 @@ export function TimeCardManager({
                             onClick={(event) => reviewCard(card, "rejected", event.currentTarget.form!)}
                           >
                             <XCircle size={17} />
-                            {pendingAction === `rejected-${card.id}` ? "Rejecting..." : "Reject"}
+                            {pendingAction === `rejected-${card.id}` ? "Rejecting…" : "Reject"}
                         </button>
                       </form>
                     ) : (
