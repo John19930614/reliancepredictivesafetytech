@@ -6,10 +6,14 @@ vi.mock("@/lib/audit/events", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/audit/events")>();
   return { ...actual, recordAuditEvent: vi.fn(async () => {}) };
 });
+vi.mock("@/lib/proposals/acceptance-filing", () => ({
+  fileAcceptedProposalPdf: vi.fn(async () => ({ ok: true, fileId: "filed-file-1" })),
+}));
 
 import { revalidatePath } from "next/cache";
 import { getProposalAccess } from "@/lib/proposals/access";
 import { recordAuditEvent } from "@/lib/audit/events";
+import { fileAcceptedProposalPdf } from "@/lib/proposals/acceptance-filing";
 import { resolveProposalRoleFlags } from "@/lib/proposals/policy";
 import { isGeneratorState, type GeneratorState } from "@/lib/proposals/generator-state";
 import { phaseOptions } from "@/lib/proposals/catalog";
@@ -28,6 +32,7 @@ import {
 const getAccessMock = vi.mocked(getProposalAccess);
 const auditMock = vi.mocked(recordAuditEvent);
 const revalidateMock = vi.mocked(revalidatePath);
+const filingMock = vi.mocked(fileAcceptedProposalPdf);
 
 const PROPOSAL_ID = "11111111-1111-4111-8111-111111111111";
 const CLIENT_ID = "22222222-2222-4222-8222-222222222222";
@@ -729,5 +734,55 @@ describe("audit events", () => {
     expect(event.actor_role).toBe("marketing");
     expect(event.actor_id).toBe("user-1");
     expect(event.resource_id).toBe(PROPOSAL_ID);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Acceptance filing
+// ---------------------------------------------------------------------------
+describe("acceptance filing", () => {
+  it("files the accepted PDF when a proposal moves to accepted", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "sent" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("employee", supabase);
+
+    const result = await setProposalStatus(PROPOSAL_ID, "accepted");
+
+    expect(result).toEqual({ ok: true });
+    expect(filingMock).toHaveBeenCalledTimes(1);
+    expect(filingMock).toHaveBeenCalledWith({ proposalId: PROPOSAL_ID, actorUserId: "user-1", actorRole: "employee" });
+  });
+
+  it("does not file on a non-accept transition", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "draft" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("employee", supabase);
+
+    await setProposalStatus(PROPOSAL_ID, "in_review");
+
+    expect(filingMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the acceptance and audits a warning when filing fails", async () => {
+    filingMock.mockResolvedValueOnce({ ok: false, error: "bucket offline" });
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "sent" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("employee", supabase);
+
+    const result = await setProposalStatus(PROPOSAL_ID, "accepted");
+
+    // The business event stands; the filing failure is a warning, not an error.
+    expect(result).toEqual({ ok: true });
+    expect(auditMock).toHaveBeenCalledTimes(2);
+    const warning = auditMock.mock.calls[1][0];
+    expect(warning.severity).toBe("warn");
+    expect(warning.summary).toContain("could not be auto-filed");
+    expect(warning.summary).toContain("bucket offline");
   });
 });

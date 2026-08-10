@@ -40,6 +40,7 @@ import { resolveDocumentExtras } from "@/lib/proposals/team-server";
 import type { DocumentSignature, DocumentTeamMember } from "@/components/proposals/proposal-document-model";
 import { computeProposalTotals } from "@/lib/proposals/pricing";
 import { proposalStatuses, type ProposalStatus } from "@/lib/proposals/types";
+import { fileAcceptedProposalPdf } from "@/lib/proposals/acceptance-filing";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
 
 export interface ActionResult {
@@ -633,6 +634,26 @@ export async function setProposalStatus(proposalId: string, status: ProposalStat
     { status },
   );
 
+  // Best-effort convenience copy: the accepted document is filed into the
+  // client's File Center folder. The acceptance stands either way — a filing
+  // failure is audited as a warning, never surfaced as an action failure.
+  if (status === "accepted") {
+    const filing = await fileAcceptedProposalPdf({ proposalId, actorUserId: userId, actorRole: role });
+    if (!filing.ok) {
+      await recordAuditEvent({
+        ...buildDataAuditEvent(
+          "update",
+          "client_proposal",
+          proposalId,
+          userId,
+          `Accepted proposal "${proposal.title}" could not be auto-filed to the File Center: ${filing.error}`,
+        ),
+        severity: "warn",
+        actor_role: role,
+      });
+    }
+  }
+
   revalidateProposals(proposalId);
   return { ok: true };
 }
@@ -913,6 +934,29 @@ export async function acceptProposalViaShareLink(
     user_agent: userAgent,
     evidence_links: [view.linkId],
   });
+
+  // Best-effort: file the PDF of the revision the client just accepted into
+  // their File Center folder. Never affects the client's own result — they
+  // accepted successfully whether or not the copy could be filed.
+  const filing = await fileAcceptedProposalPdf({
+    proposalId: view.proposalId,
+    revisionId: view.revisionId,
+    actorUserId: null,
+    actorRole: "client_share_link",
+  });
+  if (!filing.ok) {
+    await recordAuditEvent({
+      ...buildDataAuditEvent(
+        "update",
+        "client_proposal",
+        view.proposalId,
+        null,
+        `Accepted proposal "${view.title}" could not be auto-filed to the File Center: ${filing.error}`,
+      ),
+      severity: "warn",
+      actor_role: "client_share_link",
+    });
+  }
 
   revalidateProposals(view.proposalId);
   return { ok: true };

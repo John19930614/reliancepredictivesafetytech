@@ -51,11 +51,8 @@ function isFileScope(value: unknown): value is FileScope {
   return value === "company" || value === "client";
 }
 
-/** FormData values can be File or null; only a non-empty string counts. */
-function formString(formData: FormData, key: string): string | null {
-  const value = formData.get(key);
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
+/** Shape of the ids minted by createUploadTicket. */
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function recordFileAudit(
   role: string | null,
@@ -287,72 +284,210 @@ export async function deleteFolder(folderId: string): Promise<ActionResult> {
   return { ok: true };
 }
 
-export async function uploadFile(formData: FormData): Promise<ActionResult & { fileId?: string }> {
-  const { supabase, userId, flags } = await getFileCenterAccess();
-  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
-  if (!flags.canManage) return { ok: false, error: "You do not have permission to manage files." };
+/* -------------------------------------------------------------------------- */
+/* Uploads — ticket, direct PUT, finalize                                      */
+/*                                                                             */
+/* The file bytes deliberately never travel through a Server Action. Action    */
+/* request bodies are capped far below the advertised 25 MB (1 MB by Next.js   */
+/* default, ~4.5 MB hard on Vercel), which is why the previous design — the    */
+/* whole File inside the action's FormData — died with a dead connection on    */
+/* anything but small files. Instead:                                          */
+/*   1. createUploadTicket() validates the request and returns a one-time      */
+/*      signed upload URL for a server-chosen object key;                      */
+/*   2. the browser PUTs the bytes straight to Supabase Storage;               */
+/*   3. finalizeUpload() re-validates, confirms the object actually landed,    */
+/*      and inserts the metadata row using the size and type STORAGE reports,  */
+/*      never what the browser claimed.                                        */
+/* An abandoned ticket leaves at worst an unreferenced object with no row —    */
+/* invisible to every screen and safe to clear; a row is only ever written     */
+/* for verified bytes.                                                        */
+/* -------------------------------------------------------------------------- */
 
-  const file = formData.get("file");
-  if (!(file instanceof File) || !file.name) {
-    return { ok: false, error: "Choose a file to upload.", fieldErrors: { file: "Choose a file to upload." } };
-  }
+interface UploadRequest {
+  scope: FileScope;
+  clientId: string | null;
+  folderId: string | null;
+  name: string;
+  description: string;
+}
 
-  const scopeValue = formString(formData, "scope");
-  if (!isFileScope(scopeValue)) return { ok: false, error: "Choose a valid file area." };
+/**
+ * The checks shared by the ticket and the finalize steps. Run TWICE per upload
+ * on purpose: nothing the browser held between the two calls is trusted.
+ */
+async function validateUploadRequest(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  input: {
+    scope?: unknown;
+    clientId?: unknown;
+    folderId?: unknown;
+    fileName?: unknown;
+    mimeType?: unknown;
+    description?: unknown;
+  },
+): Promise<{ ok: true; request: UploadRequest } | { ok: false; error: string; fieldErrors?: Record<string, string> }> {
+  if (!isFileScope(input.scope)) return { ok: false, error: "Choose a valid file area." };
 
-  if (!isAllowedMimeType(file.type)) {
+  if (input.mimeType !== undefined && !isAllowedMimeType(typeof input.mimeType === "string" ? input.mimeType : "")) {
     return { ok: false, error: "This file type is not allowed.", fieldErrors: { file: "This file type is not allowed." } };
   }
-  if (file.size > maxFileSizeBytes) {
-    const message = `File is too large. Keep it under ${Math.round(maxFileSizeBytes / (1024 * 1024))} MB.`;
-    return { ok: false, error: message, fieldErrors: { file: message } };
-  }
 
-  const name = sanitizeFileName(file.name);
+  const name = sanitizeFileName(typeof input.fileName === "string" ? input.fileName : "");
   if (!name) {
     const message = "That file name has no usable characters. Rename the file and try again.";
     return { ok: false, error: message, fieldErrors: { file: message } };
   }
 
-  const location = await resolveLocation(supabase, scopeValue, formString(formData, "clientId"));
-  if (!location.ok) return { ok: false, error: location.error, fieldErrors: location.fieldErrors };
-
-  const folderId = formString(formData, "folderId");
-  if (folderId) {
-    const folder = await loadFolderInLocation(supabase, folderId, scopeValue, location.clientId);
-    if (!folder.ok) return { ok: false, error: folder.error };
-  }
-
-  const rawDescription = formData.get("description");
-  const description = typeof rawDescription === "string" ? rawDescription.trim() : "";
+  const description = typeof input.description === "string" ? input.description.trim() : "";
   if (description.length > maxDescriptionLength) {
     const message = `Keep the description under ${maxDescriptionLength} characters.`;
     return { ok: false, error: message, fieldErrors: { description: message } };
   }
 
-  // The id is minted here (not by the insert default) so the storage path and
-  // the row agree on it — the path embeds the id to stay unique per upload.
-  const fileId = crypto.randomUUID();
-  const storagePath = buildStoragePath(scopeValue, location.clientId, fileId, name);
+  const clientId = typeof input.clientId === "string" && input.clientId.trim() ? input.clientId.trim() : null;
+  const location = await resolveLocation(supabase, input.scope, clientId);
+  if (!location.ok) return { ok: false, error: location.error, fieldErrors: location.fieldErrors };
 
-  // Uploaded with the USER-scoped client so storage RLS applies to the actor.
-  const { error: uploadError } = await supabase.storage
-    .from(fileCenterBucket)
-    .upload(storagePath, Buffer.from(await file.arrayBuffer()), { contentType: file.type, upsert: false });
-  if (uploadError) return { ok: false, error: uploadError.message };
+  const folderId = typeof input.folderId === "string" && input.folderId.trim() ? input.folderId.trim() : null;
+  if (folderId) {
+    const folder = await loadFolderInLocation(supabase, folderId, input.scope, location.clientId);
+    if (!folder.ok) return { ok: false, error: folder.error };
+  }
+
+  return { ok: true, request: { scope: input.scope, clientId: location.clientId, folderId, name, description } };
+}
+
+export interface UploadTicketInput {
+  scope: FileScope;
+  clientId?: string | null;
+  folderId?: string | null;
+  fileName: string;
+  sizeBytes: number;
+  mimeType: string;
+  description?: string;
+}
+
+export interface UploadTicket {
+  fileId: string;
+  storagePath: string;
+  /** One-time signed URL the browser PUTs the raw file bytes to. */
+  signedUrl: string;
+}
+
+export async function createUploadTicket(input: UploadTicketInput): Promise<ActionResult & { ticket?: UploadTicket }> {
+  const { supabase, userId, flags } = await getFileCenterAccess();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+  if (!flags.canManage) return { ok: false, error: "You do not have permission to manage files." };
+
+  const sizeBytes = Number(input.sizeBytes);
+  if (!Number.isFinite(sizeBytes) || sizeBytes < 0) {
+    return { ok: false, error: "Could not read the file's size. Try again.", fieldErrors: { file: "Could not read the file's size." } };
+  }
+  if (sizeBytes > maxFileSizeBytes) {
+    const message = `File is too large. Keep it under ${Math.round(maxFileSizeBytes / (1024 * 1024))} MB.`;
+    return { ok: false, error: message, fieldErrors: { file: message } };
+  }
+
+  const validated = await validateUploadRequest(supabase, input);
+  if (!validated.ok) return validated;
+
+  // Minted here so the storage key and the eventual row agree on the id — the
+  // key embeds it, which is also what keeps every upload attempt's key unique.
+  const fileId = crypto.randomUUID();
+  const storagePath = buildStoragePath(validated.request.scope, validated.request.clientId, fileId, validated.request.name);
+
+  // Signed with the USER-scoped client, so the storage insert policy (owner =
+  // this employee) is what authorises the URL — no service role involved.
+  const { data: signed, error } = await supabase.storage.from(fileCenterBucket).createSignedUploadUrl(storagePath);
+  if (error || !signed?.signedUrl) {
+    return { ok: false, error: error?.message ?? "Could not prepare the upload." };
+  }
+
+  return { ok: true, ticket: { fileId, storagePath, signedUrl: signed.signedUrl } };
+}
+
+export interface FinalizeUploadInput {
+  fileId: string;
+  scope: FileScope;
+  clientId?: string | null;
+  folderId?: string | null;
+  fileName: string;
+  description?: string;
+}
+
+async function removeUploadedObject(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  storagePath: string,
+): Promise<void> {
+  try {
+    await supabase.storage.from(fileCenterBucket).remove([storagePath]);
+  } catch {
+    // Best effort — an object without a row is invisible to the UI and
+    // harmless; a row pointing at missing bytes is the state that must never
+    // exist, and no row has been written on any path that lands here.
+  }
+}
+
+export async function finalizeUpload(input: FinalizeUploadInput): Promise<ActionResult & { fileId?: string }> {
+  const { supabase, userId, flags } = await getFileCenterAccess();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+  if (!flags.canManage) return { ok: false, error: "You do not have permission to manage files." };
+
+  if (typeof input.fileId !== "string" || !uuidPattern.test(input.fileId)) {
+    return { ok: false, error: "Malformed upload reference. Start the upload again." };
+  }
+
+  // mimeType is intentionally absent here: the type recorded below is the one
+  // storage observed on the PUT, not a second browser claim.
+  const validated = await validateUploadRequest(supabase, {
+    scope: input.scope,
+    clientId: input.clientId,
+    folderId: input.folderId,
+    fileName: input.fileName,
+    description: input.description,
+  });
+  if (!validated.ok) return validated;
+  const { scope, clientId, folderId, name, description } = validated.request;
+
+  // Rebuilt from the validated inputs rather than accepted from the browser,
+  // so a caller cannot file a row against an object it never got a ticket for.
+  const storagePath = buildStoragePath(scope, clientId, input.fileId, name);
+
+  const { data: objectInfo, error: infoError } = await supabase.storage.from(fileCenterBucket).info(storagePath);
+  if (infoError || !objectInfo) {
+    return { ok: false, error: "The file never reached storage, so nothing was saved. Try the upload again." };
+  }
+
+  // storage-js has surfaced these fields in both casings across versions.
+  const info = objectInfo as Record<string, unknown>;
+  const storedSize = Number(info.size ?? (info.metadata as Record<string, unknown> | undefined)?.size ?? 0);
+  const rawType = info.contentType ?? info.content_type ?? "";
+  const mimeType = typeof rawType === "string" && rawType ? rawType : "application/octet-stream";
+
+  if (!Number.isFinite(storedSize) || storedSize > maxFileSizeBytes) {
+    await removeUploadedObject(supabase, storagePath);
+    const message = `File is too large. Keep it under ${Math.round(maxFileSizeBytes / (1024 * 1024))} MB.`;
+    return { ok: false, error: message, fieldErrors: { file: message } };
+  }
+  if (!isAllowedMimeType(mimeType)) {
+    await removeUploadedObject(supabase, storagePath);
+    return { ok: false, error: "This file type is not allowed.", fieldErrors: { file: "This file type is not allowed." } };
+  }
 
   const { data: created, error: insertError } = await supabase
     .from("company_files")
     .insert({
-      id: fileId,
-      scope: scopeValue,
-      client_id: location.clientId,
+      id: input.fileId,
+      scope,
+      client_id: clientId,
       folder_id: folderId,
       name,
       storage_bucket: fileCenterBucket,
       storage_path: storagePath,
-      mime_type: file.type,
-      size_bytes: file.size,
+      mime_type: mimeType,
+      size_bytes: storedSize,
       description,
       uploaded_by: userId,
     })
@@ -360,17 +495,18 @@ export async function uploadFile(formData: FormData): Promise<ActionResult & { f
     .single();
 
   if (insertError || !created) {
-    // Best-effort cleanup: without it the just-uploaded object would sit in
-    // storage with no row pointing at it. The cleanup outcome is deliberately
-    // ignored — the caller needs the real insert error, not the cleanup's.
-    try {
-      await supabase.storage.from(fileCenterBucket).remove([storagePath]);
-    } catch {
-      // Documented best-effort path.
-    }
     if (errorCode(insertError) === UNIQUE_VIOLATION) {
-      return { ok: false, error: DUPLICATE_FILE, fieldErrors: { file: DUPLICATE_FILE } };
+      // The only unique keys on this table are the id and the storage path,
+      // both minted by the ticket — a violation means this exact upload was
+      // ALREADY filed (a retry or a double-click). Report success and leave
+      // the object alone: it belongs to the existing row.
+      revalidateFiles();
+      return { ok: true, fileId: input.fileId };
     }
+    // Without cleanup the verified object would sit in storage with no row
+    // pointing at it. The cleanup outcome is deliberately ignored — the caller
+    // needs the real insert error, not the cleanup's.
+    await removeUploadedObject(supabase, storagePath);
     return { ok: false, error: insertError?.message ?? "Could not save the uploaded file." };
   }
 
