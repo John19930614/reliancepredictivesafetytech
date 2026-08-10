@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Download, FileText } from "lucide-react";
 import { ProposalDocument } from "@/components/proposals/ProposalDocument";
 import { formatDocumentDate } from "@/components/proposals/proposal-document-model";
 import { getProposalAccess } from "@/lib/proposals/access";
@@ -78,9 +78,19 @@ export default async function ProposalRevisionPage({
                 print the SERVER's timezone and locale, not the reader's. */}
             Saved {formatDocumentDate(revision.created_at as string)}
             {revision.change_note ? ` · ${revision.change_note}` : ""}
-            {" · "}Read-only. Use your browser&apos;s Print / Save as PDF (Ctrl or Cmd + P) to produce the client copy.
+            {" · "}Read-only snapshot.
           </p>
         </div>
+        {state ? (
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <a className="button button-light" href={`/employee/proposals/${id}/pdf?revision=${revisionId}`} download>
+              <Download size={16} /> Download PDF
+            </a>
+            <a className="button button-light" href={`/employee/proposals/${id}/docx?revision=${revisionId}`} download>
+              <FileText size={16} /> Download DOCX
+            </a>
+          </div>
+        ) : null}
       </div>
 
       {state ? (

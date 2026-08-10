@@ -213,6 +213,20 @@ describe("ProposalDetailPage — the 404 wall", () => {
 });
 
 describe("ProposalDetailPage — the Edit affordance", () => {
+  it("offers both client download formats on the document view", async () => {
+    signIn();
+    await renderPage();
+
+    expect(screen.getByRole("link", { name: /Download PDF/ })).toHaveAttribute(
+      "href",
+      `/employee/proposals/${PROPOSAL_ID}/pdf`,
+    );
+    expect(screen.getByRole("link", { name: /Download DOCX/ })).toHaveAttribute(
+      "href",
+      `/employee/proposals/${PROPOSAL_ID}/docx`,
+    );
+  });
+
   it("offers the editor on a draft to a user who can manage proposals", async () => {
     signIn({ proposal: proposalRow({ status: "draft" }) });
     await renderPage();

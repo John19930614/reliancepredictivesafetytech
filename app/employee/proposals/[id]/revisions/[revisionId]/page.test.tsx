@@ -183,6 +183,20 @@ describe("ProposalRevisionPage — access and scoping", () => {
 });
 
 describe("ProposalRevisionPage — historical snapshot marking", () => {
+  it("offers PDF and DOCX downloads for the exact revision being viewed", async () => {
+    signIn();
+    await renderPage();
+
+    expect(screen.getByRole("link", { name: /Download PDF/ })).toHaveAttribute(
+      "href",
+      `/employee/proposals/${PROPOSAL_ID}/pdf?revision=${REVISION_ID}`,
+    );
+    expect(screen.getByRole("link", { name: /Download DOCX/ })).toHaveAttribute(
+      "href",
+      `/employee/proposals/${PROPOSAL_ID}/docx?revision=${REVISION_ID}`,
+    );
+  });
+
   it("banners an older revision as an archived snapshot", async () => {
     signIn({ revisionNumber: 2, currentRevision: 5 });
     await renderPage();

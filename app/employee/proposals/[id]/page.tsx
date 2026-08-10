@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Download, PencilLine } from "lucide-react";
+import { ChevronLeft, Download, FileText, PencilLine } from "lucide-react";
 import { getProposalAccess } from "@/lib/proposals/access";
 import { canEditProposalContent, isProposalUuid } from "@/lib/proposals/policy";
 import { isGeneratorState, type GeneratorState } from "@/lib/proposals/generator-state";
@@ -211,6 +211,9 @@ export default async function ProposalDetailPage({
               page margin. This route generates the file itself. */}
           <a className="button button-light" href={`/employee/proposals/${normalized.id}/pdf`} download>
             <Download size={16} /> Download PDF
+          </a>
+          <a className="button button-light" href={`/employee/proposals/${normalized.id}/docx`} download>
+            <FileText size={16} /> Download DOCX
           </a>
           {canEdit ? (
             <Link className="button button-primary" href={`/employee/proposals/${normalized.id}/edit`}>

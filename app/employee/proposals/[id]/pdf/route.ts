@@ -18,17 +18,8 @@ import { computeProposalTotals } from "@/lib/proposals/pricing";
 import { renderProposalPdf } from "@/lib/proposals/pdf";
 import { resolveDocumentExtras } from "@/lib/proposals/team-server";
 import { buildProposalDocumentModel } from "@/components/proposals/proposal-document-model";
+import { proposalDownloadFilename } from "@/lib/proposals/downloads";
 import type { ProposalStatus } from "@/lib/proposals/types";
-
-/** Filename-safe slug of the client/proposal title. */
-function toFilename(title: string, revision: number): string {
-  const slug = title
-    .replace(/[^A-Za-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60)
-    .toLowerCase();
-  return `${slug || "proposal"}-v${revision}.pdf`;
-}
 
 export async function GET(
   request: Request,
@@ -109,9 +100,10 @@ export async function GET(
   return new NextResponse(Buffer.from(bytes), {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${toFilename(
+      "Content-Disposition": `attachment; filename="${proposalDownloadFilename(
         proposal.title as string,
         revisionNumber ?? currentRevision,
+        "pdf",
       )}"`,
       // A proposal is per-client and revisable; a cached copy served to the
       // wrong reader, or a stale one after an edit, are both unacceptable.

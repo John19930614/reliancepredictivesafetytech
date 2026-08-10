@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { UserPen } from "lucide-react";
+import { Download, Eye, FileText, PencilLine, UserPen } from "lucide-react";
 import { getProposalAccess } from "@/lib/proposals/access";
-import { isProposalUuid } from "@/lib/proposals/policy";
+import { isGeneratorState } from "@/lib/proposals/generator-state";
+import { canEditProposalContent, isProposalUuid } from "@/lib/proposals/policy";
 import { proposalStatusLabels, proposalStatuses, type ProposalStatus } from "@/lib/proposals/types";
 import { ProposalStatusBadge } from "@/components/proposals/ProposalStatusBadge";
 import { ProposalCreateForm } from "@/components/proposals/ProposalCreateForm";
@@ -14,6 +15,7 @@ interface ProposalListRow {
   proposal_value: number | null;
   current_revision: number;
   updated_at: string;
+  form_data: unknown;
   client: { name: string } | null;
 }
 
@@ -61,7 +63,7 @@ export default async function ProposalsPage({
   searchParams: Promise<ProposalsSearchParams>;
 }) {
   const params = await searchParams;
-  const { supabase } = await getProposalAccess();
+  const { supabase, canManage } = await getProposalAccess();
 
   // Every filter is read from the URL and applied in the DATABASE query — this
   // stays a server component, so nothing here becomes a client-side Supabase
@@ -81,7 +83,7 @@ export default async function ProposalsPage({
     let query = supabase
       .from("client_proposals")
       .select(
-        "id, title, status, owner, proposal_value, current_revision, updated_at, client:company_clients(name)",
+        "id, title, status, owner, proposal_value, current_revision, updated_at, form_data, client:company_clients(name)",
         { count: "exact" },
       )
       .order("updated_at", { ascending: false })
@@ -196,34 +198,80 @@ export default async function ProposalsPage({
                       <th>Value</th>
                       <th>Rev</th>
                       <th>Updated</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((proposal) => (
-                      <tr key={proposal.id}>
-                        <td>
-                          <Link href={`/employee/proposals/${proposal.id}`}>{proposal.title}</Link>
-                        </td>
-                        <td>{proposal.client?.name ?? "—"}</td>
-                        <td>
-                          <ProposalStatusBadge status={proposal.status} />
-                        </td>
-                        <td>{proposal.owner ?? "—"}</td>
-                        <td>
-                          {proposal.proposal_value != null
-                            ? `$${Number(proposal.proposal_value).toLocaleString("en-US")}`
-                            : "—"}
-                        </td>
-                        <td>v{proposal.current_revision}</td>
-                        <td>
-                          {new Date(proposal.updated_at).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          })}
-                        </td>
-                      </tr>
-                    ))}
+                    {rows.map((proposal) => {
+                      const detailHref = `/employee/proposals/${proposal.id}`;
+                      const canEdit = canManage && canEditProposalContent(proposal.status).ok;
+                      const hasDocument = isGeneratorState(proposal.form_data);
+                      return (
+                        <tr key={proposal.id}>
+                          <td>
+                            <Link href={detailHref}>{proposal.title}</Link>
+                          </td>
+                          <td>{proposal.client?.name ?? "—"}</td>
+                          <td>
+                            <ProposalStatusBadge status={proposal.status} />
+                          </td>
+                          <td>{proposal.owner ?? "—"}</td>
+                          <td>
+                            {proposal.proposal_value != null
+                              ? `$${Number(proposal.proposal_value).toLocaleString("en-US")}`
+                              : "—"}
+                          </td>
+                          <td>v{proposal.current_revision}</td>
+                          <td>
+                            {new Date(proposal.updated_at).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })}
+                          </td>
+                          <td>
+                            <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                              <Link className="button button-light" href={detailHref} aria-label={`View ${proposal.title}`}>
+                                <Eye size={14} /> View
+                              </Link>
+                              {canEdit ? (
+                                <Link
+                                  className="button button-primary"
+                                  href={`${detailHref}/edit`}
+                                  aria-label={`Edit ${proposal.title}`}
+                                >
+                                  <PencilLine size={14} /> Edit
+                                </Link>
+                              ) : null}
+                              {hasDocument ? (
+                                <>
+                                  <a
+                                    className="button button-light"
+                                    href={`${detailHref}/pdf`}
+                                    download
+                                    aria-label={`Download PDF for ${proposal.title}`}
+                                  >
+                                    <Download size={14} /> PDF
+                                  </a>
+                                  <a
+                                    className="button button-light"
+                                    href={`${detailHref}/docx`}
+                                    download
+                                    aria-label={`Download DOCX for ${proposal.title}`}
+                                  >
+                                    <FileText size={14} /> DOCX
+                                  </a>
+                                </>
+                              ) : (
+                                <span className="badge" title="Open the editor and save content before exporting.">
+                                  No export yet
+                                </span>
+                              )}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

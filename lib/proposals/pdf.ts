@@ -22,8 +22,10 @@
 
 import "server-only";
 
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
-import type { ProposalDocumentModel } from "@/components/proposals/proposal-document-model";
+import type { DocumentPill, ProposalDocumentModel } from "@/components/proposals/proposal-document-model";
 import { proposalFooterText } from "./types";
 
 /* -------------------------------------------------------------------------- */
@@ -236,6 +238,80 @@ function drawSectionHeading(layout: Layout, number: string, title: string): void
   layout.space(5);
 }
 
+function drawCallout(layout: Layout, label: string, body: string): void {
+  const size = 8.2;
+  const lineHeight = size * 1.32;
+  const labelWidth = layout.fonts.bold.widthOfTextAtSize(label, size);
+  const bodyLines = wrapText(body, layout.fonts.regular, size, CONTENT_WIDTH - labelWidth - 24);
+  const height = Math.max(24, bodyLines.length * lineHeight + 14);
+  layout.ensure(height);
+  const top = layout.y;
+  layout.y -= height;
+
+  layout.page.drawRectangle({
+    x: MARGIN_X,
+    y: layout.y,
+    width: CONTENT_WIDTH,
+    height,
+    color: BAND,
+    borderColor: RULE,
+    borderWidth: 0.4,
+  });
+  layout.page.drawRectangle({ x: MARGIN_X, y: layout.y, width: 4, height, color: GOLD });
+  layout.page.drawText(toPdfText(label), {
+    x: MARGIN_X + 10,
+    y: top - 15,
+    size,
+    font: layout.fonts.bold,
+    color: NAVY,
+  });
+  bodyLines.forEach((line, index) => {
+    layout.page.drawText(line, {
+      x: MARGIN_X + 10 + labelWidth,
+      y: top - 15 - index * lineHeight,
+      size,
+      font: layout.fonts.regular,
+      color: INK,
+    });
+  });
+  layout.space(3);
+}
+
+function drawPills(layout: Layout, pills: readonly DocumentPill[]): void {
+  const gap = 7;
+  const columns = 3;
+  const width = (CONTENT_WIDTH - gap * (columns - 1)) / columns;
+  const height = 20;
+
+  for (let index = 0; index < pills.length; index += columns) {
+    layout.ensure(height + 5);
+    const row = pills.slice(index, index + columns);
+    const top = layout.y;
+    layout.y -= height;
+    row.forEach((pill, offset) => {
+      const x = MARGIN_X + offset * (width + gap);
+      layout.page.drawRectangle({
+        x,
+        y: layout.y,
+        width,
+        height,
+        color: rgb(1, 1, 1),
+        borderColor: RULE,
+        borderWidth: 0.45,
+      });
+      const label = `${pill.label}: ${pill.value}`;
+      layout.page.drawText(toPdfText(label), {
+        x: x + 6,
+        y: top - 13,
+        size: 7.5,
+        font: layout.fonts.bold,
+        color: NAVY,
+      });
+    });
+    layout.space(4);
+  }
+}
+
 function drawBullets(layout: Layout, items: readonly string[]): void {
   for (const item of items) {
     const lines = wrapText(item, layout.fonts.regular, 8.6, CONTENT_WIDTH - 12);
@@ -330,7 +406,7 @@ function drawFeeRow(
 function drawTwoColumnBlocks(
   layout: Layout,
   blocks: Array<{ heading: string; body: string[] }>,
-  options: { headingSize?: number; bodySize?: number } = {},
+  options: { headingSize?: number; bodySize?: number; boxed?: boolean } = {},
 ): void {
   const headingSize = options.headingSize ?? 8;
   const bodySize = options.bodySize ?? 7.1;
@@ -373,6 +449,25 @@ function drawTwoColumnBlocks(
 
     const x = columnX();
     let y = cursor;
+
+    if (options.boxed) {
+      layout.page.drawRectangle({
+        x: x - 3,
+        y: cursor - block.height + 2,
+        width: COLUMN_WIDTH,
+        height: block.height - 2,
+        color: rgb(1, 1, 1),
+        borderColor: RULE,
+        borderWidth: 0.35,
+      });
+      layout.page.drawRectangle({
+        x: x - 3,
+        y: cursor - block.height + 2,
+        width: 2.2,
+        height: block.height - 2,
+        color: GOLD,
+      });
+    }
 
     for (const line of block.headingLines) {
       y -= headingLine;
@@ -443,12 +538,22 @@ export interface ProposalPdfOptions {
   documentTitle: string;
 }
 
+async function tryEmbedSeal(doc: PDFDocument) {
+  try {
+    const bytes = await readFile(path.join(process.cwd(), "public", "reliance-seal-transparent.png"));
+    return await doc.embedPng(bytes);
+  } catch {
+    return null;
+  }
+}
+
 export async function renderProposalPdf({ model, documentTitle }: ProposalPdfOptions): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const fonts: Fonts = {
     regular: await doc.embedFont(StandardFonts.Helvetica),
     bold: await doc.embedFont(StandardFonts.HelveticaBold),
   };
+  const seal = await tryEmbedSeal(doc);
 
   doc.setTitle(toPdfText(documentTitle));
   doc.setProducer(toPdfText(model.wordmark));
@@ -457,32 +562,60 @@ export async function renderProposalPdf({ model, documentTitle }: ProposalPdfOpt
   const layout = new Layout(doc, fonts);
 
   /* --- Masthead --------------------------------------------------------- */
-  layout.y -= 14;
+  const mastheadTop = layout.y;
+  const sealSize = 46;
+  if (seal) {
+    layout.page.drawImage(seal, {
+      x: MARGIN_X,
+      y: mastheadTop - sealSize + 3,
+      width: sealSize,
+      height: sealSize,
+    });
+  }
+  const textX = seal ? MARGIN_X + sealSize + 11 : MARGIN_X;
   layout.page.drawText(toPdfText(model.wordmark), {
-    x: MARGIN_X,
-    y: layout.y,
+    x: textX,
+    y: mastheadTop - 17,
     size: 13,
     font: fonts.bold,
     color: NAVY,
   });
   const stamp = toPdfText(`${model.revisionLabel ?? model.currentRevisionLabel} - ${model.statusLabel}`);
   const stampWidth = fonts.regular.widthOfTextAtSize(stamp, 7.5);
+  const stampX = PAGE_WIDTH - MARGIN_X - Math.max(stampWidth + 12, 72);
+  layout.page.drawRectangle({
+    x: stampX,
+    y: mastheadTop - 19,
+    width: Math.max(stampWidth + 12, 72),
+    height: 18,
+    color: rgb(1, 1, 1),
+    borderColor: RULE,
+    borderWidth: 0.4,
+  });
   layout.page.drawText(stamp, {
-    x: PAGE_WIDTH - MARGIN_X - stampWidth,
-    y: layout.y + 2,
+    x: stampX + 6,
+    y: mastheadTop - 13,
     size: 7.5,
     font: fonts.regular,
     color: MUTED,
   });
-  layout.y -= 11;
   layout.page.drawText(toPdfText(model.docline.toUpperCase()), {
-    x: MARGIN_X,
-    y: layout.y,
+    x: textX,
+    y: mastheadTop - 31,
     size: 7.2,
     font: fonts.regular,
     color: MUTED,
   });
-  layout.y -= 6;
+  const conf = "CONFIDENTIAL";
+  const confWidth = fonts.bold.widthOfTextAtSize(conf, 7.2);
+  layout.page.drawText(conf, {
+    x: PAGE_WIDTH - MARGIN_X - confWidth,
+    y: mastheadTop - 31,
+    size: 7.2,
+    font: fonts.bold,
+    color: GOLD,
+  });
+  layout.y = mastheadTop - sealSize - 7;
   layout.page.drawRectangle({
     x: MARGIN_X,
     y: layout.y,
@@ -549,17 +682,19 @@ export async function renderProposalPdf({ model, documentTitle }: ProposalPdfOpt
   /* --- 01 Executive Summary --------------------------------------------- */
   drawSectionHeading(layout, "01", "Executive Summary");
   layout.text(model.summary, { size: 9 });
+  layout.space(4);
+  drawCallout(layout, "Proposal Purpose: ", model.purposeCallout);
 
   /* --- 02 Package -------------------------------------------------------- */
   drawSectionHeading(layout, "02", "Selected Platform Package");
   layout.text(model.packageIntro);
   layout.space(4);
-  for (const pill of model.packagePills) {
-    layout.text(`${pill.label}: ${pill.value}`, { size: 8, x: MARGIN_X + 6, width: CONTENT_WIDTH - 6 });
-  }
+  drawPills(layout, model.packagePills);
 
   /* --- 03 Scope ---------------------------------------------------------- */
   drawSectionHeading(layout, "03", "Detailed Scope of Work");
+  layout.text(model.scopeIntro);
+  layout.space(2);
   const scope = [...model.phaseScope, ...model.serviceScope];
   if (scope.length === 0) {
     layout.text("No implementation phases or service lines selected.", { color: MUTED });
@@ -624,7 +759,7 @@ export async function renderProposalPdf({ model, documentTitle }: ProposalPdfOpt
         heading: member.title ? `${member.name} - ${member.title}` : member.name,
         body: member.paragraphs,
       })),
-      { headingSize: 8.6, bodySize: 7.4 },
+      { headingSize: 8.6, bodySize: 7.4, boxed: true },
     );
     layout.space(4);
   }
@@ -635,6 +770,7 @@ export async function renderProposalPdf({ model, documentTitle }: ProposalPdfOpt
   drawTwoColumnBlocks(
     layout,
     model.terms.map((term) => ({ heading: term.heading, body: [term.body] })),
+    { boxed: true },
   );
   layout.space(6);
 
