@@ -239,7 +239,7 @@ function ResearchFindings({
           <div style={{ fontWeight: 700, fontSize: "0.95rem", marginBottom: 4 }}>Research Complete — {result.findings.length} findings</div>
           <div style={{ fontSize: "0.82rem", color: "var(--portal-muted)" }}>{result.research_summary}</div>
         </div>
-        <button onClick={onDismiss} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}><X size={18} /></button>
+        <button type="button" aria-label="Dismiss findings" onClick={onDismiss} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}><X size={18} /></button>
       </div>
 
       <div style={{ padding: "12px 24px", borderBottom: "1px solid var(--portal-border)", display: "flex", gap: 12, alignItems: "center" }}>

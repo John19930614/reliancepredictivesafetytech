@@ -61,6 +61,13 @@ export const jobOrderStatusLabels: Record<JobOrderStatus, string> = {
 export const jobOrderPriorities = ["low", "normal", "high", "urgent"] as const;
 export type JobOrderPriority = (typeof jobOrderPriorities)[number];
 
+export const jobOrderPriorityLabels: Record<JobOrderPriority, string> = {
+  low: "Low",
+  normal: "Normal",
+  high: "High",
+  urgent: "Urgent",
+};
+
 export interface JobOrderRow {
   id: string;
   client_id: string | null;

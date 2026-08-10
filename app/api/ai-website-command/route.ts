@@ -1,5 +1,6 @@
 import { convertToModelMessages, stepCountIs, streamText, tool, type UIMessage } from "ai";
 import { z } from "zod";
+import { checkAiBudget, recordAiUsage } from "@/lib/ai/metering";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@/lib/supabase/types";
 import { isPortalAdminRole } from "@/lib/user-management";
@@ -14,7 +15,7 @@ const websiteProposalTables = [
   "company_operations_records",
 ] as const;
 
-const websiteAiModel = process.env.AI_COMMAND_MODEL || "openai/gpt-4o";
+const websiteAiModel = process.env.AI_COMMAND_MODEL || "openai/gpt-4o-mini";
 
 class HttpError extends Error {
   constructor(
@@ -76,10 +77,16 @@ export async function POST(req: Request) {
     } catch {
       return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
     }
+    const budget = await checkAiBudget("website_command");
+    if (!budget.allowed) {
+      return Response.json({ error: budget.message }, { status: 429 });
+    }
+    const model = budget.modelOverride ?? websiteAiModel;
+
     const snapshot = await getWebsiteOperationsSnapshot(supabase);
 
     const result = streamText({
-      model: websiteAiModel,
+      model,
       system:
         "You are the Reliance Website Operations AI. You help admins monitor the public website, leads, content drafts, SEO gaps, route health, and deployment risks. " +
         "You may create low-risk internal notifications and draft text. You must not publish public content, send customer messages, update lead/customer business records, deploy, roll back, edit environment variables, change auth, or make legal/safety claims final. " +
@@ -88,6 +95,16 @@ export async function POST(req: Request) {
         `Current website operations snapshot: ${JSON.stringify(snapshot)}`,
       messages: await convertToModelMessages(messages),
       stopWhen: stepCountIs(5),
+      onFinish: async ({ totalUsage }) => {
+        await recordAiUsage({
+          featureKey: "website_command",
+          runSource: "user",
+          userId: user.id,
+          model,
+          inputTokens: totalUsage.inputTokens ?? 0,
+          outputTokens: totalUsage.outputTokens ?? 0,
+        });
+      },
       tools: {
         readWebsiteOperationsSnapshot: tool({
           description: "Read the current website operations snapshot.",

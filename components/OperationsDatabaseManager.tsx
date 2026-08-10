@@ -12,6 +12,7 @@ import {
   type CompanyOperationsRecord,
 } from "@/lib/company-data";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyError } from "@/lib/friendly-error";
 
 type OperationsDatabaseManagerProps = {
   initialRecords: CompanyOperationsRecord[];
@@ -187,10 +188,11 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents, 
 
   async function createRecord(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     setCreating(true);
     setMessage("");
 
-    const formData = new FormData(event.currentTarget);
+    const formData = new FormData(form);
     const payload = {
       title: String(formData.get("title") ?? "").trim(),
       category: String(formData.get("category") ?? "Operations"),
@@ -215,7 +217,7 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents, 
 
     if (!supabase) {
       setCreating(false);
-      setStatusMessage("Supabase is required for the operations database.", "error");
+      setStatusMessage("Company data is unavailable right now. Refresh the page, or contact an administrator.", "error");
       return;
     }
 
@@ -223,14 +225,15 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents, 
     setCreating(false);
 
     if (error) {
-      setStatusMessage(error.message, "error");
+      console.error(error);
+      setStatusMessage(friendlyError(error, "The operations record could not be added."), "error");
       return;
     }
 
     if (data) {
       setRecords((current) => [data as CompanyOperationsRecord, ...current]);
       setStatusMessage("Operations record added.");
-      event.currentTarget.reset();
+      form.reset();
     }
   }
 
@@ -247,7 +250,7 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents, 
     const supabase = createClient();
     if (!supabase) {
       setSavingId(null);
-      setStatusMessage("Supabase is required for the operations database.", "error");
+      setStatusMessage("Company data is unavailable right now. Refresh the page, or contact an administrator.", "error");
       return;
     }
 
@@ -261,7 +264,8 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents, 
     setSavingId(null);
 
     if (error) {
-      setStatusMessage(error.message, "error");
+      console.error(error);
+      setStatusMessage(friendlyError(error, "The operations record could not be saved."), "error");
       return;
     }
 
@@ -285,7 +289,7 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents, 
     const supabase = createClient();
     if (!supabase) {
       setDeletingId(null);
-      setStatusMessage("Supabase is required for the operations database.", "error");
+      setStatusMessage("Company data is unavailable right now. Refresh the page, or contact an administrator.", "error");
       return;
     }
 
@@ -293,7 +297,8 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents, 
     setDeletingId(null);
 
     if (error) {
-      setStatusMessage(error.message, "error");
+      console.error(error);
+      setStatusMessage(friendlyError(error, "The operations record could not be removed."), "error");
       return;
     }
 
@@ -395,7 +400,7 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents, 
           </div>
           <button className="button button-primary" disabled={creating} type="submit">
             <Database size={18} />
-            {creating ? "Adding..." : "Add Record"}
+            {creating ? "Adding…" : "Add Record"}
           </button>
         </div>
       </form>
@@ -553,7 +558,7 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents, 
                 <div className="operations-record-actions">
                   <button className="button button-primary" disabled={!dirty || savingId === record.id || deletingId === record.id} onClick={() => saveRecord(record)} type="button">
                     <Save size={17} />
-                    {savingId === record.id ? "Saving..." : "Save"}
+                    {savingId === record.id ? "Saving…" : "Save"}
                   </button>
                   <button
                     className="button button-secondary button-neutral"
@@ -575,7 +580,7 @@ export function OperationsDatabaseManager({ initialRecords, clients, documents, 
                     type="button"
                   >
                     <Trash2 size={17} />
-                    {deletingId === record.id ? "Removing..." : "Remove"}
+                    {deletingId === record.id ? "Removing…" : "Remove"}
                   </button>
                   {messageTone === "error" && dirty ? (
                     <span className="operation-save-warning">

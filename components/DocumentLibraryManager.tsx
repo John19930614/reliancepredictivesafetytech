@@ -13,6 +13,7 @@ import {
   type CompanyDocumentRequirement,
 } from "@/lib/company-data";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyError } from "@/lib/friendly-error";
 import { shareDocument, revokeShare, getSharedDownloadUrl } from "@/app/employee/documents/actions";
 
 type ShareUser = { userId: string; label: string };
@@ -43,6 +44,7 @@ export function DocumentLibraryManager({
   const [documents, setDocuments] = useState(initialDocuments);
   const [filters, setFilters] = useState({ category: "", status: "", owner: "", recordType: "", lifecycleStage: "", clientId: "", legalHold: "" });
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [uploading, setUploading] = useState(false);
   const [sharePanelFor, setSharePanelFor] = useState<string | null>(null);
   const [shareRecipient, setShareRecipient] = useState("");
@@ -99,12 +101,18 @@ export function DocumentLibraryManager({
     });
   }, [documents, filters]);
 
+  function setStatusMessage(text: string, tone: "success" | "error" = "success") {
+    setMessage(text);
+    setMessageTone(tone);
+  }
+
   async function handleUpload(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     setUploading(true);
     setMessage("");
 
-    const formData = new FormData(event.currentTarget);
+    const formData = new FormData(form);
     const file = formData.get("file");
     const title = String(formData.get("title") ?? "");
     const documentNumber = String(formData.get("document_number") ?? "").trim() || null;
@@ -121,14 +129,14 @@ export function DocumentLibraryManager({
 
     if (!(file instanceof File) || !file.name) {
       setUploading(false);
-      setMessage("Choose a document to upload.");
+      setStatusMessage("Choose a document to upload.", "error");
       return;
     }
 
     const supabase = createClient();
     if (!supabase) {
       setUploading(false);
-      setMessage("Supabase is required for employee document uploads.");
+      setStatusMessage("Company data is unavailable right now. Refresh the page, or contact an administrator.", "error");
       return;
     }
 
@@ -138,7 +146,7 @@ export function DocumentLibraryManager({
 
     if (!user) {
       setUploading(false);
-      setMessage("Please sign in again before uploading.");
+      setStatusMessage("Please sign in again before uploading.", "error");
       return;
     }
 
@@ -147,8 +155,9 @@ export function DocumentLibraryManager({
     const { error: uploadError } = await supabase.storage.from("company-documents").upload(filePath, file);
 
     if (uploadError) {
+      console.error(uploadError);
       setUploading(false);
-      setMessage(uploadError.message);
+      setStatusMessage(friendlyError(uploadError, "The file could not be uploaded. Try again."), "error");
       return;
     }
 
@@ -181,14 +190,15 @@ export function DocumentLibraryManager({
     setUploading(false);
 
     if (error) {
-      setMessage(error.message);
+      console.error(error);
+      setStatusMessage(friendlyError(error, "The document could not be registered. Try again."), "error");
       return;
     }
 
     if (data) {
       setDocuments((current) => [data as CompanyDocument, ...current]);
-      setMessage("Document uploaded and registered.");
-      event.currentTarget.reset();
+      setStatusMessage("Document uploaded and registered.");
+      form.reset();
     }
   }
 
@@ -223,7 +233,13 @@ export function DocumentLibraryManager({
     <div className="document-grid">
       <form className="form-panel" onSubmit={handleUpload}>
         <h2>Upload document</h2>
-        {message ? <div className="success-box">{message}</div> : null}
+        {message ? (
+          messageTone === "error" ? (
+            <div className="success-box portal-alert portal-alert-error" role="alert">{message}</div>
+          ) : (
+            <div className="success-box" role="status">{message}</div>
+          )
+        ) : null}
         <div className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 16 }}>
           <div className="field">
             <label htmlFor="title">Title</label>
@@ -333,7 +349,7 @@ export function DocumentLibraryManager({
           </div>
           <button className="button button-primary" disabled={uploading} type="submit">
             <UploadCloud size={18} />
-            {uploading ? "Uploading..." : "Upload Document"}
+            {uploading ? "Uploading…" : "Upload Document"}
           </button>
         </div>
       </form>

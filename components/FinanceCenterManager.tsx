@@ -20,6 +20,7 @@ import {
   type CompanyFinanceTransaction,
 } from "@/lib/company-data";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyError } from "@/lib/friendly-error";
 import {
   addAuthorizedFinanceUser,
   createFinanceBudget,
@@ -157,9 +158,10 @@ export function FinanceCenterManager({
 
   async function handleCreateTransaction(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!canManageRecords) return setStatusMessage("Finance authorization is required to create transactions.", "error");
 
-    const formData = new FormData(event.currentTarget);
+    const formData = new FormData(form);
     setPendingAction("create-transaction");
     const result = await createFinanceTransaction({
       transactionType,
@@ -181,7 +183,7 @@ export function FinanceCenterManager({
 
     setTransactionRows((current) => [result.data! as CompanyFinanceTransaction, ...current]);
     setStatusMessage("Finance transaction added.");
-    event.currentTarget.reset();
+    form.reset();
   }
 
   async function saveTransactionPatch(id: string, patch: Parameters<typeof updateFinanceTransaction>[0]["patch"]) {
@@ -197,22 +199,24 @@ export function FinanceCenterManager({
 
   async function handleReceiptUpload(event: React.FormEvent<HTMLFormElement>, transactionId: string) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!canManageRecords) return setStatusMessage("Finance authorization is required to upload receipts.", "error");
 
-    const formData = new FormData(event.currentTarget);
+    const formData = new FormData(form);
     const file = formData.get("receipt");
     if (!(file instanceof File) || !file.name) return setStatusMessage("Choose a receipt file.", "error");
 
     const supabase = createClient();
-    if (!supabase) return setStatusMessage("Supabase is required for receipt uploads.", "error");
+    if (!supabase) return setStatusMessage("Company data is unavailable right now. Refresh the page, or contact an administrator.", "error");
 
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
     const filePath = `${currentUserId}/${transactionId}/${Date.now()}-${safeName}`;
     setPendingAction(`receipt-${transactionId}`);
     const { error: uploadError } = await supabase.storage.from("finance-receipts").upload(filePath, file);
     if (uploadError) {
+      console.error(uploadError);
       setPendingAction("");
-      return setStatusMessage(uploadError.message, "error");
+      return setStatusMessage(friendlyError(uploadError, "The receipt could not be uploaded. Try again."), "error");
     }
 
     const result = await registerFinanceReceipt({
@@ -228,15 +232,18 @@ export function FinanceCenterManager({
 
     setReceiptRows((current) => [result.data!, ...current]);
     setStatusMessage("Receipt uploaded.");
-    event.currentTarget.reset();
+    form.reset();
   }
 
   async function viewReceipt(receipt: CompanyFinanceReceipt) {
     const supabase = createClient();
-    if (!supabase) return setStatusMessage("Supabase is required to view receipts.", "error");
+    if (!supabase) return setStatusMessage("Company data is unavailable right now. Refresh the page, or contact an administrator.", "error");
 
     const { data, error } = await supabase.storage.from("finance-receipts").createSignedUrl(receipt.file_path, 60);
-    if (error || !data?.signedUrl) return setStatusMessage(error?.message ?? "Receipt link could not be created.", "error");
+    if (error || !data?.signedUrl) {
+      console.error(error);
+      return setStatusMessage(friendlyError(error, "Receipt link could not be created."), "error");
+    }
 
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   }
@@ -254,7 +261,8 @@ export function FinanceCenterManager({
 
   async function handleCreateBudget(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     setPendingAction("create-budget");
     const result = await createFinanceBudget({
       name: cleanOptional(formData.get("name")),
@@ -272,12 +280,13 @@ export function FinanceCenterManager({
 
     setBudgetRows((current) => [result.data! as CompanyFinanceBudget, ...current]);
     setStatusMessage("Budget added.");
-    event.currentTarget.reset();
+    form.reset();
   }
 
   async function handleCreateRecurring(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     setPendingAction("create-recurring");
     const result = await createFinanceRecurringItem({
       itemType: cleanOptional(formData.get("item_type")),
@@ -298,12 +307,13 @@ export function FinanceCenterManager({
 
     setRecurringRows((current) => [result.data! as CompanyFinanceRecurringItem, ...current]);
     setStatusMessage("Recurring item added.");
-    event.currentTarget.reset();
+    form.reset();
   }
 
   async function handleAuthorizeUser(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     setPendingAction("authorize-user");
     const result = await addAuthorizedFinanceUser({
       userId: cleanOptional(formData.get("user_id")),
@@ -315,7 +325,7 @@ export function FinanceCenterManager({
 
     setFinanceUsers((current) => [result.data!, ...current.filter((user) => user.user_id !== result.data!.user_id)]);
     setStatusMessage("Finance access updated.");
-    event.currentTarget.reset();
+    form.reset();
   }
 
   async function handleRemoveFinanceUser(userId: string) {
@@ -462,7 +472,7 @@ export function FinanceCenterManager({
               </div>
               <button className="button button-primary" disabled={!canManageRecords || pendingAction === "create-transaction"} type="submit">
                 <Plus size={18} />
-                {pendingAction === "create-transaction" ? "Adding..." : "Add Transaction"}
+                {pendingAction === "create-transaction" ? "Adding…" : "Add Transaction"}
               </button>
             </div>
           </form>
@@ -583,7 +593,7 @@ export function FinanceCenterManager({
                       <input aria-label={`Upload receipt for ${transaction.title}`} name="receipt" type="file" />
                       <button className="button button-secondary" disabled={pendingAction === `receipt-${transaction.id}`} type="submit">
                         <UploadCloud size={16} />
-                        {pendingAction === `receipt-${transaction.id}` ? "Uploading..." : "Upload Receipt"}
+                        {pendingAction === `receipt-${transaction.id}` ? "Uploading…" : "Upload Receipt"}
                       </button>
                     </form>
                     {pendingAction === `transaction-${transaction.id}` ? <small>Saving...</small> : null}

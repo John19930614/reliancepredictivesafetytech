@@ -48,6 +48,7 @@ import "server-only";
 import OpenAI from "openai";
 
 import { validateAIOutput, type GatewayValidationResult } from "@/lib/ai/gateway";
+import { checkAiBudget, recordAiUsage } from "@/lib/ai/metering";
 import { sanitizeLabel } from "./ai";
 import {
   capLeads,
@@ -63,7 +64,8 @@ import { sourcingMaxLeadsPerRun, type SourcingRunType } from "./types";
 /* -------------------------------------------------------------------------- */
 
 /**
- * The sweep cannot run at all — currently only "no API key configured".
+ * The sweep cannot run at all — no API key configured, or the daily AI budget
+ * is spent.
  *
  * Typed rather than a bare Error so the orchestrator can tell "this deployment
  * has no model access" (record it on the run row, do not retry, do not page
@@ -613,6 +615,7 @@ export interface SourcingSearchResult {
 export async function searchSourcingLeads(
   runType: SourcingRunType,
   ctx: CandidateSearchContext | JobOrderSearchContext,
+  runSource: "user" | "cron" = "cron",
 ): Promise<SourcingSearchResult> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -620,6 +623,14 @@ export async function searchSourcingLeads(
       "OPENAI_API_KEY is not configured, so the Sourcing Agent cannot search the web. Add it to your " +
         "environment variables and run the sweep again.",
     );
+  }
+
+  // Budget gate, checked ONCE per run — both calls below ride on this decision.
+  // A denial takes the orchestrator's existing run-failure path (recorded on
+  // the run row with this message, sweep and cron stay green).
+  const budget = await checkAiBudget("talent_sourcing");
+  if (!budget.allowed) {
+    throw new SourcingUnavailableError(budget.message);
   }
 
   const querySummary = buildSourcingQuerySummary(runType, ctx);
@@ -631,7 +642,7 @@ export async function searchSourcingLeads(
         );
 
   const client = new OpenAI({ apiKey });
-  const model = process.env.OPENAI_RESEARCH_MODEL || "gpt-4o-mini";
+  const model = budget.modelOverride || process.env.OPENAI_RESEARCH_MODEL || "gpt-4o-mini";
 
   // ---- Call 1: RESEARCH. Web search, prose out, citations attached. --------
   const response = await client.responses.create({
@@ -639,6 +650,21 @@ export async function searchSourcingLeads(
     tools: [{ type: "web_search_preview" }],
     max_output_tokens: 32000,
     input: prompt,
+  });
+
+  // Metered before the incomplete check — a cut-off run still spent the
+  // tokens. The output walk stays defensive like everything else that touches
+  // this vendor shape.
+  await recordAiUsage({
+    featureKey: "talent_sourcing",
+    callKind: "research",
+    runSource,
+    model,
+    inputTokens: response.usage?.input_tokens ?? 0,
+    outputTokens: response.usage?.output_tokens ?? 0,
+    webSearchCalls: Array.isArray(response.output)
+      ? response.output.filter((item) => (item as { type?: unknown } | null)?.type === "web_search_call").length
+      : 0,
   });
 
   if (response.status === "incomplete") {
@@ -668,6 +694,15 @@ export async function searchSourcingLeads(
     model,
     max_output_tokens: 16000,
     input: buildStructuringPrompt(researchNote),
+  });
+
+  await recordAiUsage({
+    featureKey: "talent_sourcing",
+    callKind: "structuring",
+    runSource,
+    model,
+    inputTokens: structured.usage?.input_tokens ?? 0,
+    outputTokens: structured.usage?.output_tokens ?? 0,
   });
 
   if (structured.status === "incomplete") {

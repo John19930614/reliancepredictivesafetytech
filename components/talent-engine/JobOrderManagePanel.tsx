@@ -32,6 +32,7 @@ import {
 } from "@/app/employee/talent-engine/actions";
 import {
   jobOrderPriorities,
+  jobOrderPriorityLabels,
   jobOrderStatusLabels,
   jobOrderStatuses,
   type JobOrderPriority,
@@ -337,7 +338,7 @@ export function JobOrderManagePanel({
               <select defaultValue={order.priority} disabled={fieldsDisabled} name="priority">
                 {jobOrderPriorities.map((value) => (
                   <option key={value} value={value}>
-                    {value}
+                    {jobOrderPriorityLabels[value]}
                   </option>
                 ))}
               </select>

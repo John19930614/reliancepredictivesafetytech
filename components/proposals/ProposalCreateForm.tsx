@@ -117,7 +117,14 @@ export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
       <div className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 16 }}>
         <div className="field">
           <label htmlFor="title">Title</label>
-          <input id="title" name="title" placeholder="e.g. SafetyIQ Platform Rollout — Acme Construction" required />
+          <input
+            autoFocus
+            id="title"
+            name="title"
+            placeholder="e.g. SafetyIQ Platform Rollout — Acme Construction"
+            required
+            maxLength={200}
+          />
         </div>
         <ProposalTemplatePicker value={templateId} onChange={setTemplateId} disabled={submitting} />
         <div className="field">
@@ -175,8 +182,8 @@ export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
         </div>
 
         <button className="button button-primary" disabled={submitting} type="submit" style={{ justifySelf: "start" }}>
-          {submitting ? <Loader2 size={18} className="spin" /> : <FilePlus2 size={18} />}
-          {submitting ? "Creating…" : "Create Proposal"}
+          {submitting ? <Loader2 size={18} className="spin" aria-hidden="true" /> : <FilePlus2 size={18} aria-hidden="true" />}
+          {submitting ? "Creating…" : "Create proposal"}
         </button>
       </div>
     </form>

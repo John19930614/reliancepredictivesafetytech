@@ -11,7 +11,7 @@ export default async function CalendarPage() {
       <div className="portal-topline">
         <div>
           <h1>Calendar</h1>
-          <p>Supabase connection required.</p>
+          <p>Calendar data is unavailable right now. Refresh the page, or contact an administrator.</p>
         </div>
       </div>
     );

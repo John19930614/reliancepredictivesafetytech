@@ -24,6 +24,7 @@ import {
   type CompanyClient,
 } from "@/lib/company-data";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyError } from "@/lib/friendly-error";
 
 type DemoRequest = {
   id: string;
@@ -117,11 +118,12 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
 
   async function createLead(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     setMessage("");
-    const formData = new FormData(event.currentTarget);
+    const formData = new FormData(form);
     const supabase = createClient();
     if (!supabase) {
-      setMessage("Supabase is required to create leads.");
+      setMessage("Company data is unavailable right now. Refresh the page, or contact an administrator.");
       return;
     }
 
@@ -139,13 +141,14 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
 
     const { data, error } = await supabase.from("company_clients").insert(payload).select("*").single();
     if (error || !data) {
-      setMessage(error?.message ?? "Could not create lead.");
+      console.error(error);
+      setMessage(friendlyError(error, "Could not create lead."));
       return;
     }
 
     await seedOnboarding(data.id, payload.owner);
     setClients((current) => [data as CompanyClient, ...current]);
-    event.currentTarget.reset();
+    form.reset();
     setMessage("Company card added to Lead with onboarding checklist.");
   }
 
@@ -153,7 +156,7 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
     setMessage("");
     const supabase = createClient();
     if (!supabase) {
-      setMessage("Supabase is required to convert demo requests.");
+      setMessage("Company data is unavailable right now. Refresh the page, or contact an administrator.");
       return;
     }
 
@@ -173,7 +176,8 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
       .single();
 
     if (error || !data) {
-      setMessage(error?.message ?? "Could not convert demo request.");
+      console.error(error);
+      setMessage(friendlyError(error, "Could not convert demo request."));
       return;
     }
 
@@ -204,8 +208,9 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
     if (supabase) {
       const { error } = await supabase.from("company_clients").update({ lifecycle_stage }).eq("id", client.id);
       if (error) {
+        console.error(error);
         setClients((current) => current.map((item) => (item.id === client.id ? { ...item, lifecycle_stage: previousStage } : item)));
-        setMessage(error.message);
+        setMessage(friendlyError(error, "Could not move the card. It was returned to its previous stage."));
         return;
       }
     }

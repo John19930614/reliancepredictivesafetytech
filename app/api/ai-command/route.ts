@@ -2,6 +2,7 @@ import { convertToModelMessages, stepCountIs, streamText, tool, type UIMessage }
 import { z } from "zod";
 import { getCommandSnapshot } from "@/lib/ai/command-context";
 import { validateAIOutput } from "@/lib/ai/gateway";
+import { checkAiBudget, recordAiUsage } from "@/lib/ai/metering";
 import { cleanEmployeeActionHref, getWorkflowActionHref } from "@/lib/ai/task-routing";
 import { createHrAutomationNotification } from "@/lib/hr-automation";
 import { createClient } from "@/lib/supabase/server";
@@ -23,7 +24,7 @@ const allowedProposalTables = [
   "website_operations_events",
 ] as const;
 
-const aiCommandModel = process.env.AI_COMMAND_MODEL || "openai/gpt-4o";
+const aiCommandModel = process.env.AI_COMMAND_MODEL || "openai/gpt-4o-mini";
 
 class HttpError extends Error {
   constructor(
@@ -274,10 +275,16 @@ export async function POST(req: Request) {
     } catch {
       return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
     }
+    const budget = await checkAiBudget("ai_command");
+    if (!budget.allowed) {
+      return Response.json({ error: budget.message }, { status: 429 });
+    }
+    const model = budget.modelOverride ?? aiCommandModel;
+
     const snapshot = await getCommandSnapshot(supabase, user.id);
 
     const result = streamText({
-      model: aiCommandModel,
+      model,
       system:
         "You are the Reliance internal AI command assistant. Help employees triage notifications, workflows, leads, HR review items, time cards, documents, legal issues, and operations records. " +
         "AI output is decision support only. Never claim to provide final safety, legal, HR, payroll, or compliance advice. " +
@@ -285,6 +292,16 @@ export async function POST(req: Request) {
         `Current command snapshot: ${JSON.stringify(snapshot)}`,
       messages: await convertToModelMessages(messages),
       stopWhen: stepCountIs(5),
+      onFinish: async ({ totalUsage }) => {
+        await recordAiUsage({
+          featureKey: "ai_command",
+          runSource: "user",
+          userId: user.id,
+          model,
+          inputTokens: totalUsage.inputTokens ?? 0,
+          outputTokens: totalUsage.outputTokens ?? 0,
+        });
+      },
       tools: {
         readCommandSnapshot: tool({
           description: "Read the current command-center snapshot and priority queue.",

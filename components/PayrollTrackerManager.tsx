@@ -160,7 +160,8 @@ export function PayrollTrackerManager({
 
   async function handleCreateRun(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     setPendingAction("create-run");
     const result = await createPayrollRun({
       periodStart: String(formData.get("period_start") ?? ""),
@@ -176,7 +177,7 @@ export function PayrollTrackerManager({
     setSelectedRunId(result.data.run.id);
     setActiveView("runs");
     setStatusMessage("Payroll run created from approved time cards.");
-    event.currentTarget.reset();
+    form.reset();
   }
 
   async function saveRunStatus(run: EmployeePayrollRun, status: string) {
@@ -316,7 +317,7 @@ export function PayrollTrackerManager({
               </div>
               <button className="button button-primary" disabled={pendingAction === "create-run"} type="submit">
                 <Plus size={18} />
-                {pendingAction === "create-run" ? "Creating..." : "Create Run"}
+                {pendingAction === "create-run" ? "Creating…" : "Create Run"}
               </button>
               <div className="empty-state payroll-create-note">
                 {availableCards.length} approved time card(s) are available for payroll assignment.
@@ -495,7 +496,7 @@ export function PayrollTrackerManager({
                           Net pay: <strong>{money(Number(item.net_pay))}</strong>
                         </span>
                         <button className="button button-primary" disabled={pendingAction === `taxes-${item.id}`} type="submit">
-                          {pendingAction === `taxes-${item.id}` ? "Saving..." : "Save taxes"}
+                          {pendingAction === `taxes-${item.id}` ? "Saving…" : "Save taxes"}
                         </button>
                       </div>
                     </form>

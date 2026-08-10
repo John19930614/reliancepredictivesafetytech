@@ -10,13 +10,16 @@ import {
   inviteEmployee,
   updatePortalUserRole,
 } from "@/app/employee/users/actions";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
+import { SubmitButton } from "@/components/SubmitButton";
+import { friendlyError } from "@/lib/friendly-error";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { EmployeePayrollSetupTask, HrCandidateIntake, TimeCardRole } from "@/lib/company-data";
 import { formatPortalRole, getPortalRoleCommandRank, isPortalAdminRole, portalUserRoles } from "@/lib/user-management";
 
 type UsersPageProps = {
-  searchParams: Promise<{ message?: string; error?: string; invite_link?: string }>;
+  searchParams: Promise<{ message?: string; error?: string; invite_link?: string; q?: string }>;
 };
 
 type UserRoleRow = {
@@ -115,6 +118,16 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
         a.email.localeCompare(b.email),
     );
 
+  const query = (params.q ?? "").trim().toLowerCase();
+  const filteredUsers = query
+    ? users.filter(
+        (portalUser) =>
+          portalUser.email.toLowerCase().includes(query) ||
+          portalUser.displayName.toLowerCase().includes(query) ||
+          portalUser.legalName.toLowerCase().includes(query),
+      )
+    : users;
+
   return (
     <>
       <div className="portal-topline">
@@ -135,7 +148,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
         </div>
       ) : null}
       {params.error ? <div className="success-box portal-alert portal-alert-error">{params.error}</div> : null}
-      {usersError ? <div className="success-box portal-alert portal-alert-error">{usersError.message}</div> : null}
+      {usersError ? <div className="success-box portal-alert portal-alert-error">{friendlyError(usersError, "The user list could not be loaded. Refresh to try again.")}</div> : null}
 
       {!canManageUsers ? (
         <section className="portal-card">
@@ -192,10 +205,10 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                 <label htmlFor="jurisdiction_state">Work state</label>
                 <input id="jurisdiction_state" name="jurisdiction_state" maxLength={2} placeholder="TX" />
               </div>
-              <button className="button button-primary" type="submit">
+              <SubmitButton className="button button-primary" pendingLabel="Generating…">
                 <Send size={18} />
                 Generate Invite Link
-              </button>
+              </SubmitButton>
             </div>
           </form>
 
@@ -227,10 +240,10 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                 <label htmlFor="candidate_notes">Notes</label>
                 <textarea id="candidate_notes" name="notes" />
               </div>
-              <button className="button button-primary" type="submit">
+              <SubmitButton className="button button-primary" pendingLabel="Adding…">
                 <Send size={18} />
                 Add Candidate
-              </button>
+              </SubmitButton>
             </form>
           </section>
 
@@ -238,14 +251,21 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
             <div className="user-list-header">
               <div>
                 <h2>Current users</h2>
-                <p>{users.length} Supabase Auth account{users.length === 1 ? "" : "s"}</p>
+                <p>
+                  {users.length === 200
+                    ? "Showing the first 200 accounts."
+                    : `${users.length} Supabase Auth account${users.length === 1 ? "" : "s"}`}
+                </p>
               </div>
+              <form method="get">
+                <input aria-label="Search users" defaultValue={params.q ?? ""} name="q" placeholder="Search users" />
+              </form>
             </div>
             <div className="user-list">
-              {users.length === 0 ? (
-                <div className="empty-state">No users found.</div>
+              {filteredUsers.length === 0 ? (
+                <div className="empty-state">{query ? "No accounts match." : "No users found."}</div>
               ) : (
-                users.map((portalUser) => (
+                filteredUsers.map((portalUser) => (
                   <article className="user-row" key={portalUser.id}>
                     <div>
                       <h3>{portalUser.email}</h3>
@@ -293,10 +313,10 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                         <label htmlFor={`jurisdiction-state-${portalUser.id}`}>Work state</label>
                         <input id={`jurisdiction-state-${portalUser.id}`} name="jurisdiction_state" maxLength={2} defaultValue={portalUser.workState} />
                       </div>
-                      <button className="button button-light" type="submit">
+                      <SubmitButton className="button button-light" pendingLabel="Saving…">
                         <Save size={16} />
                         Save
-                      </button>
+                      </SubmitButton>
                     </form>
 
                     <div className="user-row-actions">
@@ -305,24 +325,31 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                       </Link>
                       <form action={generateEmployeeAccessLink}>
                         <input name="email" type="hidden" value={portalUser.email} />
-                        <button className="button button-light" type="submit">
+                        <SubmitButton className="button button-light" pendingLabel="Generating…">
                           <Send size={16} />
                           Access Link
-                        </button>
+                        </SubmitButton>
                       </form>
                       <form action={archivePortalUser}>
                         <input name="user_id" type="hidden" value={portalUser.id} />
-                        <button className="button button-secondary" disabled={portalUser.accountStatus === "archived"} type="submit">
-                          <Archive size={16} />
-                          Archive
-                        </button>
+                        {portalUser.accountStatus === "archived" ? (
+                          <button className="button button-secondary" disabled type="submit">
+                            <Archive size={16} />
+                            Archive
+                          </button>
+                        ) : (
+                          <ConfirmSubmit className="button button-secondary" message={`Archive ${portalUser.email}? They lose portal access until restored.`}>
+                            <Archive size={16} />
+                            Archive
+                          </ConfirmSubmit>
+                        )}
                       </form>
                       <form action={deletePortalUser}>
                         <input name="user_id" type="hidden" value={portalUser.id} />
-                        <button className="button button-danger" type="submit">
+                        <ConfirmSubmit className="button button-danger" message={`Permanently delete ${portalUser.email}? This removes their account, role, and chat profile. There is no undo.`}>
                           <Trash2 size={16} />
                           Delete
-                        </button>
+                        </ConfirmSubmit>
                       </form>
                     </div>
                   </article>
@@ -370,17 +397,31 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                             <label htmlFor={`decision-notes-${candidate.id}`}>Decision notes</label>
                             <input id={`decision-notes-${candidate.id}`} name="human_decision_notes" placeholder="Human approval notes" />
                           </div>
-                          <button className="button button-light" disabled={isClosed || isApproved} type="submit">
-                            <CheckCircle2 size={16} />
-                            {approveLabel}
-                          </button>
+                          {isClosed || isApproved ? (
+                            <button className="button button-light" disabled type="submit">
+                              <CheckCircle2 size={16} />
+                              {approveLabel}
+                            </button>
+                          ) : (
+                            <SubmitButton className="button button-light" pendingLabel="Approving…">
+                              <CheckCircle2 size={16} />
+                              {approveLabel}
+                            </SubmitButton>
+                          )}
                         </form>
                         <form action={convertCandidateToInvite}>
                           <input name="candidate_id" type="hidden" value={candidate.id} />
-                          <button className="button button-primary" disabled={!isApproved || isInvited} type="submit">
-                            <Send size={16} />
-                            {inviteLabel}
-                          </button>
+                          {!isApproved || isInvited ? (
+                            <button className="button button-primary" disabled type="submit">
+                              <Send size={16} />
+                              {inviteLabel}
+                            </button>
+                          ) : (
+                            <SubmitButton className="button button-primary" pendingLabel="Inviting…">
+                              <Send size={16} />
+                              {inviteLabel}
+                            </SubmitButton>
+                          )}
                         </form>
                       </div>
                     </article>
