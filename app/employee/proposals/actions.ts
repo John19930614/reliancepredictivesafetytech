@@ -198,8 +198,9 @@ export async function createProposal(input: CreateProposalInput): Promise<Action
   ]);
 
   // The row is inserted BEFORE the form state is built, because the proposal's
-  // reference number is allocated by the column default
-  // (next_client_proposal_number) and the document has to print the number this
+  // reference number is allocated by the insert trigger
+  // (allocate_client_proposal_number — CODE-NN for a client with a code, the
+  // global RPS scheme otherwise) and the document has to print the number this
   // proposal actually got. Building the state first would mean either guessing
   // the number or burning a sequence value on a row that may fail to insert.
   const { data: proposal, error } = await supabase

@@ -18,6 +18,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
+import { clientCodeRule, isValidClientCode, normalizeClientCode } from "@/lib/proposals/client-codes";
 
 export interface CompanyActionResult {
   ok: boolean;
@@ -144,6 +145,101 @@ export async function saveCompanyAddress(
 
   revalidateCompany(clientId);
   return { ok: true };
+}
+
+/**
+ * Assigns the company's proposal code (the moniker prefixing every proposal
+ * number: HUN-01). Decision of record from the 2026-08-07 build review:
+ * whoever writes the client's first proposal assigns the code.
+ *
+ * Once set, the code is immutable here: proposals already numbered under it
+ * are documents a client may be quoting back on a PO, and silently switching
+ * the moniker would strand their references. The database rejects duplicates
+ * (unique index); that rejection is translated into a human answer.
+ *
+ * Existing DRAFT proposals for the company are renumbered onto the new scheme
+ * by renumber_client_draft_proposals() — sent or accepted ones keep the
+ * reference the client was quoted.
+ */
+export async function assignClientCode(
+  clientId: string,
+  code: string,
+): Promise<CompanyActionResult & { assignedCode?: string; renumbered?: number }> {
+  if (!UUID.test(clientId)) return { ok: false, error: "Missing company id." };
+
+  const { supabase, userId } = await requireEmployee();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+
+  const normalized = normalizeClientCode(code);
+  if (!isValidClientCode(normalized)) {
+    return { ok: false, error: `That doesn't work as a proposal code. ${clientCodeRule}` };
+  }
+
+  const { data: company, error: readError } = await supabase
+    .from("company_clients")
+    .select("id, name, client_code")
+    .eq("id", clientId)
+    .maybeSingle();
+  if (readError) return { ok: false, error: readError.message };
+  if (!company) return { ok: false, error: "That company was not found, or you do not have permission to edit it." };
+
+  const existing = normalizeClientCode(company.client_code as string | null | undefined);
+  if (existing !== "") {
+    if (existing === normalized) return { ok: true, assignedCode: existing, renumbered: 0 };
+    return {
+      ok: false,
+      error: `This company already has the code ${existing}. Codes stay fixed once proposals are numbered under them.`,
+    };
+  }
+
+  const { data: updated, error } = await supabase
+    .from("company_clients")
+    .update({ client_code: normalized })
+    .eq("id", clientId)
+    .is("client_code", null)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    // 23505 = the partial unique index on client_code: someone else owns it.
+    if ((error as { code?: string }).code === "23505") {
+      return { ok: false, error: `The code ${normalized} is already taken by another company — pick a different one.` };
+    }
+    return { ok: false, error: error.message };
+  }
+  if (!updated) {
+    return { ok: false, error: "The code was not saved — the company may have just been given one. Reload and check." };
+  }
+
+  // Draft proposals move onto the new numbering immediately, so the document
+  // someone is about to send carries the code that was just decided.
+  const { data: renumbered, error: renumberError } = await supabase.rpc("renumber_client_draft_proposals", {
+    p_client: clientId,
+  });
+
+  await recordAuditEvent(
+    buildDataAuditEvent(
+      "update",
+      "company_clients",
+      clientId,
+      userId,
+      `Assigned proposal code ${normalized} to ${(company.name as string) ?? "a client company"}`,
+      { client_code: null },
+      { client_code: normalized },
+    ),
+  );
+
+  revalidateCompany(clientId);
+
+  if (renumberError) {
+    return {
+      ok: true,
+      assignedCode: normalized,
+      renumbered: 0,
+      error: `The code was saved, but existing drafts could not be renumbered: ${renumberError.message}`,
+    };
+  }
+  return { ok: true, assignedCode: normalized, renumbered: typeof renumbered === "number" ? renumbered : 0 };
 }
 
 export interface CompanyContactInput {

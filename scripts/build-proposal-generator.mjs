@@ -85,8 +85,26 @@ const bridge = `
       previewTimer = null;
       try { window.parent.postMessage({ type: 'proposal:preview', state: collectFullState() }, window.location.origin); }
       catch (err) { /* a closed or navigated parent is not an error worth surfacing */ }
+      pushHeight();
     }, 250);
   }
+  // Content-height reporting, so the parent can size the iframe to the panel
+  // and the form scrolls with the page instead of inside a nested frame.
+  // body.embedded .panel is static (no inner scroll area) for the same reason.
+  var lastHeight = 0;
+  function pushHeight(){
+    var doc = document.documentElement;
+    var height = doc ? Math.ceil(doc.scrollHeight) : 0;
+    if (height <= 0 || Math.abs(height - lastHeight) <= 4) return; // ignore subpixel jitter
+    lastHeight = height;
+    try { window.parent.postMessage({ type: 'proposal:height', height: height }, window.location.origin); }
+    catch (err) { /* parent gone: nothing to size */ }
+  }
+  var resizeTimer = null;
+  window.addEventListener('resize', function(){
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function(){ resizeTimer = null; pushHeight(); }, 200);
+  });
   document.addEventListener('input', pushPreview, true);
   document.addEventListener('change', pushPreview, true);
   // Adding or removing a phase/service row is a click, and the row is created
@@ -102,6 +120,7 @@ const bridge = `
   window.addEventListener('DOMContentLoaded', ()=>{
     window.parent.postMessage({ type: 'proposal:ready' }, window.location.origin);
     pushPreview();
+    pushHeight();
   });
 })();
 /* --- end platform bridge --- */

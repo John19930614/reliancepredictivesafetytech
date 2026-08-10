@@ -12,7 +12,15 @@
 // gate has to be decided BEFORE twenty minutes of work goes into an iframe that
 // will refuse to save.
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  startTransition as startNonUrgentRender,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -68,6 +76,7 @@ import {
   canTransitionProposal,
 } from "@/lib/proposals/policy";
 import { diffGeneratorState } from "@/lib/proposals/diff";
+import { estimatePrintPages, formatPrintPagesLabel } from "@/lib/proposals/page-estimate";
 import {
   maxTeamMembers,
   parseSignerId,
@@ -299,6 +308,15 @@ export function ProposalWorkspace({
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [baseRevision, setBaseRevision] = useState(proposal.current_revision);
+  /**
+   * The generator document's own height, reported by the bridge. The iframe is
+   * sized to it so the form has NO internal scrollbar — the page scrolls, the
+   * preview scrolls, and that is the entire set of scroll controls (the
+   * 2026-08-07 review counted four).
+   */
+  const [generatorHeight, setGeneratorHeight] = useState(780);
+  /** ≈ print pages of the previewed document; null until measured. */
+  const [pagesEstimate, setPagesEstimate] = useState<number | null>(null);
 
   const editGate = canEditProposalContent(proposal.status);
 
@@ -314,6 +332,68 @@ export function ProposalWorkspace({
   );
 
   const documentExtras = useDocumentExtras(previewState);
+
+  /**
+   * The document subtree, rebuilt ONLY when its own inputs change. Without
+   * this, every unrelated state tick in the workspace (dirty flag from the 10s
+   * poll, a save notice, the change-note field) re-rendered the entire
+   * multi-section document — the single heaviest subtree on the page and the
+   * bulk of the "form is slow to fill out" report.
+   */
+  const documentNode = useMemo(
+    () =>
+      previewState ? (
+        <ProposalDocument
+          state={previewState}
+          // Resolved from the picker's selection, so section 09 and the
+          // seller signature block appear here exactly as they do on the
+          // document view — the claim the preview badge makes.
+          team={documentExtras.team}
+          signature={documentExtras.signature}
+          proposal={{
+            id: proposal.id,
+            title: proposal.title,
+            status: proposal.status,
+            currentRevision: baseRevision,
+            validUntil: proposal.valid_until,
+          }}
+        />
+      ) : null,
+    [
+      previewState,
+      documentExtras,
+      proposal.id,
+      proposal.title,
+      proposal.status,
+      proposal.valid_until,
+      baseRevision,
+    ],
+  );
+
+  /**
+   * Measures the rendered document for the ≈-pages badge. Observes the
+   * wrapper, reads .rp-doc's box — the observer refires as typing grows the
+   * document, so the count tracks the edit live.
+   */
+  const previewObserverRef = useRef<ResizeObserver | null>(null);
+  const measurePreview = useCallback((node: HTMLDivElement | null) => {
+    previewObserverRef.current?.disconnect();
+    previewObserverRef.current = null;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const update = () => {
+      const doc = node.querySelector<HTMLElement>(".rp-doc");
+      if (!doc) {
+        setPagesEstimate(null);
+        return;
+      }
+      const rect = doc.getBoundingClientRect();
+      setPagesEstimate(estimatePrintPages(rect.height, rect.width));
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    previewObserverRef.current = observer;
+    update();
+  }, []);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   /** True once the saved state has been pushed into the current iframe document. */
@@ -471,9 +551,29 @@ export function ProposalWorkspace({
       }
 
       // Preview only. Deliberately does not touch the dirty flag, the autosave
-      // timer, or the collect queue — this fires on every keystroke.
+      // timer, or the collect queue — this fires on every keystroke. Applied as
+      // a transition: re-rendering the full document is the expensive part of
+      // every keystroke, and marking it interruptible keeps typing in the
+      // iframe responsive while React catches the preview up behind it.
       if (msg.type === "proposal:preview") {
-        if (isGeneratorState(msg.state)) setPreviewState(msg.state);
+        if (isGeneratorState(msg.state)) {
+          const state = msg.state;
+          // React's module-level startTransition, NOT this component's
+          // useTransition() — that one drives `busy`, and routing every
+          // keystroke through it would flicker the save buttons disabled.
+          startNonUrgentRender(() => setPreviewState(state));
+        }
+        return;
+      }
+
+      // The generator document's height, so the iframe can hold the whole form
+      // without a nested scrollbar. Clamped: a bridge bug must not collapse the
+      // form to nothing or grow the page without bound.
+      if (msg.type === "proposal:height") {
+        const height = Number((msg as { height?: unknown }).height);
+        if (Number.isFinite(height)) {
+          setGeneratorHeight(Math.min(8000, Math.max(720, Math.ceil(height) + 2)));
+        }
         return;
       }
 
@@ -683,14 +783,18 @@ export function ProposalWorkspace({
             // Belt-and-braces against a dropped `proposal:ready`: whichever of
             // the two arrives first delivers the state, the other is a no-op.
             onLoad={deliverInitialState}
+            // Sized to the generator document (bridge `proposal:height`), so
+            // the form has no internal scrollbar — it flows and scrolls with
+            // the page like any other panel.
             style={{
               width: "100%",
-              height: "78vh",
-              minHeight: 720,
+              height: generatorHeight,
               border: "1px solid var(--portal-line, #dbe2e9)",
               borderRadius: 8,
               background: "#fff",
             }}
+            // No scrolling="no": if the height report ever fails, a scrollbar
+            // is a degraded experience — clipped content is a broken one.
           />
 
           <ProposalTeamPicker
@@ -702,25 +806,16 @@ export function ProposalWorkspace({
         </div>
 
         <div className="proposal-editor-preview">
-          <div className="rp-doc-noprint" style={{ marginBottom: 8 }}>
+          <div className="rp-doc-noprint" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <span className="badge">Live preview — exactly what the client sees</span>
+            {pagesEstimate !== null ? (
+              <span className="badge" title="Estimated from the preview's length. The exported PDF is authoritative.">
+                {formatPrintPagesLabel(pagesEstimate)}
+              </span>
+            ) : null}
           </div>
           {previewState ? (
-            <ProposalDocument
-              state={previewState}
-              // Resolved from the picker's selection, so section 09 and the
-              // seller signature block appear here exactly as they do on the
-              // document view — the claim the badge above makes.
-              team={documentExtras.team}
-              signature={documentExtras.signature}
-              proposal={{
-                id: proposal.id,
-                title: proposal.title,
-                status: proposal.status,
-                currentRevision: baseRevision,
-                validUntil: proposal.valid_until,
-              }}
-            />
+            <div ref={measurePreview}>{documentNode}</div>
           ) : (
             <div className="empty-state">Waiting for the generator to load…</div>
           )}

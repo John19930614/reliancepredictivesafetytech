@@ -20,6 +20,8 @@ interface ProposalListRow {
 interface ClientOption {
   id: string;
   name: string;
+  /** Proposal moniker (HUN); null until assigned. The create form prompts when missing. */
+  client_code?: string | null;
 }
 
 interface ProposalsSearchParams {
@@ -91,7 +93,7 @@ export default async function ProposalsPage({
 
     const [{ data: proposals, count }, { data: clients }] = await Promise.all([
       query,
-      supabase.from("company_clients").select("id, name").order("name").limit(clientOptionLimit),
+      supabase.from("company_clients").select("id, name, client_code").order("name").limit(clientOptionLimit),
     ]);
 
     rows = (proposals ?? []) as unknown as ProposalListRow[];
@@ -102,7 +104,7 @@ export default async function ProposalsPage({
     if (clientId && !clientOptions.some((option) => option.id === clientId)) {
       const { data: selected } = await supabase
         .from("company_clients")
-        .select("id, name")
+        .select("id, name, client_code")
         .eq("id", clientId)
         .maybeSingle();
       if (selected) clientOptions = [selected as ClientOption, ...clientOptions];

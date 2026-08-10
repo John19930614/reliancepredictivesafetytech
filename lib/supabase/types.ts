@@ -1014,6 +1014,7 @@ export type Database = {
           address_line1: string | null
           address_line2: string | null
           city: string | null
+          client_code: string | null
           company_type: string | null
           contact_name: string | null
           country: string | null
@@ -1026,6 +1027,7 @@ export type Database = {
           owner: string | null
           phone: string | null
           postal_code: string | null
+          proposal_seq: number
           source: string | null
           state: string | null
           status: string
@@ -1036,6 +1038,7 @@ export type Database = {
           address_line1?: string | null
           address_line2?: string | null
           city?: string | null
+          client_code?: string | null
           company_type?: string | null
           contact_name?: string | null
           country?: string | null
@@ -1048,6 +1051,7 @@ export type Database = {
           owner?: string | null
           phone?: string | null
           postal_code?: string | null
+          proposal_seq?: number
           source?: string | null
           state?: string | null
           status?: string
@@ -1058,6 +1062,7 @@ export type Database = {
           address_line1?: string | null
           address_line2?: string | null
           city?: string | null
+          client_code?: string | null
           company_type?: string | null
           contact_name?: string | null
           country?: string | null
@@ -1070,6 +1075,7 @@ export type Database = {
           owner?: string | null
           phone?: string | null
           postal_code?: string | null
+          proposal_seq?: number
           source?: string | null
           state?: string | null
           status?: string
@@ -8028,6 +8034,7 @@ export type Database = {
       is_company_portal_super_admin: { Args: never; Returns: boolean }
       mark_employee_last_seen: { Args: never; Returns: undefined }
       next_client_proposal_number: { Args: never; Returns: string }
+      renumber_client_draft_proposals: { Args: { p_client: string }; Returns: number }
     }
     Enums: {
       [_ in never]: never

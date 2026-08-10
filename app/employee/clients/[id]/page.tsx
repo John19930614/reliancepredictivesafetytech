@@ -75,6 +75,8 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
           the company record could not hold. */}
       <CompanyAddressAndContacts
         clientId={id}
+        clientName={(client.name ?? "") as string}
+        clientCode={(client.client_code ?? null) as string | null}
         address={{
           address_line1: (client.address_line1 ?? null) as string | null,
           address_line2: (client.address_line2 ?? null) as string | null,
