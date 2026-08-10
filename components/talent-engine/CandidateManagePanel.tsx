@@ -31,14 +31,18 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import {
+  setCandidateCertificationDates,
   updateCandidate,
   verifyCandidateCertification,
   type ActionResult,
   type CandidatePatch,
 } from "@/app/employee/talent-engine/actions";
+import { certExpiringSoon } from "@/lib/talent-engine/policy";
 import {
   candidateStatusLabels,
   candidateStatuses,
+  certExpiryWarningDays,
+  type CandidateCertificationRow,
   type CandidateRow,
   type CandidateStatus,
 } from "@/lib/talent-engine/types";
@@ -83,6 +87,7 @@ export function CandidateManagePanel({
   canPropose,
   canApprove,
   verticalOptions,
+  certDates = [],
 }: {
   candidate: CandidateRow;
   /** Gates the edit fields — updateCandidate re-checks this on the server. */
@@ -91,6 +96,8 @@ export function CandidateManagePanel({
   canApprove: boolean;
   /** Configured trade list from talent_settings, for the vertical picker. */
   verticalOptions?: string[];
+  /** Dates ledger rows for this candidate (talent_candidate_certifications). */
+  certDates?: Pick<CandidateCertificationRow, "certification" | "issued_on" | "expires_on">[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -110,6 +117,53 @@ export function CandidateManagePanel({
   const verified = new Set(
     candidate.verified_certifications.map((entry) => entry.trim().toLowerCase()).filter(Boolean),
   );
+
+  /** Ledger rows by lowercased cert name, for the per-cert date inputs. */
+  const datesByCert = new Map(
+    certDates.map((row) => [row.certification.trim().toLowerCase(), row] as const),
+  );
+  /** Unsaved edits to the date inputs, keyed the same way. */
+  const [dateDrafts, setDateDrafts] = useState<Record<string, { issued: string; expires: string }>>({});
+  const [pendingDatesCert, setPendingDatesCert] = useState<string | null>(null);
+
+  function draftFor(certification: string): { issued: string; expires: string } {
+    const key = certification.trim().toLowerCase();
+    const draft = dateDrafts[key];
+    if (draft) return draft;
+    const row = datesByCert.get(key);
+    return { issued: dateValue(row?.issued_on ?? null), expires: dateValue(row?.expires_on ?? null) };
+  }
+
+  function setDraft(certification: string, patch: Partial<{ issued: string; expires: string }>) {
+    const key = certification.trim().toLowerCase();
+    setDateDrafts((current) => ({ ...current, [key]: { ...draftFor(certification), ...patch } }));
+  }
+
+  function handleSaveDates(certification: string) {
+    const draft = draftFor(certification);
+    setCertError("");
+    setCertNotice("");
+    setPendingDatesCert(certification);
+    startTransition(async () => {
+      const result = await setCandidateCertificationDates(
+        candidate.id,
+        certification,
+        draft.issued || null,
+        draft.expires || null,
+      );
+      setPendingDatesCert(null);
+      if (!result?.ok) {
+        setCertError(messageFor(result, `The dates for ${certification} could not be saved.`));
+        return;
+      }
+      setCertNotice(
+        draft.issued || draft.expires
+          ? `${certification} dates saved.`
+          : `${certification} dates cleared.`,
+      );
+      router.refresh();
+    });
+  }
 
   function handleVerify(certification: string) {
     setCertError("");
@@ -244,42 +298,88 @@ export function CandidateManagePanel({
                 {candidate.certifications.map((certification, index) => {
                   const isVerified = verified.has(certification.trim().toLowerCase());
                   const busy = pendingCert === certification;
+                  const draft = draftFor(certification);
+                  const datesBusy = pendingDatesCert === certification;
+                  const expiringSoon = certExpiringSoon(draft.expires || null);
                   return (
-                    <li className="talent-row" key={`${certification}-${index}`}>
-                      <span className="talent-lead-cert">{certification}</span>
-                      <span className="talent-row-main">
-                        <span
-                          className="talent-row-sub"
-                          title={
-                            isVerified
-                              ? `${certification} has been confirmed by a human reviewer and no longer blocks submittal.`
-                              : `${certification} is claimed but unconfirmed. A job order requiring it cannot be submitted for this candidate.`
-                          }
-                        >
-                          {isVerified ? "Verified" : "Claimed, not verified"}
+                    <li className="talent-row talent-row-managed" key={`${certification}-${index}`}>
+                      <span className="talent-row-line">
+                        <span className="talent-lead-cert">{certification}</span>
+                        <span className="talent-row-main">
+                          <span
+                            className="talent-row-sub"
+                            title={
+                              isVerified
+                                ? `${certification} has been confirmed by a human reviewer and no longer blocks submittal.`
+                                : `${certification} is claimed but unconfirmed. A job order requiring it cannot be submitted for this candidate.`
+                            }
+                          >
+                            {isVerified ? "Verified" : "Claimed, not verified"}
+                          </span>
                         </span>
+                        {expiringSoon ? (
+                          <span
+                            className="talent-cert-expiring"
+                            title={`This certification lapses within ${certExpiryWarningDays} days (or already has).`}
+                          >
+                            Expiring
+                          </span>
+                        ) : null}
+                        {isVerified ? (
+                          <span className="talent-row-rate">
+                            <span className="talent-rate-unit">verified</span>
+                          </span>
+                        ) : (
+                          <button
+                            aria-label={`Verify ${certification} for ${candidate.full_name}`}
+                            className="talent-btn talent-btn-approve"
+                            disabled={isPending || !canApprove}
+                            onClick={() => handleVerify(certification)}
+                            title={verifyTitle}
+                            type="button"
+                          >
+                            {busy ? (
+                              <Loader2 aria-hidden="true" className="spin" size={14} />
+                            ) : (
+                              <ShieldCheck aria-hidden="true" size={14} />
+                            )}
+                            {busy ? "Verifying…" : "Verify"}
+                          </button>
+                        )}
                       </span>
-                      {isVerified ? (
-                        <span className="talent-row-rate">
-                          <span className="talent-rate-unit">verified</span>
-                        </span>
-                      ) : (
+                      <span className="talent-cert-dates">
+                        <label>
+                          <span>Issued</span>
+                          <input
+                            aria-label={`${certification} issue date`}
+                            disabled={isPending || !canPropose}
+                            onChange={(event) => setDraft(certification, { issued: event.target.value })}
+                            type="date"
+                            value={draft.issued}
+                          />
+                        </label>
+                        <label>
+                          <span>Expires</span>
+                          <input
+                            aria-label={`${certification} expiry date`}
+                            disabled={isPending || !canPropose}
+                            onChange={(event) => setDraft(certification, { expires: event.target.value })}
+                            type="date"
+                            value={draft.expires}
+                          />
+                        </label>
                         <button
-                          aria-label={`Verify ${certification} for ${candidate.full_name}`}
-                          className="talent-btn talent-btn-approve"
-                          disabled={isPending || !canApprove}
-                          onClick={() => handleVerify(certification)}
-                          title={verifyTitle}
+                          aria-label={`Save ${certification} dates for ${candidate.full_name}`}
+                          className="talent-btn"
+                          disabled={isPending || !canPropose}
+                          onClick={() => handleSaveDates(certification)}
+                          title={editTitle}
                           type="button"
                         >
-                          {busy ? (
-                            <Loader2 aria-hidden="true" className="spin" size={14} />
-                          ) : (
-                            <ShieldCheck aria-hidden="true" size={14} />
-                          )}
-                          {busy ? "Verifying…" : "Verify"}
+                          {datesBusy ? <Loader2 aria-hidden="true" className="spin" size={14} /> : null}
+                          {datesBusy ? "Saving…" : "Save dates"}
                         </button>
-                      )}
+                      </span>
                     </li>
                   );
                 })}

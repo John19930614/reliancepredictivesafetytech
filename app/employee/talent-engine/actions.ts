@@ -84,6 +84,7 @@ const UNIQUE_VIOLATION = "23505";
 const tables = {
   jobOrders: "talent_job_orders",
   candidates: "talent_candidates",
+  candidateCertifications: "talent_candidate_certifications",
   matches: "talent_matches",
   approvals: "talent_match_approvals",
   placements: "talent_placements",
@@ -647,6 +648,24 @@ export async function updateCandidate(candidateId: string, patch: CandidatePatch
   if (error) return { ok: false, error: error.message };
   if (!updated || updated.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
 
+  // The dates ledger only holds rows for CLAIMED certifications. Removing a
+  // claim removes its dates too — the ledger must never resurrect a cert the
+  // candidate no longer carries. Delete-by-difference rather than delete-all:
+  // dates on certs that remain claimed survive an unrelated list edit.
+  if (Array.isArray(validation.update.certifications)) {
+    const claimed = new Set((validation.update.certifications as string[]).map((c) => c.trim().toLowerCase()));
+    const { data: certRows } = await supabase
+      .from(tables.candidateCertifications)
+      .select("id, certification")
+      .eq("candidate_id", candidateId);
+    const stale = (Array.isArray(certRows) ? certRows : [])
+      .filter((row) => !claimed.has(String(row.certification ?? "").trim().toLowerCase()))
+      .map((row) => row.id as string);
+    if (stale.length > 0) {
+      await supabase.from(tables.candidateCertifications).delete().in("id", stale);
+    }
+  }
+
   await recordTalentAudit(
     role,
     "update",
@@ -740,6 +759,118 @@ export async function verifyCandidateCertification(
       actorId: userId,
       candidateId,
     }),
+  );
+
+  revalidateTalent();
+  return { ok: true };
+}
+
+/** YYYY-MM-DD or empty/null. Anything else is rejected, not coerced. */
+function cleanDateInput(value: unknown): { ok: boolean; date: string | null } {
+  if (value === null || value === undefined) return { ok: true, date: null };
+  if (typeof value !== "string") return { ok: false, date: null };
+  const text = value.trim();
+  if (text === "") return { ok: true, date: null };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return { ok: false, date: null };
+  return Number.isNaN(Date.parse(`${text}T00:00:00Z`)) ? { ok: false, date: null } : { ok: true, date: text };
+}
+
+/**
+ * Records (or clears) the issue/expiry dates for one CLAIMED certification —
+ * the dates ledger behind the tracker's 60-day expiry flag (build-review spec,
+ * 2026-08-07).
+ *
+ * `canPropose`, not `canApprove`: dates are intake data. Verification stays
+ * its own gated act because it unblocks submittal; a date never does.
+ */
+export async function setCandidateCertificationDates(
+  candidateId: string,
+  certification: string,
+  issuedOn: string | null,
+  expiresOn: string | null,
+): Promise<ActionResult> {
+  const { supabase, userId, canRead, canPropose, role } = await getTalentAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT_MESSAGE };
+  if (!canRead) return { ok: false, error: "You do not have access to the Talent Engine." };
+  if (!canPropose) return { ok: false, error: "You do not have permission to edit candidates." };
+  if (!isTalentUuid(candidateId)) return { ok: false, error: "Missing or invalid candidate id." };
+
+  const cert = cleanText(certification, certMaxLength);
+  if (!cert) return { ok: false, error: "Name the certification the dates belong to." };
+
+  const issued = cleanDateInput(issuedOn);
+  const expires = cleanDateInput(expiresOn);
+  if (!issued.ok || !expires.ok) return { ok: false, error: "Dates must be calendar dates (YYYY-MM-DD)." };
+  if (issued.date && expires.date && issued.date > expires.date) {
+    return { ok: false, error: "The issue date cannot be after the expiry date." };
+  }
+
+  const { data: candidate } = await supabase
+    .from(tables.candidates)
+    .select("id, full_name, certifications")
+    .eq("id", candidateId)
+    .maybeSingle();
+  if (!candidate) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  // Dates hang off a claim. An unclaimed cert gets its claim added in the edit
+  // fields first — the ledger must not invent claims as a side effect.
+  const claimed: string[] = Array.isArray(candidate.certifications) ? candidate.certifications : [];
+  const key = cert.toLowerCase();
+  const claimedMatch = claimed.find((entry) => typeof entry === "string" && entry.trim().toLowerCase() === key);
+  if (!claimedMatch) {
+    return { ok: false, error: `${cert} is not on this candidate's certification list — add the claim first.` };
+  }
+
+  const { data: existing } = await supabase
+    .from(tables.candidateCertifications)
+    .select("id, issued_on, expires_on")
+    .eq("candidate_id", candidateId)
+    .ilike("certification", claimedMatch.trim())
+    .maybeSingle();
+
+  const beforeAudit = existing
+    ? { certification: claimedMatch.trim(), issued_on: existing.issued_on, expires_on: existing.expires_on }
+    : null;
+  const afterAudit = { certification: claimedMatch.trim(), issued_on: issued.date, expires_on: expires.date };
+
+  if (!issued.date && !expires.date) {
+    // Clearing both dates removes the row — an all-null row reads as data.
+    if (existing?.id) {
+      const { error } = await supabase.from(tables.candidateCertifications).delete().eq("id", existing.id);
+      if (error) return { ok: false, error: error.message };
+    }
+  } else if (existing?.id) {
+    const { error } = await supabase
+      .from(tables.candidateCertifications)
+      .update({ issued_on: issued.date, expires_on: expires.date })
+      .eq("id", existing.id);
+    if (error) return { ok: false, error: error.message };
+  } else {
+    const { error } = await supabase.from(tables.candidateCertifications).insert({
+      candidate_id: candidateId,
+      certification: claimedMatch.trim(),
+      issued_on: issued.date,
+      expires_on: expires.date,
+    });
+    // 23505 = the per-cert unique index: a concurrent save won the insert.
+    // Their dates land; re-saving from a refreshed panel is the honest retry.
+    if (error) {
+      if ((error as { code?: string }).code === "23505") {
+        return { ok: false, error: "Someone else just saved dates for this certification — reload and try again." };
+      }
+      return { ok: false, error: error.message };
+    }
+  }
+
+  await recordTalentAudit(
+    role,
+    existing ? "update" : "create",
+    "talent_candidate_certification",
+    candidateId,
+    userId,
+    `Set ${claimedMatch.trim()} dates for candidate ${candidate.full_name}`,
+    beforeAudit,
+    afterAudit,
   );
 
   revalidateTalent();

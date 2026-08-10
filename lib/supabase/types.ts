@@ -6833,6 +6833,44 @@ export type Database = {
           },
         ]
       }
+      talent_candidate_certifications: {
+        Row: {
+          candidate_id: string
+          certification: string
+          created_at: string
+          expires_on: string | null
+          id: string
+          issued_on: string | null
+          updated_at: string
+        }
+        Insert: {
+          candidate_id: string
+          certification: string
+          created_at?: string
+          expires_on?: string | null
+          id?: string
+          issued_on?: string | null
+          updated_at?: string
+        }
+        Update: {
+          candidate_id?: string
+          certification?: string
+          created_at?: string
+          expires_on?: string | null
+          id?: string
+          issued_on?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "talent_candidate_certifications_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "talent_candidates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       talent_candidates: {
         Row: {
           availability_date: string | null

@@ -121,6 +121,21 @@ export interface CandidateRow {
   updated_at: string;
 }
 
+/**
+ * One claimed certification's dates ledger row (talent_candidate_certifications).
+ * WHICH certs are claimed/verified stays on the candidate arrays above — this
+ * table only answers "when was it issued and when does it lapse".
+ */
+export interface CandidateCertificationRow {
+  id: string;
+  candidate_id: string;
+  certification: string;
+  issued_on: string | null;
+  expires_on: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ============================================================================
 // Matches — the approval queue
 // ============================================================================

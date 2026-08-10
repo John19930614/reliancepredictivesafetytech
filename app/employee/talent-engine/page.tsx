@@ -126,9 +126,17 @@ function viewerRoleLabel(access: TalentAccess): string {
 }
 
 interface CertScanRow {
+  id: string;
   certifications: string[] | null;
   verified_certifications: string[] | null;
   cert_expiry_date: string | null;
+}
+
+interface CertDatesRow {
+  candidate_id: string;
+  certification: string;
+  issued_on: string | null;
+  expires_on: string | null;
 }
 
 /**
@@ -163,15 +171,30 @@ function buildCertificationCoverage(rows: CertScanRow[]): CertificationCoverage[
     .slice(0, certTrackerRows);
 }
 
-/** Candidates whose certification lapses inside the warning window (or already has). */
-function countExpiringSoon(rows: CertScanRow[], today: Date): number {
+/**
+ * Candidates with ANY certification lapsing inside the warning window (or
+ * already lapsed). Two sources, unioned by candidate: the per-cert dates
+ * ledger (talent_candidate_certifications, the build-review upgrade) and the
+ * legacy person-level cert_expiry_date still carried by older rows.
+ */
+function countExpiringSoon(rows: CertScanRow[], certDates: CertDatesRow[], today: Date): number {
   const cutoff = new Date(today.getTime());
   cutoff.setUTCDate(cutoff.getUTCDate() + certExpiryWarningDays);
-  return rows.filter((row) => {
-    if (!row.cert_expiry_date) return false;
-    const expiry = new Date(`${row.cert_expiry_date}T00:00:00Z`);
+
+  const lapsing = (value: string | null): boolean => {
+    if (!value) return false;
+    const expiry = new Date(`${value}T00:00:00Z`);
     return !Number.isNaN(expiry.getTime()) && expiry.getTime() <= cutoff.getTime();
-  }).length;
+  };
+
+  const expiring = new Set<string>();
+  for (const row of rows) {
+    if (lapsing(row.cert_expiry_date)) expiring.add(row.id);
+  }
+  for (const row of certDates) {
+    if (lapsing(row.expires_on)) expiring.add(row.candidate_id);
+  }
+  return expiring.size;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -224,6 +247,7 @@ export default async function TalentEnginePage() {
     placementsResult,
     activityResult,
     certScanResult,
+    certDatesResult,
     poolCountResult,
     newLeadsResult,
     deskWaitingResult,
@@ -301,10 +325,21 @@ export default async function TalentEnginePage() {
     readList<CertScanRow>(
       db
         .from("talent_candidates")
-        .select("certifications, verified_certifications, cert_expiry_date")
+        .select("id, certifications, verified_certifications, cert_expiry_date")
         .neq("status", "inactive")
         .order("id", { ascending: true })
         .limit(certScanLimit),
+    ),
+
+    // The per-cert dates ledger: feeds the manage panels' date fields and the
+    // tracker's expiring-soon union. Bounded like the candidate scan.
+    readList<CertDatesRow>(
+      db
+        .from("talent_candidate_certifications")
+        .select("candidate_id, certification, issued_on, expires_on")
+        .order("candidate_id", { ascending: true })
+        .order("certification", { ascending: true })
+        .limit(certScanLimit * 4),
     ),
 
     readList<{ id: string }>(
@@ -368,6 +403,7 @@ export default async function TalentEnginePage() {
     placementsResult,
     activityResult,
     certScanResult,
+    certDatesResult,
     poolCountResult,
     newLeadsResult,
     deskWaitingResult,
@@ -468,7 +504,13 @@ export default async function TalentEnginePage() {
 
   const certRows = certScanResult.rows;
   const coverage = buildCertificationCoverage(certRows);
-  const expiringCount = countExpiringSoon(certRows, now);
+  const expiringCount = countExpiringSoon(certRows, certDatesResult.rows, now);
+
+  /** Dates-ledger rows for the manage panels, grouped by candidate. */
+  const certDatesByCandidate: Record<string, CertDatesRow[]> = {};
+  for (const row of certDatesResult.rows) {
+    (certDatesByCandidate[row.candidate_id] ??= []).push(row);
+  }
 
   /* ---- Viewer identity ---------------------------------------------------- */
 
@@ -521,6 +563,7 @@ export default async function TalentEnginePage() {
             canApprove={canApprove}
             canPropose={canPropose}
             candidates={candidatesResult.rows}
+            certDatesByCandidate={certDatesByCandidate}
             verticalOptions={verticalOptions}
           />
           <Link className="talent-leadlink" href="/employee/talent-engine/leads">

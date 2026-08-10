@@ -1,5 +1,5 @@
 import { HardHat } from "lucide-react";
-import type { CandidateRow } from "@/lib/talent-engine/types";
+import type { CandidateCertificationRow, CandidateRow } from "@/lib/talent-engine/types";
 import { TalentAiTag, TalentCard, TalentEmpty } from "./TalentCard";
 import { CandidateCreateForm } from "./CandidateCreateForm";
 import { CandidateManagePanel } from "./CandidateManagePanel";
@@ -16,6 +16,7 @@ export function TalentPoolCard({
   canPropose,
   canApprove,
   verticalOptions,
+  certDatesByCandidate = {},
 }: {
   candidates: CandidateRow[];
   activeCount: number;
@@ -24,6 +25,11 @@ export function TalentPoolCard({
   canApprove: boolean;
   /** Configured trade list from talent_settings, for the vertical pickers. */
   verticalOptions?: string[];
+  /** Dates-ledger rows grouped by candidate id, for the manage panels. */
+  certDatesByCandidate?: Record<
+    string,
+    Pick<CandidateCertificationRow, "certification" | "issued_on" | "expires_on">[]
+  >;
 }) {
   return (
     <TalentCard
@@ -76,6 +82,7 @@ export function TalentPoolCard({
                     candidate={candidate}
                     canApprove={canApprove}
                     canPropose={canPropose}
+                    certDates={certDatesByCandidate[candidate.id] ?? []}
                     verticalOptions={verticalOptions}
                   />
                 ) : null}

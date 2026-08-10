@@ -30,6 +30,7 @@ import {
   restoreSourcingLead,
   runSourcingNow,
   setJobOrderStatus,
+  setCandidateCertificationDates,
   submitMatch,
   updateCandidate,
   updateJobOrder,
@@ -103,6 +104,14 @@ function createSupabaseMock(routes: Record<string, Route>) {
       },
       eq(column: string, value: unknown) {
         record.filters.push([column, value]);
+        return api;
+      },
+      ilike(column: string, value: unknown) {
+        record.filters.push([column, value]);
+        return api;
+      },
+      in(column: string, values: unknown) {
+        record.filters.push([column, values]);
         return api;
       },
       is: () => api,
@@ -475,6 +484,7 @@ describe("permission matrix — the read-only account manager", () => {
     expect((await createPlacement(MATCH_ID, "2026-09-01")).ok).toBe(false);
     expect((await logTimesheet(PLACEMENT_ID, "2026-09-07", 40)).ok).toBe(false);
     expect((await updateTalentSettings({ minSpreadPerHour: 1 })).ok).toBe(false);
+    expect((await setCandidateCertificationDates(CANDIDATE_ID, "CSP", "2026-01-01", "2027-01-01")).ok).toBe(false);
 
     expect(supabase.calls).toHaveLength(0);
     expect(auditMock).not.toHaveBeenCalled();
@@ -1016,6 +1026,68 @@ describe("verifyCandidateCertification", () => {
     await createCandidate({ fullName: "Dana Reyes", certifications: ["CSP"], ...({ verified_certifications: ["CSP"] } as any) });
 
     expect(findCall(supabase, "talent_candidates", "insert")?.payload?.verified_certifications).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// Certification dates — the ledger behind the 60-day expiry flag
+// ===========================================================================
+
+describe("setCandidateCertificationDates", () => {
+  it("records dates for a claimed certification", async () => {
+    const supabase = createSupabaseMock({
+      "talent_candidates:select": { data: candidate({ certifications: ["CSP", "OSHA 30"] }) },
+      "talent_candidate_certifications:select": { data: null },
+      "talent_candidate_certifications:insert": {},
+    });
+    signIn("employee", supabase);
+
+    const result = await setCandidateCertificationDates(CANDIDATE_ID, "csp", "2025-02-01", "2027-02-01");
+
+    expect(result).toEqual({ ok: true });
+    expect(findCall(supabase, "talent_candidate_certifications", "insert")?.payload).toEqual({
+      candidate_id: CANDIDATE_ID,
+      certification: "CSP",
+      issued_on: "2025-02-01",
+      expires_on: "2027-02-01",
+    });
+  });
+
+  it("refuses dates for a certification the candidate does not claim", async () => {
+    const supabase = createSupabaseMock({
+      "talent_candidates:select": { data: candidate({ certifications: ["CSP"] }) },
+    });
+    signIn("employee", supabase);
+
+    const result = await setCandidateCertificationDates(CANDIDATE_ID, "CIH", "2025-02-01", null);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("not on this candidate's certification list");
+    expect(supabase.calls.some((c) => c.op === "insert")).toBe(false);
+  });
+
+  it("rejects an issue date after the expiry date before touching the database", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("employee", supabase);
+
+    const result = await setCandidateCertificationDates(CANDIDATE_ID, "CSP", "2027-01-01", "2026-01-01");
+
+    expect(result.ok).toBe(false);
+    expect(supabase.calls).toHaveLength(0);
+  });
+
+  it("clearing both dates deletes the ledger row rather than storing nulls", async () => {
+    const supabase = createSupabaseMock({
+      "talent_candidates:select": { data: candidate({ certifications: ["CSP"] }) },
+      "talent_candidate_certifications:select": {
+        data: { id: "5d1d0f52-2f3c-4d2e-9a76-0f5f8a3f9b21", issued_on: "2025-02-01", expires_on: "2027-02-01" },
+      },
+      "talent_candidate_certifications:delete": { data: [] },
+    });
+    signIn("employee", supabase);
+
+    expect((await setCandidateCertificationDates(CANDIDATE_ID, "CSP", null, null)).ok).toBe(true);
+    expect(supabase.calls.some((c) => c.table === "talent_candidate_certifications" && c.op === "delete")).toBe(true);
   });
 });
 
