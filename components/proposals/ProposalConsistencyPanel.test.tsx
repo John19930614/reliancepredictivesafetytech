@@ -105,13 +105,22 @@ describe("ProposalConsistencyPanel", () => {
     expect(screen.getByText(/Included Jobsites is 5/)).toBeInTheDocument();
   });
 
+  it("says plainly that it corrects nothing on its own, and counts the fixes on the button", () => {
+    render(
+      <ProposalConsistencyPanel proposalId={PROPOSAL_ID} state={driftedState()} disabled={false} onApply={() => {}} />,
+    );
+
+    expect(screen.getByText(/Nothing below is corrected automatically/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Fix these 3 figures with AI/i })).toBeInTheDocument();
+  });
+
   it("reports an all-clear and offers no rewrite when the prose already agrees", () => {
     render(
       <ProposalConsistencyPanel proposalId={PROPOSAL_ID} state={cleanState()} disabled={false} onApply={() => {}} />,
     );
 
     expect(screen.getByText(/Narrative matches the fields/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Fix figures with AI/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Fix .* with AI/i })).not.toBeInTheDocument();
   });
 
   it("posts the live state and shows the draft as before/after without applying it", async () => {
@@ -122,7 +131,7 @@ describe("ProposalConsistencyPanel", () => {
     render(
       <ProposalConsistencyPanel proposalId={PROPOSAL_ID} state={state} disabled={false} onApply={onApply} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /Fix figures with AI/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Fix .* with AI/i }));
 
     await waitFor(() => expect(screen.getByText(/Proposed wording/i)).toBeInTheDocument());
 
@@ -145,7 +154,7 @@ describe("ProposalConsistencyPanel", () => {
     render(
       <ProposalConsistencyPanel proposalId={PROPOSAL_ID} state={state} disabled={false} onApply={onApply} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /Fix figures with AI/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Fix .* with AI/i }));
     await waitFor(() => expect(screen.getByText(/Proposed wording/i)).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /Apply 1 passage/i }));
 
@@ -171,7 +180,7 @@ describe("ProposalConsistencyPanel", () => {
     render(
       <ProposalConsistencyPanel proposalId={PROPOSAL_ID} state={driftedState()} disabled={false} onApply={onApply} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /Fix figures with AI/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Fix .* with AI/i }));
     await waitFor(() => expect(screen.getByText(/Proposed wording/i)).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("checkbox"));
@@ -187,7 +196,7 @@ describe("ProposalConsistencyPanel", () => {
     );
 
     expect(screen.getByText(/3 mismatches/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Fix figures with AI/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Fix .* with AI/i })).toBeDisabled();
     expect(screen.getByText(/Reopen it as a draft first/i)).toBeInTheDocument();
   });
 
@@ -197,7 +206,7 @@ describe("ProposalConsistencyPanel", () => {
     render(
       <ProposalConsistencyPanel proposalId={PROPOSAL_ID} state={driftedState()} disabled={false} onApply={() => {}} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /Fix figures with AI/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Fix .* with AI/i }));
 
     await waitFor(() => expect(screen.getByText("AI budget reached for today.")).toBeInTheDocument());
     expect(screen.queryByText(/Proposed wording/i)).not.toBeInTheDocument();
@@ -234,7 +243,7 @@ describe("ProposalConsistencyPanel — field passages", () => {
     state.fields.customSummary = "A pilot covering up to 20 users.";
 
     render(<ProposalConsistencyPanel proposalId={PROPOSAL_ID} state={state} disabled={false} onApply={onApply} />);
-    fireEvent.click(screen.getByRole("button", { name: /Fix figures with AI/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Fix .* with AI/i }));
     await waitFor(() => expect(screen.getByText(/Proposed wording/i)).toBeInTheDocument());
 
     // "Executive summary" appears twice — once as the findings heading and once

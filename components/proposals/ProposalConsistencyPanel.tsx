@@ -190,6 +190,15 @@ export function ProposalConsistencyPanel({
         The pills, the package paragraph and the fee table always follow the fields. The executive summary, the
         assumptions block and the scope descriptions are written text — they keep whatever numbers were typed, which is
         how a proposal ends up saying 50 users in one section and 20 in another.
+        {findings.length > 0 ? (
+          <>
+            {" "}
+            <strong>
+              Nothing below is corrected automatically. The document keeps your wording until you use the button and
+              apply a change.
+            </strong>
+          </>
+        ) : null}
       </p>
 
       {findings.length > 0 ? (
@@ -212,7 +221,10 @@ export function ProposalConsistencyPanel({
             disabled={busy || disabled}
             onClick={() => void draftFixes()}
           >
-            <Sparkles size={16} /> {busy ? "Drafting…" : "Fix figures with AI"}
+            <Sparkles size={16} />{" "}
+            {busy
+              ? "Drafting…"
+              : `Fix ${findings.length === 1 ? "this figure" : `these ${findings.length} figures`} with AI`}
           </button>
           {disabled ? (
             <p style={{ color: "var(--portal-muted)", marginTop: 8, fontSize: "0.8rem" }}>
