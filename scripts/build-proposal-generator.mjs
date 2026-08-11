@@ -48,7 +48,16 @@ const bridge = `
     });
     if (Array.isArray(state.phases)) {
       $('phases').innerHTML = '';
-      state.phases.forEach((p)=>{ addPhase(p.key, p.qty, p.price, p.desc); });
+      state.phases.forEach((p)=>{
+        // Custom names are restored the same way the service branch below does
+        // it. collectItems() reads BOTH row types through dataset.customName, so
+        // without this a phase carrying a name the catalog no longer has —
+        // a legacy "Phase 1 — Discovery & Intake", or one loaded from a
+        // duplicated proposal — silently reverted to the catalog name the
+        // moment anything pushed state back into the generator.
+        const div = addPhase(p.key, p.qty, p.price, p.desc);
+        if (p.name && p.name !== ((phaseOptions[p.key] || {}).name || '')) div.dataset.customName = p.name;
+      });
     }
     if (Array.isArray(state.services)) {
       $('services').innerHTML = '';

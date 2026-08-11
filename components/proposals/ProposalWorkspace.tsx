@@ -86,6 +86,7 @@ import {
   toggleTeamMember,
   type TeamRosterEntry,
 } from "@/lib/proposals/team-selection";
+import { ProposalConsistencyPanel } from "./ProposalConsistencyPanel";
 import { ProposalDocument } from "./ProposalDocument";
 import { documentLimits, type DocumentSignature, type DocumentTeamMember } from "./proposal-document-model";
 import {
@@ -774,6 +775,17 @@ export function ProposalWorkspace({
             state={previewState}
             disabled={!editGate.ok}
             onChange={(fields) => postToGenerator({ type: "proposal:load", state: { v: 1, fields } })}
+          />
+
+          {/* Between the parties and the controls, because a figure mismatch is
+              about the numbers the seller is typing just below it. Detection is
+              pure and local; only the "Fix figures with AI" button leaves the
+              browser, and what it returns is a draft the seller ticks in. */}
+          <ProposalConsistencyPanel
+            proposalId={proposal.id}
+            state={previewState}
+            disabled={!editGate.ok}
+            onApply={(patch) => postToGenerator({ type: "proposal:load", state: { v: 1, ...patch } })}
           />
 
           <iframe
