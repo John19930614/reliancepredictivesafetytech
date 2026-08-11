@@ -1328,17 +1328,28 @@ export function ProposalControlPanel({
   proposal,
   clients,
   isAdmin,
+  canApprove = false,
 }: {
   proposal: WorkspaceProposal;
   clients: ClientOption[];
   isAdmin: boolean;
+  /** Whether this viewer may approve and send. Only used to explain the gap. */
+  canApprove?: boolean;
 }) {
   const { router, isPending, error, notice, setError, setNotice, run } = useProposalAction();
   const [working, setWorking] = useState(false);
   const busy = isPending || working;
 
   const metaGate = canEditProposalMeta(proposal.status);
-  const transitions = useMemo(() => availableTransitions(proposal.status), [proposal.status]);
+  // Submit-for-review and send are the maker–checker moves, and they belong to
+  // ProposalReviewPanel: they need the approval state to decide whether they are
+  // even legal, and firing them from a bare status dropdown is what let a
+  // proposal reach a client unread. Everything else — archive, reopen, mark
+  // accepted/declined — stays here as ordinary workflow.
+  const transitions = useMemo(
+    () => availableTransitions(proposal.status).filter((to) => to !== "in_review" && to !== "sent"),
+    [proposal.status],
+  );
 
   async function handleDuplicate() {
     setError("");
@@ -1378,7 +1389,9 @@ export function ProposalControlPanel({
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
           {transitions.length === 0 ? (
             <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem", margin: 0 }}>
-              No status changes are available from {proposalStatusLabels[proposal.status]}.
+              {proposal.status === "in_review" && !canApprove
+                ? "This proposal is with the reviewer. Approving and sending are theirs."
+                : `No status changes are available from ${proposalStatusLabels[proposal.status]}.`}
             </p>
           ) : (
             transitions.map((to) => (

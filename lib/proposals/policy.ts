@@ -5,9 +5,16 @@
 import { isPortalAdminRole, portalUserRoles, type PortalUserRole } from "@/lib/user-management";
 import type { ProposalStatus } from "./types";
 
-/** Allowed status transitions. Anything not listed is rejected. */
+/**
+ * Allowed status transitions. Anything not listed is rejected.
+ *
+ * `draft -> sent` was removed deliberately: it let a proposal reach a client
+ * without ever entering review, which made the whole in_review status optional
+ * and the maker–checker split unenforceable. The only road to `sent` now runs
+ * through `in_review`, and lib/proposals/approval.ts decides whether it opens.
+ */
 const proposalTransitions: Record<ProposalStatus, readonly ProposalStatus[]> = {
-  draft: ["in_review", "sent", "archived"],
+  draft: ["in_review", "archived"],
   in_review: ["draft", "sent", "archived"],
   sent: ["accepted", "declined", "draft", "archived"],
   accepted: ["archived"],
@@ -71,6 +78,17 @@ export interface ProposalRoleFlags {
   canRead: boolean;
   canManage: boolean;
   isAdmin: boolean;
+  /**
+   * May approve a proposal and put it in front of a client.
+   *
+   * Deliberately NOT derived from the role. Both the maker and the reviewer
+   * hold super_admin, so any role-derived answer gives them identical rights
+   * and there is no split left to enforce. It is granted per user through
+   * `user_roles.can_approve_proposals`, which makes "who may send a proposal
+   * to a client" an explicit, auditable list rather than a side effect of a
+   * role someone was given for an unrelated reason.
+   */
+  canApprove: boolean;
 }
 
 /**
@@ -93,9 +111,23 @@ export function isProposalPortalRole(role: string | null | undefined): role is P
  * reject is told so up front instead of seeing a success message backed by a
  * silent zero-row write.
  */
-export function resolveProposalRoleFlags(role: string | null | undefined, isActive: boolean): ProposalRoleFlags {
-  if (!isActive || !isProposalPortalRole(role)) return { canRead: false, canManage: false, isAdmin: false };
-  return { canRead: true, canManage: true, isAdmin: isPortalAdminRole(role) };
+export function resolveProposalRoleFlags(
+  role: string | null | undefined,
+  isActive: boolean,
+  /** `user_roles.can_approve_proposals` for this user. Absent means not granted. */
+  canApproveProposals = false,
+): ProposalRoleFlags {
+  if (!isActive || !isProposalPortalRole(role)) {
+    return { canRead: false, canManage: false, isAdmin: false, canApprove: false };
+  }
+  return {
+    canRead: true,
+    canManage: true,
+    isAdmin: isPortalAdminRole(role),
+    // Still gated on holding a portal role: revoking someone's access must
+    // revoke their ability to send, even if the grant column is still true.
+    canApprove: canApproveProposals === true,
+  };
 }
 
 // ---------------------------------------------------------------------------

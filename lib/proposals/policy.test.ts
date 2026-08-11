@@ -97,8 +97,30 @@ describe("proposal RBAC flags", () => {
   });
 
   it("denies everything to inactive users", () => {
-    expect(resolveProposalRoleFlags("admin", false)).toEqual({ canRead: false, canManage: false, isAdmin: false });
+    expect(resolveProposalRoleFlags("admin", false)).toEqual({
+      canRead: false,
+      canManage: false,
+      isAdmin: false,
+      canApprove: false,
+    });
     expect(resolveProposalRoleFlags(null, false).canRead).toBe(false);
+  });
+
+  // The maker–checker split exists because the author and the reviewer both
+  // hold super_admin. If the approver capability were derived from the role,
+  // they would be indistinguishable and there would be no split to enforce.
+  it("never grants the approver capability from a role alone", () => {
+    for (const role of portalUserRoles) {
+      expect(resolveProposalRoleFlags(role, true).canApprove).toBe(false);
+    }
+    expect(resolveProposalRoleFlags("super_admin", true, true).canApprove).toBe(true);
+  });
+
+  it("revokes the approver capability with portal access, even when the grant stands", () => {
+    // Archiving someone must stop them sending proposals without anyone having
+    // to remember to clear the column too.
+    expect(resolveProposalRoleFlags("super_admin", false, true).canApprove).toBe(false);
+    expect(resolveProposalRoleFlags("not_a_portal_role", true, true).canApprove).toBe(false);
   });
 
   // The DB predicate is_company_portal_employee() whitelists exactly the seven
@@ -115,11 +137,11 @@ describe("proposal RBAC flags", () => {
   });
 
   it("denies an active row whose role is null or outside the whitelist", () => {
-    expect(resolveProposalRoleFlags(null, true)).toEqual({ canRead: false, canManage: false, isAdmin: false });
+    expect(resolveProposalRoleFlags(null, true)).toEqual({ canApprove: false, canRead: false, canManage: false, isAdmin: false });
     expect(resolveProposalRoleFlags(undefined, true).canManage).toBe(false);
     for (const role of ["client_user", "contractor", "viewer", "", "ADMIN"]) {
       expect(isProposalPortalRole(role)).toBe(false);
-      expect(resolveProposalRoleFlags(role, true)).toEqual({ canRead: false, canManage: false, isAdmin: false });
+      expect(resolveProposalRoleFlags(role, true)).toEqual({ canApprove: false, canRead:false, canManage: false, isAdmin: false });
     }
   });
 });

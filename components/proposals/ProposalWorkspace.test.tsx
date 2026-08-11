@@ -167,9 +167,13 @@ describe("ProposalControlPanel — commercial field gate", () => {
 describe("ProposalControlPanel — status transitions", () => {
   // Exactly the transitions lib/proposals/policy.ts permits, in the panel's
   // display order (forward-moving first, reopen/archive last).
+  // Submit-for-review and send moved to ProposalReviewPanel, which is the only
+  // place that can see whether an approval exists. What is left here is ordinary
+  // workflow. "Mark as sent" must never appear in this panel again: firing it
+  // from a bare dropdown is what let a proposal reach a client unread.
   const expected: Record<ProposalStatus, string[]> = {
-    draft: ["Send for review", "Mark as sent", "Archive"],
-    in_review: ["Mark as sent", "Back to draft", "Archive"],
+    draft: ["Archive"],
+    in_review: ["Back to draft", "Archive"],
     sent: ["Mark accepted", "Mark declined", "Reopen for revision", "Archive"],
     accepted: ["Archive"],
     declined: ["Reopen for revision", "Archive"],

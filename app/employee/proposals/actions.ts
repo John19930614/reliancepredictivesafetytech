@@ -13,6 +13,17 @@ import {
   validateProposalFields,
 } from "@/lib/proposals/policy";
 import {
+  canDecideProposal,
+  canDispatchToClient,
+  canSendProposal,
+  canSubmitForReview,
+  editVoidsApproval,
+  isProposalDecision,
+  normalizeDecisionNote,
+  type ProposalDecision,
+} from "@/lib/proposals/approval";
+import { loadApprovalState } from "@/lib/proposals/approval-server";
+import {
   buildShareLinkUrl,
   canShareProposal,
   clampShareLinkDays,
@@ -352,7 +363,7 @@ function concurrentSaveMessage(revisionNumber: number): string {
 
 /** Saves content edits as a new immutable revision and updates the working copy. */
 export async function saveProposalRevision(proposalId: string, input: SaveRevisionInput): Promise<ActionResult & { revisionNumber?: number }> {
-  const { supabase, userId, canManage, role } = await getProposalAccess();
+  const { supabase, userId, canManage, canApprove, role } = await getProposalAccess();
   if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
   if (!canManage) return { ok: false, error: "You do not have permission to edit proposals." };
   if (!proposalId) return { ok: false, error: "Missing proposal id." };
@@ -427,8 +438,162 @@ export async function saveProposalRevision(proposalId: string, input: SaveRevisi
     proposal_value: proposalValue,
   });
 
+  // A standing approval covers ONE revision. The maker saving a new one means
+  // what the reviewer read is no longer what would go out, so the proposal
+  // returns to review. An approver's own edit carries their approval forward —
+  // bouncing it back to the person who just made the change is theatre.
+  //
+  // Nothing is deleted: client_proposal_approvals is append-only, and the
+  // approval of the earlier revision stays in the history. It simply no longer
+  // names the current revision, which is what every send gate tests.
+  if (editVoidsApproval(canApprove) && proposal.status === "in_review") {
+    const { data: reopened } = await supabase
+      .from("client_proposals")
+      .update({ status: "draft" satisfies ProposalStatus })
+      .eq("id", proposalId)
+      .eq("status", "in_review")
+      .select("id");
+    if (Array.isArray(reopened) && reopened.length > 0) {
+      await recordProposalAudit(
+        role,
+        "update",
+        proposalId,
+        userId,
+        `Proposal returned to draft: v${revisionNumber} was saved after review began, so it needs approving again`,
+        { status: "in_review" },
+        { status: "draft", revision_number: revisionNumber },
+      );
+    }
+  }
+
   revalidateProposals(proposalId);
   return { ok: true, revisionNumber };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Maker–checker                                                               */
+/*                                                                             */
+/* The maker hands the proposal over; the approver decides. Both are recorded  */
+/* — the decision table is the answer to "who authorised this going out".      */
+/* -------------------------------------------------------------------------- */
+
+/** Maker's action: hand a draft to the reviewer. Needs no approver capability. */
+export async function submitProposalForReview(proposalId: string): Promise<ActionResult> {
+  const { supabase, userId, canManage, role } = await getProposalAccess();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+  if (!canManage) return { ok: false, error: "You do not have permission to update proposals." };
+  if (!proposalId || !isProposalUuid(proposalId)) return { ok: false, error: "Missing or invalid proposal id." };
+
+  const { data: proposal } = await supabase
+    .from("client_proposals")
+    .select("id, status, title, current_revision")
+    .eq("id", proposalId)
+    .maybeSingle();
+  if (!proposal) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  const gate = canSubmitForReview(proposal.status as ProposalStatus);
+  if (!gate.ok) return { ok: false, error: gate.reason };
+
+  const { data: updated, error } = await supabase
+    .from("client_proposals")
+    .update({ status: "in_review" satisfies ProposalStatus })
+    .eq("id", proposalId)
+    // Guards the read-then-write: a concurrent transition must not be
+    // overwritten by this one.
+    .eq("status", "draft")
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!updated || updated.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  await recordProposalAudit(
+    role,
+    "update",
+    proposalId,
+    userId,
+    `Submitted proposal "${proposal.title}" for review at v${proposal.current_revision}`,
+    { status: proposal.status },
+    { status: "in_review", revision_number: proposal.current_revision },
+  );
+
+  revalidateProposals(proposalId);
+  return { ok: true };
+}
+
+export interface DecideProposalInput {
+  decision: ProposalDecision;
+  /** Reviewer's note. Required when asking for changes — otherwise the maker
+   * is told "no" with no indication of what to fix. */
+  note?: string | null;
+}
+
+/** Approver's action: approve the current revision, or send it back with a note. */
+export async function decideProposal(proposalId: string, input: DecideProposalInput): Promise<ActionResult> {
+  const { supabase, userId, canManage, canApprove, role } = await getProposalAccess();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+  if (!canManage) return { ok: false, error: "You do not have permission to update proposals." };
+  if (!proposalId || !isProposalUuid(proposalId)) return { ok: false, error: "Missing or invalid proposal id." };
+  if (!isProposalDecision(input?.decision)) return { ok: false, error: "Unknown review decision." };
+
+  const note = normalizeDecisionNote(input.note);
+  if (!note.ok) return { ok: false, error: note.error };
+  if (input.decision === "changes_requested" && note.value === null) {
+    return { ok: false, error: "Say what needs changing so the author knows what to fix." };
+  }
+
+  const { data: proposal } = await supabase
+    .from("client_proposals")
+    .select("id, status, title, current_revision")
+    .eq("id", proposalId)
+    .maybeSingle();
+  if (!proposal) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  const gate = canDecideProposal(proposal.status as ProposalStatus, canApprove);
+  if (!gate.ok) return { ok: false, error: gate.reason };
+
+  // Pin the decision to the immutable revision, not to the proposal. Looked up
+  // rather than trusted from the client so the recorded id is the one the
+  // database agrees is current.
+  const { data: revision } = await supabase
+    .from("client_proposal_revisions")
+    .select("id, revision_number")
+    .eq("proposal_id", proposalId)
+    .eq("revision_number", proposal.current_revision)
+    .maybeSingle();
+
+  const { error: decisionError } = await supabase.from("client_proposal_approvals").insert({
+    proposal_id: proposalId,
+    revision_id: revision?.id ?? null,
+    revision_number: proposal.current_revision,
+    decision: input.decision,
+    note: note.value,
+    decided_by: userId,
+  });
+  if (decisionError) return { ok: false, error: decisionError.message };
+
+  // Changes requested reopens the draft so the maker can edit; an approval
+  // leaves it in_review, ready for the separate, deliberate Send.
+  if (input.decision === "changes_requested") {
+    await supabase
+      .from("client_proposals")
+      .update({ status: "draft" satisfies ProposalStatus })
+      .eq("id", proposalId)
+      .eq("status", "in_review");
+  }
+
+  await recordProposalAudit(
+    role,
+    "update",
+    proposalId,
+    userId,
+    input.decision === "approved"
+      ? `Approved proposal "${proposal.title}" at v${proposal.current_revision}`
+      : `Requested changes on proposal "${proposal.title}" at v${proposal.current_revision}`,
+    { status: proposal.status },
+    { decision: input.decision, revision_number: proposal.current_revision, note: note.value },
+  );
+
+  revalidateProposals(proposalId);
+  return { ok: true };
 }
 
 /**
@@ -601,7 +766,7 @@ export async function duplicateProposal(proposalId: string): Promise<ActionResul
 }
 
 export async function setProposalStatus(proposalId: string, status: ProposalStatus): Promise<ActionResult> {
-  const { supabase, userId, canManage, role } = await getProposalAccess();
+  const { supabase, userId, canManage, canApprove, role } = await getProposalAccess();
   if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
   if (!canManage) return { ok: false, error: "You do not have permission to update proposals." };
   if (!proposalId) return { ok: false, error: "Missing proposal id." };
@@ -609,13 +774,27 @@ export async function setProposalStatus(proposalId: string, status: ProposalStat
 
   const { data: proposal } = await supabase
     .from("client_proposals")
-    .select("id, status, title")
+    .select("id, status, title, current_revision")
     .eq("id", proposalId)
     .maybeSingle();
   if (!proposal) return { ok: false, error: NO_ROWS_MESSAGE };
 
   const gate = canTransitionProposal(proposal.status as ProposalStatus, status);
   if (!gate.ok) return { ok: false, error: gate.reason };
+
+  // The send moment. Every other transition is ordinary workflow; this one puts
+  // a document in front of a client, so it needs the approver capability AND an
+  // approval naming the revision that is current right now.
+  if (status === "sent") {
+    const approval = await loadApprovalState(supabase, proposalId, proposal.current_revision);
+    const sendGate = canSendProposal({
+      status: proposal.status as ProposalStatus,
+      isApprover: canApprove,
+      approval,
+      currentRevision: proposal.current_revision,
+    });
+    if (!sendGate.ok) return { ok: false, error: sendGate.reason };
+  }
 
   const { data: updated, error } = await supabase
     .from("client_proposals")
@@ -743,7 +922,7 @@ export async function createProposalShareLink(
   proposalId: string,
   input: CreateShareLinkInput,
 ): Promise<CreateShareLinkResult> {
-  const { supabase, userId, canManage, role } = await getProposalAccess();
+  const { supabase, userId, canManage, canApprove, role } = await getProposalAccess();
   if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
   if (!canManage) return { ok: false, error: "You do not have permission to share proposals." };
   if (!proposalId || !isProposalUuid(proposalId)) return { ok: false, error: "Missing or invalid proposal id." };
@@ -760,6 +939,12 @@ export async function createProposalShareLink(
 
   const gate = canShareProposal(proposal.status as ProposalStatus);
   if (!gate.ok) return { ok: false, error: gate.reason };
+
+  // A share link IS the client-facing document. Reaching `sent` already
+  // required an approval, but the capability is re-checked here so the maker
+  // cannot mint a client URL for a proposal the reviewer sent.
+  const dispatchGate = canDispatchToClient(proposal.status as ProposalStatus, canApprove);
+  if (!dispatchGate.ok) return { ok: false, error: dispatchGate.reason };
 
   // Scoped by proposal id as well as revision id: a revision uuid from another
   // proposal must never become a shareable document under this heading.
@@ -852,18 +1037,24 @@ export async function sendProposalToDocusign(
   proposalId: string,
   revisionId: string | null,
 ): Promise<ActionResult & { envelopeId?: string }> {
-  const { supabase, userId, canManage, role } = await getProposalAccess();
+  const { supabase, userId, canManage, canApprove, role } = await getProposalAccess();
   if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
   if (!canManage) return { ok: false, error: "You do not have permission to send proposals for signature." };
   if (!proposalId || !isProposalUuid(proposalId)) return { ok: false, error: "Missing or invalid proposal id." };
   if (revisionId && !isProposalUuid(revisionId)) return { ok: false, error: "Choose a valid revision to send." };
 
+  // `status` was NOT selected here before, and no gate read it: this action
+  // checked only that the proposal existed. Any portal user could put a raw
+  // draft in front of a client for signature.
   const { data: proposal } = await supabase
     .from("client_proposals")
-    .select("id")
+    .select("id, status")
     .eq("id", proposalId)
     .maybeSingle();
   if (!proposal) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  const dispatchGate = canDispatchToClient(proposal.status as ProposalStatus, canApprove);
+  if (!dispatchGate.ok) return { ok: false, error: dispatchGate.reason };
 
   let result: Awaited<ReturnType<typeof sendProposalForDocusign>>;
   try {
