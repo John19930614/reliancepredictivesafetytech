@@ -8,10 +8,17 @@ this environment.`
 Work through it in order. Steps 1–4 are in DocuSign, step 5 is in a terminal,
 step 6 is back in DocuSign, step 7 proves it works.
 
-**Two environments.** The app's built-in defaults point at the DocuSign sandbox,
-which needs no host configuration and cannot email a real client. Going straight
-at a production account is supported and is what we are doing — it needs two
-extra variables and one precaution, both covered below.
+**The sandbox is not optional.** DocuSign does not allow an integration key to be
+created in a production account — the Apps and Integration Keys panel there says
+so outright:
+
+> You cannot create an integration key in production. To create an IK, use your
+> developer account.
+
+So the order is fixed: build the app in the developer account, prove it against
+the demo environment, then use **Go-Live** to promote the key into production and
+cut the four environment values over (step 8). Confirmed against this account on
+2026-08-11.
 
 | | Sandbox | Production |
 |---|---|---|
@@ -44,12 +51,20 @@ Six values. Keep them somewhere safe as you go — three of them are shown once.
 
 ---
 
-## 1. Sign in to the developer account
+## 1. Sign in to the DEVELOPER account
 
-<https://developers.docusign.com> → **My Apps & Keys**, or
-<https://admin.docusign.com> → **Integrations → Apps and Keys**.
+<https://admindemo.docusign.com/apps-and-keys>, or
+<https://developers.docusign.com> → **My Apps & Keys**.
 
-If you have no developer account, create one from that first link (free).
+If you have no developer account, create one free at
+<https://go.docusign.com/o/sandbox/> — a production account does not come with
+one automatically.
+
+> **Steps 2–7 all use the DEVELOPER account's own values.** The demo account has
+> its own User ID and API Account ID, different from the production ones. Mixing
+> a production GUID into the demo configuration authenticates against the wrong
+> account and fails in a way that reads like a bad key. The production values are
+> needed only at step 8.
 
 ## 2. Create the app
 
@@ -132,7 +147,7 @@ npx vercel --prod --yes
 
 ## 6. Register the Connect listener
 
-DocuSign admin → **Settings → Integrations → Connect** → **Add Configuration →
+Demo admin → <https://admindemo.docusign.com/connect> → **Add Configuration →
 Custom**.
 
 | Field | Value |
@@ -186,41 +201,48 @@ On `completed`, the webhook pulls the signed PDF into the client's File Center
 and stamps the acceptance onto the proposal. It is idempotent — a repeated
 `completed` event is a no-op because `completed_file_id` is already set.
 
-## 8. The two production-only variables
+## 8. Go-Live: promoting into production
 
-Sandbox uses the built-in defaults and can skip this. A production account must
-set both, or JWT auth goes to the wrong host and every call fails.
+Only after the demo round trip in step 7 is clean.
 
-```bash
-npx vercel env add DOCUSIGN_OAUTH_BASE_URL production
-```
+**Promote the key.** <https://developers.docusign.com> → **My Apps & Keys** →
+your app → **Actions → Start Go-Live review** (or *Promote*). DocuSign requires
+a history of successful demo API calls before it will promote; the console shows
+where you stand. The Integration Key GUID does **not** change, and the RSA
+keypair travels with it.
 
-Value: `https://account.docusign.com`
+**Cut four variables over.** Everything else stays as it is:
 
-```bash
-npx vercel env add DOCUSIGN_BASE_PATH production
-```
+| Variable | Change |
+|---|---|
+| `DOCUSIGN_INTEGRATION_KEY` | unchanged — the same key, now promoted |
+| `DOCUSIGN_PRIVATE_KEY` | unchanged — the keypair rides on the key |
+| `DOCUSIGN_USER_ID` | → the **production** account's User ID |
+| `DOCUSIGN_ACCOUNT_ID` | → the **production** API Account ID |
+| `DOCUSIGN_OAUTH_BASE_URL` | → `https://account.docusign.com` |
+| `DOCUSIGN_BASE_PATH` | → the production **Account Base URI** |
+| `DOCUSIGN_WEBHOOK_SECRET` | → new: Connect must be configured again (below) |
 
-Value: your **Account Base URI** from the Apps and Keys page — `https://na3.docusign.net`
-or whichever region you are on.
+Both production GUIDs and the Base URI are on
+<https://admin.docusign.com/apps-and-keys>, in the *My Account Information*
+panel — the same panel that refuses to create a key.
 
-> **Host only — no `/restapi`.** `lib/docusign/client.ts` builds
-> `${basePath}/restapi/v2.1/accounts/...` itself. Including `/restapi` gives you
-> a doubled path and 404s on every envelope call.
+> **Base path is host only — no `/restapi`.** `lib/docusign/client.ts` builds
+> `${basePath}/restapi/v2.1/accounts/...` itself. Including `/restapi` gives a
+> doubled path and 404s every envelope call.
 
-Redeploy after adding them.
+Use `npx vercel env rm <NAME> production` then `add` to replace a value, and
+redeploy.
 
-### If the integration key will not authenticate
+**Re-do two things that never cross environments:**
 
-DocuSign gates API access behind its **Go-Live** review for apps created in a
-developer account. If the production **Apps and Keys** page offers no
-*Add App and Integration Key*, or the key authenticates in demo but not in
-production, that gate is the reason — build the app in a developer account,
-exercise it there, then **Apps and Keys → Actions → Promote**. This is the one
-thing that can force the sandbox route regardless of having a paid account.
+1. **Consent** — grant it again against `https://account.docusign.com/oauth/auth?...`
+   (production host, no `-d`). Demo consent does not carry.
+2. **Connect** — create the configuration again at
+   <https://admin.docusign.com/connect> with a fresh HMAC secret. Connect
+   settings never copy across accounts.
 
-Connect configurations never carry across environments; each account needs its
-own.
+Then re-run the step-7 curl against production and expect `401`.
 
 ---
 
