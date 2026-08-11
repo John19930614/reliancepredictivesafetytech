@@ -8,9 +8,24 @@ this environment.`
 Work through it in order. Steps 1–4 are in DocuSign, step 5 is in a terminal,
 step 6 is back in DocuSign, step 7 proves it works.
 
-**Do this in the demo (sandbox) environment first.** The app's built-in defaults
-already point at the sandbox, so a sandbox run needs no extra configuration and
-cannot email a real client by mistake. Step 8 covers going live.
+**Two environments.** The app's built-in defaults point at the DocuSign sandbox,
+which needs no host configuration and cannot email a real client. Going straight
+at a production account is supported and is what we are doing — it needs two
+extra variables and one precaution, both covered below.
+
+| | Sandbox | Production |
+|---|---|---|
+| Admin | `admindemo.docusign.com` | `admin.docusign.com` |
+| OAuth host | `account-d.docusign.com` | `account.docusign.com` |
+| API host | `demo.docusign.net` | `na1`/`na2`/`na3`/`eu`… `.docusign.net` |
+| Env vars | 6 | 8 (adds the two hosts) |
+| Test envelopes | simulated | **real email to a real inbox** |
+
+**Precaution when testing against production:** make the test proposal's client
+contact your own email address. `sendProposalForDocusign()` sends to whatever
+contact is on the proposal, so a self-addressed envelope gives you the full
+round trip — send, sign, webhook, File Center filing — with nothing reaching a
+customer.
 
 ---
 
@@ -32,7 +47,7 @@ Six values. Keep them somewhere safe as you go — three of them are shown once.
 ## 1. Sign in to the developer account
 
 <https://developers.docusign.com> → **My Apps & Keys**, or
-<https://admindemo.docusign.com> → **Integrations → Apps and Keys**.
+<https://admin.docusign.com> → **Integrations → Apps and Keys**.
 
 If you have no developer account, create one from that first link (free).
 
@@ -171,23 +186,41 @@ On `completed`, the webhook pulls the signed PDF into the client's File Center
 and stamps the acceptance onto the proposal. It is idempotent — a repeated
 `completed` event is a no-op because `completed_file_id` is already set.
 
-## 8. Going live
+## 8. The two production-only variables
 
-When the sandbox run is clean, promote the integration key in DocuSign
-(**Apps and Keys → Actions → Promote**), then set the production hosts and
-redeploy:
-
-```bash
-npx vercel env add DOCUSIGN_OAUTH_BASE_URL production   # https://account.docusign.com
-```
+Sandbox uses the built-in defaults and can skip this. A production account must
+set both, or JWT auth goes to the wrong host and every call fails.
 
 ```bash
-npx vercel env add DOCUSIGN_BASE_PATH production        # https://na1.docusign.net (use YOUR account's host)
+npx vercel env add DOCUSIGN_OAUTH_BASE_URL production
 ```
 
-Re-grant consent against `https://account.docusign.com/oauth/auth?...`, and add
-a second Connect configuration in the production account — Connect settings do
-**not** carry across from demo.
+Value: `https://account.docusign.com`
+
+```bash
+npx vercel env add DOCUSIGN_BASE_PATH production
+```
+
+Value: your **Account Base URI** from the Apps and Keys page — `https://na3.docusign.net`
+or whichever region you are on.
+
+> **Host only — no `/restapi`.** `lib/docusign/client.ts` builds
+> `${basePath}/restapi/v2.1/accounts/...` itself. Including `/restapi` gives you
+> a doubled path and 404s on every envelope call.
+
+Redeploy after adding them.
+
+### If the integration key will not authenticate
+
+DocuSign gates API access behind its **Go-Live** review for apps created in a
+developer account. If the production **Apps and Keys** page offers no
+*Add App and Integration Key*, or the key authenticates in demo but not in
+production, that gate is the reason — build the app in a developer account,
+exercise it there, then **Apps and Keys → Actions → Promote**. This is the one
+thing that can force the sandbox route regardless of having a paid account.
+
+Connect configurations never carry across environments; each account needs its
+own.
 
 ---
 
