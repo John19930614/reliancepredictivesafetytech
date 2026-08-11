@@ -20,12 +20,15 @@ import { phaseOptions } from "@/lib/proposals/catalog";
 import { computeProposalTotals } from "@/lib/proposals/pricing";
 import {
   createProposal,
+  decideProposal,
   deleteProposal,
   duplicateProposal,
   restoreProposalRevision,
   saveProposalDraft,
   saveProposalRevision,
+  sendProposalToDocusign,
   setProposalStatus,
+  submitProposalForReview,
   updateProposalMeta,
 } from "./actions";
 
@@ -784,5 +787,241 @@ describe("acceptance filing", () => {
     expect(warning.severity).toBe("warn");
     expect(warning.summary).toContain("could not be auto-filed");
     expect(warning.summary).toContain("bucket offline");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Maker–checker
+//
+// Steve authors, John reviews and sends. Both hold super_admin, so `role` alone
+// cannot tell them apart — the split rides entirely on the canApprove flag, and
+// every test here signs in as super_admin to prove that.
+// ---------------------------------------------------------------------------
+const MAKER = { canApprove: false };
+const APPROVER = { canApprove: true };
+
+function approvalRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "decision-1",
+    revision_id: "rev-3",
+    revision_number: 3,
+    decision: "approved",
+    note: null,
+    decided_by: "user-1",
+    decided_at: "2026-08-11T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("submitProposalForReview", () => {
+  it("lets the maker hand a draft to the reviewer without the approver capability", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "draft" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("super_admin", supabase, MAKER);
+
+    expect(await submitProposalForReview(PROPOSAL_ID)).toEqual({ ok: true });
+    const update = supabase.calls.find((call) => call.op === "update");
+    expect(update?.payload).toEqual({ status: "in_review" });
+    // Guarded read-then-write: only moves a row that is still a draft.
+    expect(update?.filters).toContainEqual(["status", "draft"]);
+  });
+
+  it("refuses a proposal that is not a draft", async () => {
+    const supabase = createSupabaseMock({ "client_proposals:select": { data: proposal({ status: "sent" }) } });
+    signIn("super_admin", supabase, MAKER);
+
+    const result = await submitProposalForReview(PROPOSAL_ID);
+    expect(result.ok).toBe(false);
+    expect(supabase.calls.some((call) => call.op === "update")).toBe(false);
+  });
+});
+
+describe("decideProposal", () => {
+  it("refuses the maker, and writes no decision", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "in_review" }) },
+    });
+    signIn("super_admin", supabase, MAKER);
+
+    const result = await decideProposal(PROPOSAL_ID, { decision: "approved" });
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/approver/i);
+    expect(supabase.calls.some((call) => call.table === "client_proposal_approvals")).toBe(false);
+  });
+
+  it("records an approval pinned to the current revision", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "in_review", current_revision: 3 }) },
+      "client_proposal_revisions:select": { data: { id: "rev-3", revision_number: 3 } },
+      "client_proposal_approvals:insert": { data: [{ id: "decision-1" }] },
+    });
+    signIn("super_admin", supabase, APPROVER);
+
+    expect(await decideProposal(PROPOSAL_ID, { decision: "approved" })).toEqual({ ok: true });
+    const insert = supabase.calls.find((call) => call.table === "client_proposal_approvals");
+    expect(insert?.payload).toMatchObject({
+      proposal_id: PROPOSAL_ID,
+      revision_id: "rev-3",
+      revision_number: 3,
+      decision: "approved",
+      decided_by: "user-1",
+    });
+    // An approval leaves it in_review; Send is a separate, deliberate act.
+    expect(supabase.calls.some((call) => call.table === "client_proposals" && call.op === "update")).toBe(false);
+  });
+
+  it("will not request changes without saying what to change", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "in_review" }) },
+    });
+    signIn("super_admin", supabase, APPROVER);
+
+    const result = await decideProposal(PROPOSAL_ID, { decision: "changes_requested", note: "   " });
+    expect(result.ok).toBe(false);
+    expect(supabase.calls.some((call) => call.table === "client_proposal_approvals")).toBe(false);
+  });
+
+  it("reopens the draft when changes are requested", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "in_review" }) },
+      "client_proposal_revisions:select": { data: { id: "rev-3", revision_number: 3 } },
+      "client_proposal_approvals:insert": { data: [{ id: "decision-1" }] },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("super_admin", supabase, APPROVER);
+
+    expect(await decideProposal(PROPOSAL_ID, { decision: "changes_requested", note: "Drop the price." })).toEqual({
+      ok: true,
+    });
+    const update = supabase.calls.find((call) => call.table === "client_proposals" && call.op === "update");
+    expect(update?.payload).toEqual({ status: "draft" });
+  });
+});
+
+describe("the send gate", () => {
+  function sendScenario(options: { approvals: unknown[]; currentRevision?: number }) {
+    return createSupabaseMock({
+      "client_proposals:select": {
+        data: proposal({ status: "in_review", current_revision: options.currentRevision ?? 3 }),
+      },
+      "client_proposal_approvals:select": { data: options.approvals },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+  }
+
+  it("refuses the maker even on a fully approved proposal", async () => {
+    const supabase = sendScenario({ approvals: [approvalRow()] });
+    signIn("super_admin", supabase, MAKER);
+
+    const result = await setProposalStatus(PROPOSAL_ID, "sent");
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/approver/i);
+    expect(supabase.calls.some((call) => call.op === "update")).toBe(false);
+  });
+
+  it("refuses an approver when nothing has been approved", async () => {
+    const supabase = sendScenario({ approvals: [] });
+    signIn("super_admin", supabase, APPROVER);
+
+    const result = await setProposalStatus(PROPOSAL_ID, "sent");
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/Approve this proposal/i);
+    expect(supabase.calls.some((call) => call.op === "update")).toBe(false);
+  });
+
+  // Approve v3, rewrite it into v4, then try to send the rewrite.
+  it("refuses to spend an approval on a revision it was not given for", async () => {
+    const supabase = sendScenario({ approvals: [approvalRow({ revision_number: 3 })], currentRevision: 4 });
+    signIn("super_admin", supabase, APPROVER);
+
+    const result = await setProposalStatus(PROPOSAL_ID, "sent");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("v3 was approved");
+    expect(supabase.calls.some((call) => call.op === "update")).toBe(false);
+  });
+
+  it("opens for an approver holding an approval of the current revision", async () => {
+    const supabase = sendScenario({ approvals: [approvalRow({ revision_number: 3 })], currentRevision: 3 });
+    signIn("super_admin", supabase, APPROVER);
+
+    expect(await setProposalStatus(PROPOSAL_ID, "sent")).toEqual({ ok: true });
+    const update = supabase.calls.find((call) => call.op === "update");
+    expect(update?.payload).toEqual({ status: "sent" });
+  });
+
+  it("leaves every other transition alone", async () => {
+    // Archiving must not require an approval.
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "draft" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("super_admin", supabase, MAKER);
+
+    expect(await setProposalStatus(PROPOSAL_ID, "archived")).toEqual({ ok: true });
+  });
+});
+
+describe("an edit after approval", () => {
+  function editScenario() {
+    return createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "in_review", current_revision: 3 }) },
+      "client_proposal_revisions:insert": { data: [{ id: "rev-4" }] },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+  }
+
+  it("returns the proposal to draft when the MAKER saves a new revision", async () => {
+    const supabase = editScenario();
+    signIn("super_admin", supabase, MAKER);
+
+    const result = await saveProposalRevision(PROPOSAL_ID, { title: "Acme Rollout", formData: validState });
+    expect(result.ok).toBe(true);
+
+    const statusUpdate = supabase.calls.find(
+      (call) => call.table === "client_proposals" && call.op === "update" && call.payload?.status === "draft",
+    );
+    expect(statusUpdate).toBeDefined();
+    expect(statusUpdate?.filters).toContainEqual(["status", "in_review"]);
+  });
+
+  it("carries the approval forward when the APPROVER saves a new revision", async () => {
+    const supabase = editScenario();
+    signIn("super_admin", supabase, APPROVER);
+
+    const result = await saveProposalRevision(PROPOSAL_ID, { title: "Acme Rollout", formData: validState });
+    expect(result.ok).toBe(true);
+    expect(
+      supabase.calls.some(
+        (call) => call.table === "client_proposals" && call.op === "update" && call.payload?.status === "draft",
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("sendProposalToDocusign", () => {
+  it("refuses the maker", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: { id: PROPOSAL_ID, status: "sent" } },
+    });
+    signIn("super_admin", supabase, MAKER);
+
+    const result = await sendProposalToDocusign(PROPOSAL_ID, null);
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/approver/i);
+  });
+
+  // Before the gate existed this action checked only that the proposal existed,
+  // so a raw draft could be put in front of a client for signature.
+  it("refuses to send a draft for signature", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: { id: PROPOSAL_ID, status: "draft" } },
+    });
+    signIn("super_admin", supabase, APPROVER);
+
+    const result = await sendProposalToDocusign(PROPOSAL_ID, null);
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/cannot be issued to a client/i);
   });
 });

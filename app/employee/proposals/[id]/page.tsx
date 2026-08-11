@@ -13,6 +13,12 @@ import {
 } from "@/components/proposals/ProposalWorkspace";
 import { ProposalStatusBadge } from "@/components/proposals/ProposalStatusBadge";
 import {
+  ProposalReviewPanel,
+  type ProposalApprovalSummary,
+} from "@/components/proposals/ProposalReviewPanel";
+import { resolveApprovalState } from "@/lib/proposals/approval";
+import { loadApprovalRecords } from "@/lib/proposals/approval-server";
+import {
   ProposalSharePanel,
   type ShareLinkListItem,
   type ShareableRevision,
@@ -45,7 +51,7 @@ export default async function ProposalDetailPage({
 }) {
   const { id } = await params;
   const { locked } = await searchParams;
-  const { supabase, canRead, canManage, isAdmin } = await getProposalAccess();
+  const { supabase, canRead, canManage, isAdmin, canApprove } = await getProposalAccess();
   if (!supabase || !canRead) notFound();
   // A malformed uuid makes PostgREST raise 22P02; reject it before the query so
   // a junk URL is a clean 404 rather than a 500.
@@ -105,6 +111,23 @@ export default async function ProposalDetailPage({
       .eq("proposal_id", id)
       .order("sent_at", { ascending: false }),
   ]);
+
+  // Decision history. Read through the same tolerant helper the send gates use,
+  // which returns [] on any error — a deploy that lands before the maker-checker
+  // migration shows "Not reviewed yet" and refuses to send, rather than 500ing.
+  const approvalState = resolveApprovalState(
+    await loadApprovalRecords(supabase, id),
+    Number(proposal.current_revision) || 1,
+  );
+  const approvalSummary: ProposalApprovalSummary = {
+    decision: approvalState.latest?.decision ?? null,
+    revisionNumber: approvalState.latest?.revisionNumber ?? null,
+    note: approvalState.latest?.note ?? null,
+    decidedAt: approvalState.latest?.decidedAt ?? null,
+    currentRevisionApproved: approvalState.currentRevisionApproved,
+    supersededByEdit: approvalState.supersededByEdit,
+    lastApprovedRevision: approvalState.lastApproval?.revisionNumber ?? null,
+  };
 
   const shareFeatureAvailable = !acceptanceResult.error && !shareLinkResult.error;
   const docusignAvailable = !docusignResult.error;
@@ -283,7 +306,19 @@ export default async function ProposalDetailPage({
           )}
         </section>
 
-        <ProposalControlPanel proposal={normalized} clients={clientOptions} isAdmin={isAdmin} />
+        <ProposalReviewPanel
+          proposalId={normalized.id}
+          status={normalized.status}
+          currentRevision={normalized.current_revision}
+          canApprove={canApprove}
+          approval={approvalSummary}
+        />
+        <ProposalControlPanel
+          proposal={normalized}
+          clients={clientOptions}
+          isAdmin={isAdmin}
+          canApprove={canApprove}
+        />
       </div>
 
       <ProposalTimeline

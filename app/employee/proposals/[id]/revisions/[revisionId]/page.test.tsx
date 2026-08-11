@@ -126,6 +126,7 @@ function signIn(scenario: Scenario = {}) {
     canRead: scenario.canRead ?? true,
     canManage: true,
     isAdmin: false,
+    canApprove: false,
   });
 
   return supabase;

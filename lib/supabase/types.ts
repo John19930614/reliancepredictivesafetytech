@@ -563,6 +563,54 @@ export type Database = {
           },
         ]
       }
+      client_proposal_approvals: {
+        Row: {
+          decided_at: string
+          decided_by: string | null
+          decision: string
+          id: string
+          note: string | null
+          proposal_id: string
+          revision_id: string | null
+          revision_number: number
+        }
+        Insert: {
+          decided_at?: string
+          decided_by?: string | null
+          decision: string
+          id?: string
+          note?: string | null
+          proposal_id: string
+          revision_id?: string | null
+          revision_number: number
+        }
+        Update: {
+          decided_at?: string
+          decided_by?: string | null
+          decision?: string
+          id?: string
+          note?: string | null
+          proposal_id?: string
+          revision_id?: string | null
+          revision_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_proposal_approvals_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "client_proposals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_proposal_approvals_revision_id_fkey"
+            columns: ["revision_id"]
+            isOneToOne: false
+            referencedRelation: "client_proposal_revisions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_proposal_revisions: {
         Row: {
           body_markdown: string | null
@@ -7802,6 +7850,7 @@ export type Database = {
       user_roles: {
         Row: {
           account_status: string
+          can_approve_proposals: boolean
           company_id: string | null
           created_at: string | null
           role: string
@@ -7811,6 +7860,7 @@ export type Database = {
         }
         Insert: {
           account_status?: string
+          can_approve_proposals?: boolean
           company_id?: string | null
           created_at?: string | null
           role?: string
@@ -7820,6 +7870,7 @@ export type Database = {
         }
         Update: {
           account_status?: string
+          can_approve_proposals?: boolean
           company_id?: string | null
           created_at?: string | null
           role?: string

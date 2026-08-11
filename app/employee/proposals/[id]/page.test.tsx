@@ -137,6 +137,8 @@ interface Scenario {
   canRead?: boolean;
   canManage?: boolean;
   isAdmin?: boolean;
+  /** Maker–checker: may approve and issue a proposal. Defaults to the MAKER. */
+  canApprove?: boolean;
   supabaseNull?: boolean;
 }
 
@@ -162,6 +164,7 @@ function signIn(scenario: Scenario = {}) {
     canRead: scenario.canRead ?? true,
     canManage: scenario.canManage ?? true,
     isAdmin: scenario.isAdmin ?? false,
+    canApprove: scenario.canApprove ?? false,
   });
 
   return supabase;
