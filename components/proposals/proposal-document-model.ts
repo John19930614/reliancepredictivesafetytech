@@ -25,6 +25,11 @@ import {
 } from "@/lib/proposals/catalog";
 import { proposalTypeLabelFromState } from "@/lib/proposals/transaction-templates";
 import {
+  buildTermsForProfile,
+  resolveLexicon,
+  resolveProposalTypeProfile,
+} from "@/lib/proposals/type-profiles";
+import {
   formatClientContactLine,
   parseClientContacts,
   type ProposalClientContact,
@@ -404,6 +409,17 @@ export interface ProposalDocumentModel {
    * training or fixed-price document has no platform package to select.
    */
   packageHeading: string;
+  /**
+   * Sections 03, 05 and 06, named for the proposal type.
+   *
+   * A document that calls every engagement "Detailed Scope of Work" and
+   * "Pricing Schedule" reads as a template with the deal poured in. These come
+   * from the type's lexicon and fall back to the original wording for a
+   * proposal with no type stamped.
+   */
+  scopeHeading: string;
+  feesHeading: string;
+  termHeading: string;
   packageIntro: string;
   packagePills: DocumentPill[];
   /** False for a services-only engagement (no subscription row, no seat pills). */
@@ -675,6 +691,9 @@ export function buildProposalDocumentModel({
   const includedUsers = includesPlatformPackage ? fieldCount(state, "includedUsers", packageOption.users) : 0;
   const includedSites = includesPlatformPackage ? fieldCount(state, "includedSites", packageOption.sites) : 0;
   const proposalTypeLabel = proposalTypeLabelFromState(state?.fields);
+  // Null for a proposal written before types existed, or started blank — those
+  // keep the shared clause set they were sent under.
+  const typeProfile = resolveProposalTypeProfile(state?.fields);
 
   /* --- Scope ------------------------------------------------------------ */
 
@@ -801,7 +820,20 @@ export function buildProposalDocumentModel({
       "The schedule is coordinated after acceptance. Unless otherwise agreed, implementation follows the order shown " +
       `in the scope.${scheduleTermClause} Billing follows the selected term (${billingTerm}), with ${paymentTerms}.`,
     exclusions: fieldText(state, "customExclusions", documentCopy.noExclusions),
-    terms: buildDocumentTerms({ paymentTerms, lateFee, aiData, ipRights, liabilityCap, governingLaw, validDays }),
+    // Section 03/05/06 headings, named for the deal being proposed. A training
+    // client reads "Courses & Delivery" and "Training Fees"; a T&M client reads
+    // "Rates & Estimated Fees", which makes the estimate argument in the
+    // heading over the money rather than only in the terms.
+    ...resolveLexicon(typeProfile),
+    // The legal section, composed for this proposal's type. Before this, all
+    // seven types printed one identical clause set, so a training proposal
+    // carried "Taxes & SaaS Fees" and a SaaS warranty disclaimer for a class in
+    // a trailer. An unstamped (pre-types) proposal still gets the shared set
+    // verbatim — see buildTermsForProfile.
+    terms: buildTermsForProfile(
+      { paymentTerms, lateFee, aiData, ipRights, liabilityCap, governingLaw, validDays },
+      typeProfile,
+    ),
     // Budgeted HERE rather than at each call site: the detail view, the revision
     // view, the share route, the PDF and the editor preview all reach the
     // renderer through this builder, and a per-caller trim is how they would

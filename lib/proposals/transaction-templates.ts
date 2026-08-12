@@ -64,6 +64,7 @@ export type ProposalBillingTerm = (typeof proposalBillingTermOptions)[number];
 
 export const transactionTemplateKeys = Object.freeze([
   "pilot",
+  "platform",
   "time_and_materials",
   "fixed_price",
   "enterprise",
@@ -269,6 +270,38 @@ const definitions: Readonly<Record<TransactionTemplateKey, TransactionTemplateDe
       "The included users, jobsites, subscription fee, and term dates for the proposed tier are stated in the schedule below, and the tier can be adjusted before signature if your needs change.",
     customExclusions:
       "The subscription covers the platform capabilities of the selected tier for the included users and jobsites shown in the schedule. Implementation phases listed in the scope are professional services and are billed as shown. Integrations, custom development, and on-site services beyond the listed scope are quoted separately. Renewal pricing is confirmed in writing before each renewal term.",
+    phases: [{ key: "discovery" }, { key: "build" }, { key: "launch" }],
+    services: [],
+  },
+
+  /* ------------------------------------------------------------------------ */
+  /* Platform — the ordinary subscription sale.                                */
+  /*                                                                           */
+  /* The everyday "buy the platform" document, and the gap this registry had:  */
+  /* Enterprise was the only subscription type, so a Professional-tier sale to */
+  /* a normal-sized contractor had to borrow a document written for a buyer    */
+  /* with procurement, a security review and an MSA. Its profile is            */
+  /* deliberately the lighter one — no SLA credits, no order-of-precedence     */
+  /* ladder, no insurance certificates.                                        */
+  /* ------------------------------------------------------------------------ */
+  platform: {
+    key: "platform",
+    label: "Platform Subscription",
+    documentLabel: "Platform Subscription",
+    description:
+      "The standard platform subscription — a Starter or Professional tier for a single operation, without the enterprise procurement apparatus.",
+    packageKey: "professional",
+    billingTerm: "Annual upfront",
+    // The Professional package's own included counts, so the fields agree with
+    // the package paragraph from the first render.
+    fields: { includedUsers: packageData.professional.users, includedSites: packageData.professional.sites },
+    customSummary:
+      `This proposal covers a ${packageData.professional.name} subscription to the platform for the users and jobsites listed in the schedule below. ` +
+      "The subscription puts document control, inspections and audits, corrective actions, and leadership reporting in one place, so safety work is recorded where it happens and the people accountable for it can see the same picture. " +
+      "Onboarding configures the account to your operation: your jobsites, your users, and the documents and templates your teams already work from. " +
+      "The subscription fee, included users and jobsites, and term dates are stated in the schedule, and the tier can be adjusted before signature.",
+    customExclusions:
+      "The subscription covers the platform capabilities of the selected tier for the included users and jobsites shown in the schedule. Users or jobsites beyond those counts are added at the rates in effect, prorated to the current term. Integrations, custom development, on-site services, and training are quoted separately. Renewal pricing is confirmed in writing before each renewal term.",
     phases: [{ key: "discovery" }, { key: "build" }, { key: "launch" }],
     services: [],
   },

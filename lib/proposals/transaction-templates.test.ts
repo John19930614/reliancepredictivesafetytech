@@ -25,9 +25,21 @@ import {
 // billing term the editor's <select> cannot even display.
 
 describe("transaction template registry", () => {
-  it("offers the six proposal types, labelled the way John asked for them", () => {
+  it("offers the seven proposal types, labelled the way John asked for them", () => {
     const labels = listTransactionTemplates().map((template) => template.label);
-    expect(labels).toEqual(["Pilot", "Time & Materials", "Fixed Price", "Enterprise", "Retainer", "Training"]);
+    // "Platform Subscription" is the ordinary tier sale. Before it, Enterprise
+    // was the only subscription template, so a Professional-tier deal for a
+    // normal contractor borrowed a document written for a buyer with
+    // procurement, a security review and an MSA.
+    expect(labels).toEqual([
+      "Pilot",
+      "Platform Subscription",
+      "Time & Materials",
+      "Fixed Price",
+      "Enterprise",
+      "Retainer",
+      "Training",
+    ]);
   });
 
   it("every summary has a non-empty description for the picker", () => {
@@ -117,7 +129,7 @@ describe("every built-in template body", () => {
   /* ------------------------------------------------------------------------ */
 
   it("gives a subscription ONLY to the platform types", () => {
-    const platformTypes: TransactionTemplateKey[] = ["pilot", "enterprise"];
+    const platformTypes: TransactionTemplateKey[] = ["pilot", "platform", "enterprise"];
     for (const key of transactionTemplateKeys) {
       const body = buildTransactionTemplateState(key);
       const isServicesOnly = isNoPlatformPackageKey(String(body.fields.packageSelect));
