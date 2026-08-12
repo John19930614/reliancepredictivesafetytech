@@ -45,8 +45,14 @@ describe("price book", () => {
     expect(serviceOptions.aiGateway.price).toBe(27500);
     expect(serviceOptions.customWorkflow).toMatchObject({ price: 225, unit: "Hour" });
     expect(serviceOptions.mileage).toMatchObject({ price: 0.7, unit: "Mile" });
-    expect(serviceOptions.osha10).toMatchObject({ price: 175, unit: "Person", group: "Training Catalog" });
+    // Certification courses are billed per participant (2026-08-12). The rest
+    // of the Training Catalog — program builds, crew briefings, facilitated
+    // workshops — stays per session, because those sell a delivery, not seats.
+    expect(serviceOptions.osha10).toMatchObject({ price: 210, unit: "Person", group: "Training Catalog" });
+    expect(serviceOptions.firstAid).toMatchObject({ price: 145, unit: "Person", group: "Training Catalog" });
+    expect(serviceOptions.forklift).toMatchObject({ price: 115, unit: "Person" });
     expect(serviceOptions.genTraining).toMatchObject({ price: 750, unit: "Session" });
+    expect(serviceOptions.culture).toMatchObject({ price: 1250, unit: "Session" });
     expect(Object.keys(serviceOptions)).toHaveLength(64);
 
     expect(packageData.starter).toMatchObject({ price: 35000, users: 15, sites: 1 });
@@ -64,7 +70,7 @@ describe("price book", () => {
     expect(() => {
       (serviceOptions.osha10 as { price: number }).price = 1;
     }).toThrow();
-    expect(serviceOptions.osha10.price).toBe(175);
+    expect(serviceOptions.osha10.price).toBe(210);
   });
 });
 

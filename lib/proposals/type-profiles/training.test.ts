@@ -72,7 +72,7 @@ describe("trainingProfile — composition", () => {
     const start = headings.indexOf("Scope Changes");
     expect(start).toBeGreaterThanOrEqual(0);
     expect(headings.slice(start + 1, start + 10)).toEqual([
-      "Class Size",
+      "Class Size and Minimum Billing",
       "Cancellation and Rescheduling",
       "Attendee No-Shows and Late Arrival",
       "Attendance Roster",
@@ -205,7 +205,10 @@ describe("trainingProfile — no per-deal commercials baked into the terms", () 
   });
 
   it("points at the schedule wherever a per-deal number belongs", () => {
-    expect(bodyOf("Class Size")).toContain("stated with the course line in the schedule");
+    // The six-participant floor is a stated commercial term, not a per-deal
+    // number, so it lives in the clause rather than pointing at the schedule.
+    expect(bodyOf("Class Size and Minimum Billing")).toContain("minimum of six participants");
+    expect(bodyOf("Class Size and Minimum Billing")).toContain("billed on the confirmed roster");
     expect(bodyOf("Travel for On-Site Delivery")).toContain("travel and expense lines shown in the schedule");
     expect(bodyOf("Attendee No-Shows and Late Arrival")).toContain("at the rate shown in the schedule");
   });
