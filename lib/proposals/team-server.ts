@@ -174,7 +174,7 @@ export async function loadTeamRoster(
 ): Promise<TeamRosterEntry[]> {
   const { data, error } = await client
     .from("proposal_team_bios")
-    .select("user_id, display_name, title, signature_path, is_publishable")
+    .select("user_id, display_name, title, bio, signature_path, is_publishable")
     .eq("is_publishable", true)
     .order("display_name", { ascending: true });
 
@@ -185,6 +185,12 @@ export async function loadTeamRoster(
       userId: row.user_id,
       name: (row.display_name ?? "").trim() || "Unnamed teammate",
       title: (row.title ?? "").trim(),
+      // Whether this person has written anything yet. A publishable row with an
+      // empty bio prints a name and a title under "Your Team" and no words at
+      // all, which reads to a client as an unfinished document — and the seller
+      // ticking the box has no way to know, because the roster only ever told
+      // them about the signature.
+      hasBio: (row.bio ?? "").trim().length > 0,
       hasSignature: Boolean(row.signature_path),
     }))
     .filter((entry) => entry.userId);

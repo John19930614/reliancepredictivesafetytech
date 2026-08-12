@@ -42,6 +42,57 @@ export const timeAndMaterialsProfile: ProposalTypeProfile = {
     unitNoun: "task",
   },
 
+  // The prose blocks in sections 01, 03, 04, 06 and 07. What they replace was
+  // written for a subscription sale and printed unchanged on this type: section
+  // 04 promised "Configured platform subscription and client account setup",
+  // section 03 said the scope could scale to "a full enterprise platform
+  // rollout", and section 06 listed "Platform setup, modules, templates,
+  // workflows, and user roles" as a step - on a document that sells safety
+  // staffing, site support, and audits by the hour, with packageKey "none" and
+  // no subscription anywhere in the deal.
+  //
+  // Same rule as the clauses: no rates, no counts, no hours, no percentages, no
+  // dates. Every one of those is a schedule line or a seller field, and copy
+  // that restates one is copy that contradicts the schedule printed beside it -
+  // consistency.ts flags prose figures no field carries. Where a number belongs
+  // to the deal, this points at the schedule of fees or the terms.
+  //
+  // The one idea this copy has to carry is the one the clauses lead with: the
+  // quantities are estimates, and billing follows what is actually delivered.
+  // Sections 01, 03 and 04 each say it in their own register, so a reader who
+  // stops before the terms has still been told. For the same reason none of
+  // this promises a finished deliverable or a guaranteed outcome; that is the
+  // fixed-price type, and it would contradict the Estimated Quantities clause.
+  copy: {
+    subtitle: "Safety Staffing, Site Support, and Compliance Services Delivered at Unit Rates",
+    purposeCallout:
+      "This document establishes the proposed scope of work, unit rates, estimated quantities, deliverables, assumptions, and commercial terms for the safety services described below, which are billed for the quantities actually delivered.",
+    scopeIntro:
+      "The work is organized as individual task lines, each showing what the task covers, the unit it is billed in, the unit rate that applies, and an estimated quantity prepared for budgeting. " +
+      "The estimated quantities are planning figures rather than a fixed price, so invoicing follows the quantities actually delivered at the rates shown, and a task line may be drawn down in full, in part, or not at all.",
+    deliverables: [
+      "Delivery of each task line listed in the schedule of fees, at the unit rates shown",
+      "Written work product for task lines that produce one, including reports, audit findings, inspection records, and written program documents",
+      "Time and unit records supporting each invoice, identifying the person, date, jobsite, and task line billed",
+      "Invoices covering the quantities actually delivered in each billing period, at the unit rates shown",
+      "Notice as cumulative billed and committed amounts approach an authorized not-to-exceed amount",
+    ],
+    scheduleSteps: [
+      "Acceptance, authorized representative confirmation, and task authorization",
+      "Personnel assignment, site access, orientation, and badging",
+      "Scheduling and mobilization of the authorized task lines",
+      "Delivery of the authorized work, with time and units recorded as performed",
+      "Time approval, invoicing for the quantities delivered, and notice as authorized amounts are approached",
+    ],
+    clientResponsibilities: [
+      "Designate an authorized representative who may approve time and unit records, direct day-to-day priorities among the authorized task lines, and authorize work the schedule of fees does not yet cover.",
+      "Provide jobsite access, site orientation, badging, and any site-specific safety requirements assigned personnel must complete before entering.",
+      "Review and approve submitted time and unit records within the period stated in the terms, and raise a question about a specific entry within the billing-dispute window rather than holding the undisputed remainder of the invoice.",
+      "Give written notice before an estimated quantity, a task line, or a not-to-exceed amount needs to change, so the work can be authorized, staffed, and scheduled before it is required.",
+      "Maintain responsibility for jobsite safety, supervision of the client's own workforce, regulatory filings, and final operational decisions, because assigned personnel advise, observe, and document without becoming client employees or assuming the client's Competent Person role.",
+    ],
+  },
+
   omitClauses: [
     // Nothing renews: packageKey is "none", there is no subscription to lapse
     // into a second term, and the engagement ends when the authorized work ends.

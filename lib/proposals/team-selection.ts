@@ -22,6 +22,8 @@ export interface TeamRosterEntry {
   userId: string;
   name: string;
   title: string;
+  /** False when the person has published a profile but written no bio text. */
+  hasBio: boolean;
   hasSignature: boolean;
 }
 

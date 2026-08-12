@@ -50,6 +50,55 @@ export const retainerProfile: ProposalTypeProfile = {
     unitNoun: "month",
   },
 
+  // The prose blocks in sections 01, 03, 04, 06 and 07. The shared copy they
+  // replace was written for a subscription sale and printed unchanged on this
+  // type: section 04 promised "Configured platform subscription and client
+  // account setup", section 03 said the scope could scale to "a full enterprise
+  // platform rollout", and section 06 listed "Platform setup, modules,
+  // templates, workflows, and user roles" as a step - on a document whose
+  // packageKey is "none" and whose only product is advisory time.
+  //
+  // Same rule as the clauses: no fee, no hour count, no rate, no date, no
+  // notice period. Every one of those is a schedule line or a term the seller
+  // sets per deal, and copy that restates one contradicts the schedule printed
+  // beside it. Included capacity is stated once, in Included Advisory Capacity;
+  // response windows once, in Availability and Response Times. Here the copy
+  // points at the schedule and at the terms instead.
+  //
+  // And nothing below may read as though Client has hired a safety department.
+  // Seller advises; Client decides, designates its own Competent Person and
+  // safety manager of record, and keeps the regulatory duty - which is what
+  // retainer.not_competent_person says two sections later.
+  copy: {
+    subtitle: "Ongoing Safety Advisory Support, Document Review, and Regulatory Guidance Services",
+    purposeCallout:
+      "This document establishes the proposed recurring advisory scope, retainer fee, term, deliverables, assumptions, and commercial terms for the ongoing safety advisory support described below.",
+    scopeIntro:
+      "The recurring advisory services are listed as individual lines, each with the support it covers and its billing unit, and together they set the standing scope the retainer provides for each period billed. " +
+      "Work outside those lines, including safety program builds, audit campaigns, incident response support, and training delivery, is scoped and quoted separately as it arises.",
+    deliverables: [
+      "Delivery of the recurring advisory scope listed in the schedule for each period billed",
+      "Advisory availability for safety questions within the response times stated in the terms",
+      "Review of the safety documents, inspection results, and incident reporting the client submits",
+      "A written summary of advisory activity, recommendations, and open items each period",
+      "An assigned primary advisor, with a named secondary advisor for coverage during absence",
+    ],
+    scheduleSteps: [
+      "Acceptance, kickoff, and intake of current safety documents and reporting",
+      "Advisor assignment, backup coverage, and confirmation of the request channel",
+      "Recurring advisory support and document review at the cadence shown in the schedule",
+      "Written summary of advisory activity, recommendations, and open items each period",
+      "Periodic review of the recurring scope, capacity, and any work to be quoted as project work",
+    ],
+    clientResponsibilities: [
+      "Designate a primary contact authorized to submit advisory requests and to receive recommendations and recurring summaries.",
+      "Give the assigned advisor access to the incident reports, inspection results, training records, and program documents the advice depends on, and keep that information current.",
+      "Route advisory requests through the agreed contact channel so they are logged, prioritized, and answered within the response times stated in the terms.",
+      "Decide whether and how to act on the recommendations provided, since the seller advises and the client decides, and carry out corrective action through the client's own supervision.",
+      "Retain the Competent Person, Qualified Person, and safety manager of record designations for the client's own personnel, together with responsibility for regulatory compliance, recordkeeping, and field safety decisions.",
+    ],
+  },
+
   omitClauses: [
     // Hosted-data custody term: it promises export "in a standard exportable
     // format" and deletion "from active systems", which presumes Seller holds

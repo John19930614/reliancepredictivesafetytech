@@ -210,6 +210,15 @@ export function ProposalDocument({
       <SectionHeading number="05">{model.feesHeading}</SectionHeading>
       <div className="rp-doc-scroll">
         <table className="rp-doc-fee">
+          {/* Column widths live in the stylesheet — the money columns are
+              nowrap and would otherwise starve Item and Description. */}
+          <colgroup>
+            <col className="rp-doc-col-item" />
+            <col className="rp-doc-col-desc" />
+            <col className="rp-doc-col-qty" />
+            <col className="rp-doc-col-price" />
+            <col className="rp-doc-col-amount" />
+          </colgroup>
           <thead>
             <tr>
               <th scope="col">Item</th>

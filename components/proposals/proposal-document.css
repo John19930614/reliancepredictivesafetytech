@@ -340,6 +340,43 @@
   border: 1px solid var(--rp-doc-line);
   border-collapse: collapse;
   font-size: 11.5px;
+  /*
+   * FIXED, because auto layout gave the money columns whatever they asked for
+   * and left the words with the remainder. Qty / Unit Price / Amount are
+   * `white-space: nowrap`, so under auto layout they reserved their width
+   * first and squeezed Item down to about 110px — enough to break
+   * "First Aid / CPR / AED Training" across four lines while three columns of
+   * short numbers sat in comfortable space. The proportions below are read
+   * left-to-right the way the client reads them: what it is, what it includes,
+   * then the figures.
+   */
+  table-layout: fixed;
+}
+
+.rp-doc-fee col.rp-doc-col-item {
+  width: 24%;
+}
+
+.rp-doc-fee col.rp-doc-col-desc {
+  width: 40%;
+}
+
+.rp-doc-fee col.rp-doc-col-qty {
+  width: 12%;
+}
+
+.rp-doc-fee col.rp-doc-col-price,
+.rp-doc-fee col.rp-doc-col-amount {
+  width: 12%;
+}
+
+/*
+ * Fixed layout will not widen a cell for a long unbroken token, so a stored
+ * name with no spaces would otherwise spill over the column rule.
+ */
+.rp-doc-fee td,
+.rp-doc-fee th {
+  overflow-wrap: anywhere;
 }
 
 .rp-doc-fee th {

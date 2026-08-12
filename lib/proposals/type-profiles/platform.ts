@@ -62,6 +62,56 @@ export const platformProfile: ProposalTypeProfile = {
     unitNoun: "billing period",
   },
 
+  // The prose blocks in sections 01, 03, 04, 06 and 07. The shared copy they
+  // replace was written FOR a subscription sale, so it started closer to right
+  // here than on any other type - and was still generic and stale. Section 03
+  // hedged that the proposal "can be scaled for a small pilot, a single jobsite,
+  // a multi-site deployment, or a full enterprise platform rollout", which
+  // describes the price book rather than the deal the client is reading; section
+  // 04 listed "Billing package selection and proposal pricing schedule" as
+  // something the client RECEIVES; and section 06 ran from "Kickoff and access
+  // setup" to "final billing activation" without naming the administrator
+  // handover that is the actual end of onboarding.
+  //
+  // Same COPY RULE as the clauses below: no counts, no tier names, no prices, no
+  // term lengths. Where a number belongs to the deal this points at the schedule.
+  // And the same line against Enterprise the clauses hold: nothing here offers an
+  // availability commitment, service credits, a security review, or certificates
+  // of insurance. A contractor buying this tier should not be reading a document
+  // written for a procurement department.
+  copy: {
+    subtitle: "Predictive Safety Platform Subscription, Onboarding, and Support Services",
+    purposeCallout:
+      "This document establishes the proposed subscription tier, fees, onboarding scope, deliverables, assumptions, and commercial terms for the platform subscription described below.",
+    scopeIntro:
+      "The subscription covers platform access at the tier stated in the schedule, for the included users and jobsites listed there, together with the onboarding that configures the account to the client's own operation. " +
+      "Each onboarding line is listed separately with the configuration work it covers, and the tier can be adjusted before signature.",
+    // What the client receives from a subscription: a configured account and the
+    // people who can run it. The tier and the included counts live in the
+    // schedule, so these point at it rather than restating it.
+    deliverables: [
+      "Configured platform subscription and client account for the tier stated in the schedule",
+      "User roles and jobsite structure for the included users and jobsites shown in the schedule",
+      "Onboarding of the client's existing safety documents, templates, and forms into the platform",
+      "Administrator enablement sessions and handover of the configured account to the client's named administrators",
+      "Reporting views for inspections, corrective actions, and document status for the client's leadership",
+    ],
+    scheduleSteps: [
+      "Acceptance, signed order, and account provisioning",
+      "Kickoff and intake of the jobsite list, user roster, and existing safety documents",
+      "Configuration of jobsites, users and roles, documents, templates, and reporting views",
+      "Configuration review and sign-off with the client's administrators",
+      "Go-live for the client's users, support handover, and billing activation",
+    ],
+    clientResponsibilities: [
+      "Provide accurate company, jobsite, user, and billing information for the account and its invoicing.",
+      "Name the account administrator and identify the reviewers authorized to approve scope, pricing, and commercial terms.",
+      "Supply the existing safety documents, templates, forms, and site-specific requirements the account is configured from.",
+      "Review configuration drafts within the review windows agreed at kickoff and consolidate feedback into a single response where possible.",
+      "Retain responsibility for final operational decisions, employee supervision and discipline, regulatory filings, and compliance at the client's sites.",
+    ],
+  },
+
   omitClauses: [
     // Non-Solicitation: a mutual 12-month no-hire is negotiation friction on an
     // ordinary subscription, where the only Seller personnel the client's team

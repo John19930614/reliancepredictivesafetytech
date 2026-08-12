@@ -68,6 +68,22 @@ export interface ProposalLexicon {
   unitNoun: string;
 }
 
+/** The prose blocks a document prints outside the clause list. */
+export interface ProposalTypeCopy {
+  /** Masthead line under the company name. */
+  subtitle: string;
+  /** Section 01's callout: what this document establishes. */
+  purposeCallout: string;
+  /** Section 03's opening paragraph, above the scope lines. */
+  scopeIntro: string;
+  /** Section 04's bullets — what the client actually receives. */
+  deliverables: readonly string[];
+  /** Section 06's ordered steps. */
+  scheduleSteps: readonly string[];
+  /** Section 07's bullets — what the client has to do. */
+  clientResponsibilities: readonly string[];
+}
+
 /* -------------------------------------------------------------------------- */
 /* Clauses                                                                     */
 /* -------------------------------------------------------------------------- */
@@ -157,6 +173,22 @@ export const requiredClauseIds: readonly SharedClauseId[] = Object.freeze([
 export interface ProposalTypeProfile {
   key: TransactionTemplateKey;
   lexicon: ProposalLexicon;
+  /**
+   * The prose sections, per type.
+   *
+   * Every one of these was a single hardcoded string printed on all seven
+   * types, and all of them were written for a platform sale. A training
+   * proposal promised "Configured platform subscription and client account
+   * setup" (section 04), said its scope could scale to "a full enterprise
+   * platform rollout" (section 03), and listed "Platform setup, modules,
+   * templates, workflows, and user roles" as a schedule step (section 06) —
+   * for a CPR class in a trailer.
+   *
+   * Required rather than optional, for the same reason the lexicon is: an
+   * optional field leaves six types silently inheriting the platform wording,
+   * which is the bug.
+   */
+  copy: ProposalTypeCopy;
   /**
    * Shared clauses that do not apply to this deal. Each needs a one-line
    * justification in a comment at the call site — a dropped legal clause with
