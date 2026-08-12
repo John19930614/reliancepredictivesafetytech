@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { isPackageKey, isPhaseKey, isPilotPackageKey, isServiceKey } from "./catalog";
+import { buildProposalDocumentModel } from "@/components/proposals/proposal-document-model";
+import { isNoPlatformPackageKey, isPackageKey, isPhaseKey, isPilotPackageKey, isServiceKey } from "./catalog";
 import { scanProposalConsistency } from "./consistency";
 import { isGeneratorState } from "./generator-state";
+import { computeProposalTotals } from "./pricing";
 import { buildStateFromTemplate, sanitizeTemplateState, templateLeakFieldIds } from "./templates";
 import {
   buildTransactionTemplateState,
@@ -11,7 +13,10 @@ import {
   isTransactionTemplateKey,
   listTransactionTemplates,
   proposalBillingTermOptions,
+  proposalTypeFieldId,
+  proposalTypeLabelFromState,
   transactionTemplateKeys,
+  type TransactionTemplateKey,
 } from "./transaction-templates";
 
 // These templates seed real client documents. Every invariant here is one that,
@@ -105,6 +110,91 @@ describe("every built-in template body", () => {
       const body = buildTransactionTemplateState(key);
       expect(isPilotPackageKey(String(body.fields.packageSelect)), key).toBe(key === "pilot");
     }
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* Only platform work carries a subscription                                 */
+  /* ------------------------------------------------------------------------ */
+
+  it("gives a subscription ONLY to the platform types", () => {
+    const platformTypes: TransactionTemplateKey[] = ["pilot", "enterprise"];
+    for (const key of transactionTemplateKeys) {
+      const body = buildTransactionTemplateState(key);
+      const isServicesOnly = isNoPlatformPackageKey(String(body.fields.packageSelect));
+      expect(isServicesOnly, `${key} package = ${body.fields.packageSelect}`).toBe(!platformTypes.includes(key));
+    }
+  });
+
+  it("prints no subscription row, heading or seat pills on a services engagement", () => {
+    for (const key of ["training", "fixed_price", "time_and_materials", "retainer"] as TransactionTemplateKey[]) {
+      const state = buildTransactionTemplateState(key);
+      const totals = computeProposalTotals(state);
+      expect(totals.lineItems.some((row) => row.source === "package"), key).toBe(false);
+
+      const model = buildProposalDocumentModel({
+        state,
+        proposal: { id: "p", title: "T", status: "draft", currentRevision: 1, validUntil: null },
+      });
+      expect(model.includesPlatformPackage, key).toBe(false);
+      expect(model.packageHeading, key).toBe("Engagement Summary");
+      expect(model.packageIntro, key).toContain("no platform subscription is included");
+      expect(model.packageIntro, key).not.toMatch(/base subscription/i);
+      const pillLabels = model.packagePills.map((pill) => pill.label);
+      expect(pillLabels, key).not.toContain("Subscription Price");
+      expect(pillLabels, key).not.toContain("Included Users");
+      expect(pillLabels, key).not.toContain("Included Jobsites");
+      // The fee table must not carry a "Platform Services" line either.
+      expect(model.feeGroups.flatMap((group) => group.rows).some((row) => /platform services/i.test(row.name))).toBe(false);
+    }
+  });
+
+  it("keeps the platform package, heading and pills on the platform types", () => {
+    for (const key of ["pilot", "enterprise"] as TransactionTemplateKey[]) {
+      const state = buildTransactionTemplateState(key);
+      const model = buildProposalDocumentModel({
+        state,
+        proposal: { id: "p", title: "T", status: "draft", currentRevision: 1, validUntil: null },
+      });
+      expect(model.includesPlatformPackage, key).toBe(true);
+      expect(model.packageHeading, key).toBe("Selected Platform Package");
+      expect(model.packageIntro, key).toContain("base subscription");
+      expect(computeProposalTotals(state).lineItems.some((row) => row.source === "package"), key).toBe(true);
+      expect(model.packagePills.map((pill) => pill.label), key).toContain("Included Users");
+    }
+  });
+
+  it("headlines the document with the engagement, not a package it does not sell", () => {
+    const training = buildProposalDocumentModel({
+      state: buildTransactionTemplateState("training"),
+      proposal: { id: "p", title: "T", status: "draft", currentRevision: 1, validUntil: null },
+    });
+    expect(training.docline).toBe("Training Services Proposal");
+    expect(training.proposalTypeLabel).toBe("Training Services");
+
+    const fixed = buildProposalDocumentModel({
+      state: buildTransactionTemplateState("fixed_price"),
+      proposal: { id: "p", title: "T", status: "draft", currentRevision: 1, validUntil: null },
+    });
+    expect(fixed.docline).toBe("Fixed-Price Services Proposal");
+
+    // The pilot keeps its own headline, driven by the package rather than the type.
+    const pilot = buildProposalDocumentModel({
+      state: buildTransactionTemplateState("pilot"),
+      proposal: { id: "p", title: "T", status: "draft", currentRevision: 1, validUntil: null },
+    });
+    expect(pilot.docline).toMatch(/pilot/i);
+  });
+
+  it("stamps the type so the document can name it, and the stamp survives scrubbing", () => {
+    const state = buildStateFromTemplate(buildTransactionTemplateState("retainer"), { preparedBy: "Steve" });
+    expect(state?.fields[proposalTypeFieldId]).toBe("retainer");
+    expect(proposalTypeLabelFromState(state?.fields)).toBe("Safety Advisory Retainer");
+  });
+
+  it("reads no type label from a proposal that was never stamped", () => {
+    expect(proposalTypeLabelFromState({})).toBeNull();
+    expect(proposalTypeLabelFromState({ [proposalTypeFieldId]: "not_a_type" })).toBeNull();
+    expect(proposalTypeLabelFromState(null)).toBeNull();
   });
 
   it("Training carries the First Aid / CPR / AED line Steve asked for", () => {

@@ -13,7 +13,14 @@
 // coerces every value it does read — a persisted state is untrusted input.
 
 import type { GeneratorItem, GeneratorState } from "./generator-state";
-import { defaultPackageKey, lookupPackage, lookupPhase, lookupService, packageData } from "./catalog";
+import {
+  defaultPackageKey,
+  isNoPlatformPackageKey,
+  lookupPackage,
+  lookupPhase,
+  lookupService,
+  packageData,
+} from "./catalog";
 import { parseProposalTerm } from "./term";
 
 /* -------------------------------------------------------------------------- */
@@ -295,7 +302,11 @@ export interface ProposalTotals {
  * proposals that have no saved state at all rather than storing that default.
  */
 export function computeProposalTotals(state: GeneratorState | null | undefined): ProposalTotals {
-  const lineItems: ProposalLineItem[] = [buildPackageLine(state)];
+  // `null` when the proposal carries no platform subscription at all: the row
+  // is OMITTED rather than priced at zero, so a training or fixed-price
+  // document does not print a "Platform Services" line the client never bought.
+  const packageLine = buildPackageLine(state);
+  const lineItems: ProposalLineItem[] = packageLine ? [packageLine] : [];
 
   for (const item of readItems(state?.phases)) {
     lineItems.push(buildItemLine(item, "phase"));
@@ -339,9 +350,14 @@ export function computeProposalTotals(state: GeneratorState | null | undefined):
  * from the seller's Included Users / Included Jobsites fields rather than the
  * catalog defaults the asset reads, so the row states what was actually quoted.
  */
-function buildPackageLine(state: GeneratorState | null | undefined): ProposalLineItem {
+function buildPackageLine(state: GeneratorState | null | undefined): ProposalLineItem | null {
   const rawKey = toText(readField(state, "packageSelect")).trim();
   const resolvedKey = lookupPackage(rawKey) ? rawKey : defaultPackageKey;
+
+  // Services-only engagement: there is no base subscription to charge for, and
+  // a $0 row for one is a line the client has to ask about.
+  if (isNoPlatformPackageKey(resolvedKey)) return null;
+
   const base = lookupPackage(resolvedKey) ?? packageData[defaultPackageKey];
 
   const price = clamp(fieldNumber(state, "annualPrice", base.price), 0);

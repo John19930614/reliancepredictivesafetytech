@@ -15,6 +15,7 @@
 // pricing, and nothing trusts a persisted numeric value directly.
 
 import {
+  isNoPlatformPackageKey,
   isPilotPackageKey,
   lookupPackage,
   lookupService,
@@ -22,6 +23,7 @@ import {
   defaultPackageKey,
   stripPhaseOrdinal,
 } from "@/lib/proposals/catalog";
+import { proposalTypeLabelFromState } from "@/lib/proposals/transaction-templates";
 import {
   formatClientContactLine,
   parseClientContacts,
@@ -396,8 +398,18 @@ export interface ProposalDocumentModel {
   /** "March 2026 – August 2026 (6 months)", or null when no term was chosen. */
   termLabel: string | null;
   summary: string;
+  /**
+   * Section 02's heading. "Selected Platform Package" when the engagement
+   * includes a subscription, "Engagement Summary" when it does not — a
+   * training or fixed-price document has no platform package to select.
+   */
+  packageHeading: string;
   packageIntro: string;
   packagePills: DocumentPill[];
+  /** False for a services-only engagement (no subscription row, no seat pills). */
+  includesPlatformPackage: boolean;
+  /** "Training Services", "Fixed-Price Services"… or null if the type is unstamped. */
+  proposalTypeLabel: string | null;
   phaseScope: DocumentScopeEntry[];
   serviceScope: DocumentScopeEntry[];
   deliverables: string[];
@@ -530,9 +542,25 @@ export function buildPackageDescription(input: {
   users: number;
   sites: number;
   term: ProposalTerm;
+  /** False for a services-only engagement — there is no subscription to describe. */
+  includesPlatformPackage?: boolean;
+  /** "Training Services" etc., used to open the engagement paragraph. */
+  proposalTypeLabel?: string | null;
 }): string {
   const termClause = input.term.rangeLabel ? ` for the term ${input.term.rangeLabel}` : "";
   const durationClause = input.term.durationLabel ? ` for the full ${input.term.durationLabel} term` : "";
+
+  // Services-only: say what the engagement IS, and say plainly that no
+  // subscription is included. Seat and site counts are skipped entirely —
+  // they are a subscription's limits, and this proposal has no subscription.
+  if (input.includesPlatformPackage === false) {
+    const engagement = input.proposalTypeLabel
+      ? `This is a ${input.proposalTypeLabel.toLowerCase()} engagement${termClause}.`
+      : `This is a professional services engagement${termClause}.`;
+    const scope = "The scope and fees are itemized in the schedule below, and no platform subscription is included.";
+    return durationClause ? `${engagement} ${scope} The engagement runs${durationClause}.` : `${engagement} ${scope}`;
+  }
+
   const opening = `${input.packageName} is the proposed base subscription${termClause}. ${input.packageDesc}`;
 
   // A blank proposal starts with no counts, and "Included limits are 0 users
@@ -553,9 +581,20 @@ export function buildPackageDescription(input: {
  * The line under the wordmark. Derived so a 3-month or 12-month engagement stops
  * being announced as a "6-Month Pilot".
  */
-export function buildDocline(packageName: string, isPilot: boolean, term: ProposalTerm): string {
+export function buildDocline(
+  packageName: string,
+  isPilot: boolean,
+  term: ProposalTerm,
+  /** Set for a services-only engagement, which has no package name to headline. */
+  proposalTypeLabel?: string | null,
+): string {
   const monthPrefix = term.months === null ? "" : `${term.months}-Month `;
   if (isPilot) return monthPrefix ? `${monthPrefix}Pilot & Platform Access Proposal` : documentCopy.doclineFallback;
+  // A training or fixed-price document headlined "Platform Services Proposal"
+  // announces the wrong deal on the first line the client reads.
+  if (proposalTypeLabel) {
+    return monthPrefix ? `${proposalTypeLabel} — ${monthPrefix}Term` : `${proposalTypeLabel} Proposal`;
+  }
   return monthPrefix ? `${packageName} — ${monthPrefix}Term` : `${packageName} Proposal`;
 }
 
@@ -622,10 +661,20 @@ export function buildProposalDocumentModel({
   // The package row's qty/price are already authoritative (computeProposalTotals
   // clamps them); name/desc come from the catalog so the intro paragraph reads
   // the same as the generator's.
+  // A services-only engagement produces NO package row at all (see
+  // buildPackageLine), so the selected key is read from the state rather than
+  // inferred from a row that was deliberately omitted.
+  const selectedPackageKey = fieldText(state, "packageSelect", defaultPackageKey);
+  const includesPlatformPackage = !isNoPlatformPackageKey(selectedPackageKey);
   const packageRow = totals.lineItems.find((row) => row.source === "package") ?? null;
-  const packageOption = lookupPackage(packageRow?.key ?? "") ?? packageData[defaultPackageKey];
-  const includedUsers = fieldCount(state, "includedUsers", packageOption.users);
-  const includedSites = fieldCount(state, "includedSites", packageOption.sites);
+  const packageOption =
+    lookupPackage(packageRow?.key ?? selectedPackageKey) ?? packageData[defaultPackageKey];
+  // Seat and site counts belong to a subscription. On a services engagement
+  // they are not "zero" — they do not apply, and printing them as limits would
+  // quote the client a cap on something they are not buying.
+  const includedUsers = includesPlatformPackage ? fieldCount(state, "includedUsers", packageOption.users) : 0;
+  const includedSites = includesPlatformPackage ? fieldCount(state, "includedSites", packageOption.sites) : 0;
+  const proposalTypeLabel = proposalTypeLabelFromState(state?.fields);
 
   /* --- Scope ------------------------------------------------------------ */
 
@@ -688,7 +737,12 @@ export function buildProposalDocumentModel({
   return {
     headline: clientCompany ? `Proposal for ${clientCompany}` : proposal.title,
     subtitle: documentCopy.subtitle,
-    docline: buildDocline(packageOption.name, isPilotPackage, term),
+    docline: buildDocline(
+      packageOption.name,
+      isPilotPackage,
+      term,
+      includesPlatformPackage ? null : proposalTypeLabel ?? "Professional Services",
+    ),
     wordmark: sellerName,
     statusLabel: proposalStatusLabels[proposal.status] ?? String(proposal.status),
     preparedFor: buildParty(clientCompany, clientLines),
@@ -704,22 +758,38 @@ export function buildProposalDocumentModel({
         : `${term.rangeLabel} (${plural(term.months, "month")})`
       : null,
     summary: truncateAtWord(fieldText(state, "customSummary", documentCopy.noSummary), documentLimits.summaryChars),
+    packageHeading: includesPlatformPackage ? "Selected Platform Package" : "Engagement Summary",
+    includesPlatformPackage,
+    proposalTypeLabel,
     packageIntro: buildPackageDescription({
       packageName: packageOption.name,
       packageDesc: packageOption.desc,
       users: includedUsers,
       sites: includedSites,
       term,
+      includesPlatformPackage,
+      proposalTypeLabel,
     }),
     // A count of zero is "not set yet", not a quoted limit — the pill is
     // dropped rather than printing "Included Users: 0" on a blank proposal.
-    packagePills: [
-      { label: isPilotPackage ? "Pilot Price" : "Subscription Price", value: formatLineAmount(packageRow?.price ?? 0) },
-      { label: "Term", value: term.rangeLabel ?? missingValue },
-      ...(includedUsers > 0 ? [{ label: "Included Users", value: String(includedUsers) }] : []),
-      ...(includedSites > 0 ? [{ label: "Included Jobsites", value: String(includedSites) }] : []),
-      { label: "Billing", value: billingTerm },
-    ],
+    //
+    // A services engagement gets a DIFFERENT set: no subscription price (there
+    // is no subscription) and no seat/site limits (nothing is capped). What
+    // matters there is what kind of engagement it is and what it costs.
+    packagePills: includesPlatformPackage
+      ? [
+          { label: isPilotPackage ? "Pilot Price" : "Subscription Price", value: formatLineAmount(packageRow?.price ?? 0) },
+          { label: "Term", value: term.rangeLabel ?? missingValue },
+          ...(includedUsers > 0 ? [{ label: "Included Users", value: String(includedUsers) }] : []),
+          ...(includedSites > 0 ? [{ label: "Included Jobsites", value: String(includedSites) }] : []),
+          { label: "Billing", value: billingTerm },
+        ]
+      : [
+          { label: "Engagement", value: proposalTypeLabel ?? "Professional Services" },
+          { label: "Total", value: formatLineAmount(totals.total) },
+          ...(term.rangeLabel ? [{ label: "Term", value: term.rangeLabel }] : []),
+          { label: "Billing", value: billingTerm },
+        ],
     phaseScope,
     serviceScope,
     deliverables: [...documentCopy.baseDeliverables],

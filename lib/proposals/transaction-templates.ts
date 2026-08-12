@@ -36,6 +36,16 @@ import { packageData, phaseOptions, serviceOptions, type PackageKey, type PhaseK
 import type { GeneratorFieldValue, GeneratorItem, GeneratorState } from "./generator-state";
 
 /**
+ * Generator field id carrying which transaction type seeded the proposal.
+ *
+ * Backed by a hidden input in assets/proposal-generator-v15.html: the bridge
+ * only collects fields that have an element, so a value written here without
+ * one would be dropped on the seller's next save. Same mechanism as the team
+ * picker's two hidden inputs.
+ */
+export const proposalTypeFieldId = "proposalType";
+
+/**
  * The Billing Term options, transcribed verbatim from the `billingTerm`
  * <select> in assets/proposal-generator-v15.html. The options carry no value
  * attribute, so the state stores the visible text — a template writing any
@@ -90,8 +100,28 @@ interface ServiceSeed {
 
 interface TransactionTemplateDefinition {
   key: TransactionTemplateKey;
+  /** Picker label, e.g. "Time & Materials". */
   label: string;
+  /**
+   * How the CLIENT'S DOCUMENT names the engagement, e.g. "Training Services".
+   * Separate from `label` because a dropdown entry and a line printed under a
+   * company wordmark are not the same register — "Training" picks a template;
+   * "Training Services Proposal" is what the client reads.
+   */
+  documentLabel: string;
   description: string;
+  /**
+   * The base subscription this type sells, or `none` for a services-only
+   * engagement.
+   *
+   * ONLY the platform types carry a subscription. Training, fixed-price
+   * deliverables, time-and-materials tasks and an advisory retainer are not
+   * platform purchases, and seeding them with a package made the document open
+   * on "Selected Platform Package", print a "Platform Services" fee row at $0,
+   * and show Included Users / Included Jobsites pills for seats nobody bought.
+   * A services deal that DOES include platform access gets a real package
+   * chosen in the editor — deliberately, rather than by default.
+   */
   packageKey: PackageKey;
   billingTerm: ProposalBillingTerm;
   /** Extra structured fields (counts etc. — fields, never prose). */
@@ -142,6 +172,7 @@ const definitions: Readonly<Record<TransactionTemplateKey, TransactionTemplateDe
   pilot: {
     key: "pilot",
     label: "Pilot",
+    documentLabel: "Pilot & Platform Access",
     description:
       "Fixed-price platform pilot — heavier setup, testing, and shared reporting, with any broader rollout scoped as its own decision.",
     packageKey: "custom",
@@ -184,8 +215,9 @@ const definitions: Readonly<Record<TransactionTemplateKey, TransactionTemplateDe
   time_and_materials: {
     key: "time_and_materials",
     label: "Time & Materials",
+    documentLabel: "Time & Materials Services",
     description: "Task-by-task line items billed at unit rates for the quantities actually delivered — estimates, not a fixed price.",
-    packageKey: "blank",
+    packageKey: "none",
     billingTerm: "Monthly",
     customSummary:
       "This engagement is billed on a time-and-materials basis. The schedule of fees lists each task as its own line item with a unit rate and an estimated quantity; invoices reflect the quantities actually delivered, at the rates shown. Estimated quantities are planning figures, not a fixed price — where scope grows or shrinks, billing follows the work performed. Rates hold for the validity period of this proposal, and new task types are added by written approval before the work begins.",
@@ -202,8 +234,9 @@ const definitions: Readonly<Record<TransactionTemplateKey, TransactionTemplateDe
   fixed_price: {
     key: "fixed_price",
     label: "Fixed Price",
+    documentLabel: "Fixed-Price Services",
     description: "Named deliverables for a fixed total — anything outside the list goes through a written change order.",
-    packageKey: "blank",
+    packageKey: "none",
     billingTerm: "Milestone-based",
     customSummary:
       "This proposal offers the deliverables enumerated in the schedule of fees for a fixed price. Each line describes a deliverable and the scope it covers; the total stated in the schedule is the full professional fee for that combined scope. Requests that fall outside the listed deliverables are handled through a written change order with its own pricing, so the fixed price stays fixed. Delivery sequence and dates are coordinated at kickoff, and billing follows the milestone structure shown in the terms.",
@@ -221,6 +254,7 @@ const definitions: Readonly<Record<TransactionTemplateKey, TransactionTemplateDe
   enterprise: {
     key: "enterprise",
     label: "Enterprise",
+    documentLabel: "Enterprise Platform Subscription",
     description: "Platform subscription presenting the tier ladder from smallest to Enterprise, proposing the Enterprise tier.",
     packageKey: "enterprise",
     billingTerm: "Annual upfront",
@@ -245,11 +279,12 @@ const definitions: Readonly<Record<TransactionTemplateKey, TransactionTemplateDe
   retainer: {
     key: "retainer",
     label: "Retainer",
-    description: "Recurring advisory and platform support on a monthly billing term, with project work quoted separately.",
-    packageKey: "blank",
+    documentLabel: "Safety Advisory Retainer",
+    description: "Recurring advisory and safety support on a monthly billing term, with project work quoted separately.",
+    packageKey: "none",
     billingTerm: "Monthly",
     customSummary:
-      "This proposal establishes an ongoing safety advisory retainer. The recurring scope in the schedule covers standing support: account and platform management, advisory access for safety questions as they arise, review of reporting, and management-ready summaries on a regular cadence. The retainer is billed on the recurring term shown in the schedule and continues until adjusted or ended under the terms below — support is in place before issues become incidents, not after.",
+      "This proposal establishes an ongoing safety advisory retainer. The recurring scope in the schedule covers standing support: advisory access for safety questions as they arise, review of your safety reporting, and management-ready summaries on a regular cadence. The retainer is billed on the recurring term shown in the schedule and continues until adjusted or ended under the terms below — support is in place before issues become incidents, not after.",
     customExclusions:
       "The retainer covers the recurring services listed in the schedule. Project work — new safety programs, audits beyond the recurring cadence, incident response support, or training engagements — is scoped and quoted separately as it arises. Either party may adjust or end the retainer under the termination terms in this proposal.",
     phases: [{ key: "ongoing" }],
@@ -262,8 +297,9 @@ const definitions: Readonly<Record<TransactionTemplateKey, TransactionTemplateDe
   training: {
     key: "training",
     label: "Training",
+    documentLabel: "Training Services",
     description: "Instructor-led courses from the training catalog — including First Aid / CPR / AED — billed per session or attendee.",
-    packageKey: "blank",
+    packageKey: "none",
     // "Milestone-based" reads correctly for sessions invoiced as delivered; the
     // only one-time option carries "(pilot)" in its label, which a training
     // document must not print.
@@ -290,6 +326,19 @@ export function getTransactionTemplateLabel(key: TransactionTemplateKey): string
 }
 
 /**
+ * The engagement label the DOCUMENT prints, e.g. "Training Services" — read
+ * from the state's stamped type. Returns null for a proposal built before the
+ * stamp existed, or one started blank, so callers fall back to package-derived
+ * wording rather than asserting a type nobody chose.
+ */
+export function proposalTypeLabelFromState(fields: Record<string, unknown> | null | undefined): string | null {
+  const raw = fields?.[proposalTypeFieldId];
+  const key = typeof raw === "string" ? raw.trim() : "";
+  if (!isTransactionTemplateKey(key)) return null;
+  return definitions[key].documentLabel;
+}
+
+/**
  * A fresh GeneratorState for one proposal type. Freshly built on every call —
  * the caller (and buildStateFromTemplate after it) may mutate the result, and a
  * shared object would let one proposal's edits reprice the next.
@@ -301,6 +350,10 @@ export function buildTransactionTemplateState(key: TransactionTemplateKey): Gene
     billingTerm: def.billingTerm,
     customSummary: def.customSummary,
     customExclusions: def.customExclusions,
+    // Stamped so the DOCUMENT can describe the engagement the seller chose —
+    // the docline and section 02 read from this rather than inferring the deal
+    // from whichever package happens to be selected.
+    [proposalTypeFieldId]: key,
     ...def.fields,
   };
   return {

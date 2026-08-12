@@ -166,7 +166,7 @@ export function ProposalDocument({
         <strong>Proposal Purpose:</strong> {model.purposeCallout}
       </div>
 
-      <SectionHeading number="02">Selected Platform Package</SectionHeading>
+      <SectionHeading number="02">{model.packageHeading}</SectionHeading>
       <p>{model.packageIntro}</p>
       <ul className="rp-doc-pills">
         {model.packagePills.map((pill) => (

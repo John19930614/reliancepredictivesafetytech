@@ -536,11 +536,16 @@ describe("revision 1 form state", () => {
     await createProposal({ title: "Unassigned deal" });
 
     const workingCopy = supabase.calls.find((c) => c.table === "client_proposals" && c.op === "update");
-    const totals = computeProposalTotals(workingCopy?.payload?.form_data as GeneratorState);
-    // Zero-priced phases must not move the total off the package fee, which is
-    // zero on the blank package the generator now preselects.
+    const seeded = workingCopy?.payload?.form_data as GeneratorState;
+    const totals = computeProposalTotals(seeded);
     expect(totals.total).toBe(0);
-    expect(totals.lineItems).toHaveLength(4);
+    // Three zero-priced phases and NO package row. A new proposal is not a
+    // platform sale yet, and the fallback package printed one anyway — a
+    // "Platform Services" subscription line at $0 with subscription pills
+    // beside it, on a proposal that might turn out to be training.
+    expect(seeded.fields.packageSelect).toBe("none");
+    expect(totals.lineItems).toHaveLength(3);
+    expect(totals.lineItems.some((row) => row.source === "package")).toBe(false);
   });
 
   it("refuses to restore a revision with no usable form data", async () => {
