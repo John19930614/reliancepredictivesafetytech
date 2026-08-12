@@ -207,6 +207,13 @@ body.embedded .panel{position:static;max-height:none;overflow:visible}
        These two hidden inputs are that element. -->
   <input type="hidden" id="proposalTeamMembers" value="">
   <input type="hidden" id="proposalSigner" value="">
+  <!-- Which transaction type seeded this proposal (pilot, training, fixed_price
+       …). Set by lib/proposals/transaction-templates.ts when the proposal is
+       created, read by the document so section 02 and the docline describe the
+       engagement the seller actually chose. Hidden here for the same reason as
+       the two inputs above: the bridge only collects fields that have an
+       element, so a value with no element would be dropped on the next save. -->
+  <input type="hidden" id="proposalType" value="">
   <!-- The people the proposal is addressed to, one per line, encoded
        "name | title | email | phone" (lib/proposals/client-contacts.ts). Owned
        by the platform's "Client company & addressees" panel above this builder,
@@ -278,8 +285,9 @@ body.embedded .panel{position:static;max-height:none;overflow:visible}
       <option value="blacklabel">Black Label Strategic Program — $155,000/year</option>
       <option value="custom">Basic Pilot / Manual Price</option>
       <option value="blank" selected>Blank / Manual Price</option>
+      <option value="none">No platform subscription (services only)</option>
     </select>
-    <p class="cardhint">Blank is the default: manual price, no pilot wording. Pick Basic Pilot only for an actual pilot &mdash; it is what puts &ldquo;Pilot&rdquo; in the document headline and the price pill. The term drives every duration printed on the document; leave it unset to omit them.</p>
+    <p class="cardhint">Blank is the default: manual price, no pilot wording. Pick Basic Pilot only for an actual pilot &mdash; it is what puts &ldquo;Pilot&rdquo; in the document headline and the price pill. Pick <b>No platform subscription</b> for work that is not platform work &mdash; training, written programs, audits, consulting hours, a retainer &mdash; and the document drops the subscription row, the subscription pills and the included user/jobsite counts entirely. The term drives every duration printed on the document; leave it unset to omit them.</p>
     <div class="grid2"><div><label>Term Starts — Month</label><select id="termStartMonth"><option value="">—</option><option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option><option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option><option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option></select></div><div><label>Year</label><select id="termStartYear"><option value="">—</option><option value="2025">2025</option><option value="2026">2026</option><option value="2027">2027</option><option value="2028">2028</option><option value="2029">2029</option><option value="2030">2030</option><option value="2031">2031</option><option value="2032">2032</option></select></div></div>
     <div class="grid2"><div><label>Term Ends — Month</label><select id="termEndMonth"><option value="">—</option><option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option><option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option><option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option></select></div><div><label>Year</label><select id="termEndYear"><option value="">—</option><option value="2025">2025</option><option value="2026">2026</option><option value="2027">2027</option><option value="2028">2028</option><option value="2029">2029</option><option value="2030">2030</option><option value="2031">2031</option><option value="2032">2032</option></select></div></div>
     <div class="cardhint" id="termSummary"></div>
@@ -356,7 +364,7 @@ body.embedded .panel{position:static;max-height:none;overflow:visible}
   <p class="lead" id="pSummary"></p>
   <div class="callout"><b>Proposal Purpose:</b> This document establishes the proposed scope, pricing, payment structure, deliverables, assumptions, and commercial terms for platform billing and related safety technology support.</div>
 
-  <h2><span class="sec-no">02</span>Selected Platform Package</h2>
+  <h2><span class="sec-no">02</span><span id="pPackageHeading">Selected Platform Package</span></h2>
   <p id="pPackageIntro"></p>
   <div id="pPackagePills"></div>
 
@@ -480,7 +488,8 @@ const packageData = {
   enterprise:{name:"Enterprise Predictive Safety",price:99500,users:100,sites:10,desc:"Full multi-site safety intelligence package with stronger predictive risk capability, AI-supported review, and executive visibility."},
   blacklabel:{name:"Black Label Strategic Program",price:155000,users:250,sites:25,desc:"Strategic enterprise program for organizations requiring advanced safety intelligence, multi-site governance, and premium implementation support."},
   custom:{name:"Pilot Program \u2014 Platform Access",price:Number($('annualPrice')?.value||0),users:Number($('includedUsers')?.value||0),sites:Number($('includedSites')?.value||0),desc:"A fixed-price pilot providing platform access for the included users and jobsites shown below, with no additional setup or licensing cost during the pilot term."},
-  blank:{name:"Platform Services",price:Number($('annualPrice')?.value||0),users:Number($('includedUsers')?.value||0),sites:Number($('includedSites')?.value||0),desc:"Platform access and services as scoped in this proposal."}
+  blank:{name:"Platform Services",price:Number($('annualPrice')?.value||0),users:Number($('includedUsers')?.value||0),sites:Number($('includedSites')?.value||0),desc:"Platform access and services as scoped in this proposal."},
+  none:{name:"Services Engagement",price:0,users:0,sites:0,desc:"A professional services engagement. No platform subscription is included; the scope and fees are itemized in the schedule below."}
 };
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 function num(x,d=0){const n=Number(x); return Number.isFinite(n)?n:d;}
@@ -560,8 +569,19 @@ function update(){
  $('pDate').textContent=$('proposalDate').value || new Date().toLocaleDateString(); $('pNo').textContent=$('proposalNo').value; $('pValid').textContent='Open for acceptance for '+$('validDays').value+' calendar days from proposal date.';
  $('pSummary').textContent=$('customSummary').value;
   const _plural=(n,w)=>n+' '+w+(n===1?'':'s');
- $('pPackageIntro').innerHTML='<b>'+esc(p.name)+'</b> is the proposed base subscription'+(term.rangeLabel?' for the term '+esc(term.rangeLabel):'')+'. '+esc(p.desc)+' Included limits are '+_plural(p.users,'user')+' across '+_plural(p.sites,'jobsite')+(term.months?' for the full '+term.months+'-month term':'')+'.';
- $('pPackagePills').innerHTML=`<span class="pill">${isPilot?'Pilot Price':'Subscription Price'}: ${money0(p.price)}</span><span class="pill">Term: ${esc(term.rangeLabel||'\u2014')}</span><span class="pill">Included Users: ${p.users}</span><span class="pill">Included Jobsites: ${p.sites}</span><span class="pill">Billing: ${esc($('billingTerm').value)}</span>`;
+ /* A services-only engagement (packageSelect "none") has no subscription to
+    describe: no base-subscription sentence, no seat/site limits, no
+    subscription price pill, and no package row in the fee table below. Mirrors
+    isNoPlatformPackageKey() + buildPackageDescription() in the platform. */
+ const noPlatform = $('packageSelect').value === 'none';
+ if($('pPackageHeading'))$('pPackageHeading').textContent = noPlatform ? 'Engagement Summary' : 'Selected Platform Package';
+ if(noPlatform){
+   $('pPackageIntro').innerHTML='This is a professional services engagement'+(term.rangeLabel?' for the term '+esc(term.rangeLabel):'')+'. The scope and fees are itemized in the schedule below, and no platform subscription is included.'+(term.months?' The engagement runs for the full '+term.months+'-month term.':'');
+   $('pPackagePills').innerHTML=`<span class="pill">Engagement: Professional Services</span><span class="pill">Term: ${esc(term.rangeLabel||'\u2014')}</span><span class="pill">Billing: ${esc($('billingTerm').value)}</span>`;
+ } else {
+   $('pPackageIntro').innerHTML='<b>'+esc(p.name)+'</b> is the proposed base subscription'+(term.rangeLabel?' for the term '+esc(term.rangeLabel):'')+'. '+esc(p.desc)+' Included limits are '+_plural(p.users,'user')+' across '+_plural(p.sites,'jobsite')+(term.months?' for the full '+term.months+'-month term':'')+'.';
+   $('pPackagePills').innerHTML=`<span class="pill">${isPilot?'Pilot Price':'Subscription Price'}: ${money0(p.price)}</span><span class="pill">Term: ${esc(term.rangeLabel||'\u2014')}</span><span class="pill">Included Users: ${p.users}</span><span class="pill">Included Jobsites: ${p.sites}</span><span class="pill">Billing: ${esc($('billingTerm').value)}</span>`;
+ }
  const phases=collectItems('phase','phase'), svcs=collectItems('service','service');
  const _stripOrd=n=>{const s=String(n||'').replace(/^\s*phase\s*\d+\s*(?:[\u2014\u2013-]|:)\s*/i,''); return s.trim()===''?n:s;};
  $('pPhaseScope').innerHTML=phases.map((x,i)=>`<h3>${i+1}. ${esc(_stripOrd(x.name))}</h3><p>${esc(x.desc)}</p>`).join('') || '<p>No implementation phases selected.</p>';
@@ -570,7 +590,7 @@ function update(){
  $('pDeliverables').innerHTML=deliverables.map(d=>'<li>'+esc(d)+'</li>').join('');
  const _covered=phases.map(x=>_stripOrd(x.name)).concat(svcs.map(x=>x.name));
  if($('pDeliverablesNote'))$('pDeliverablesNote').textContent=_covered.length?('A deliverable package is produced for each selected line: '+_covered.join(', ')+'. Section 03 states the scope of each.'):'';
- let rows=[{name:p.name,desc:'Platform access for the '+(term.months?term.months+'-month ':'')+'term \u2014 includes '+p.users+' users and '+p.sites+' sites.',qty:1,price:p.price}]; phases.forEach(x=>rows.push({name:x.name,desc:x.desc,qty:x.qty,price:x.price})); svcs.forEach(x=>rows.push({name:x.name,desc:x.desc,qty:x.qty,price:x.price}));
+ let rows=noPlatform?[]:[{name:p.name,desc:'Platform access for the '+(term.months?term.months+'-month ':'')+'term \u2014 includes '+p.users+' users and '+p.sites+' sites.',qty:1,price:p.price}]; phases.forEach(x=>rows.push({name:x.name,desc:x.desc,qty:x.qty,price:x.price})); svcs.forEach(x=>rows.push({name:x.name,desc:x.desc,qty:x.qty,price:x.price}));
  const subtotal=rows.reduce((a,x)=>a+x.qty*x.price,0); const discount=subtotal*(Number($('discountPct').value||0)/100); const taxable=subtotal-discount; const tax=taxable*(Number($('taxPct').value||0)/100); const total=taxable+tax; const deposit=total*(Number($('depositPct').value||0)/100);
  $('pFeeTable').querySelector('tbody').innerHTML=rows.map(x=>`<tr><td><b>${esc(x.name)}</b></td><td>${esc(x.desc)}</td><td class="right">${x.qty}</td><td class="right">${money0(x.price)}</td><td class="right">${money0(x.qty*x.price)}</td></tr>`).join('');
  $('pFeeTable').querySelector('tfoot').innerHTML=`<tr><td colspan="4" class="right">Subtotal</td><td class="right">${money(subtotal)}</td></tr><tr><td colspan="4" class="right">Discount</td><td class="right">-${money(discount)}</td></tr><tr><td colspan="4" class="right">Tax</td><td class="right">${money(tax)}</td></tr><tr><td colspan="4" class="right">Total</td><td class="right">${money0(total)}</td></tr><tr><td colspan="4" class="right">Deposit Due at Acceptance</td><td class="right">${money(deposit)}</td></tr>`;

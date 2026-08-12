@@ -211,6 +211,7 @@ export const packageData = freezeCatalog({
   blacklabel: { name: "Black Label Strategic Program", price: 155000, users: 250, sites: 25, desc: "Strategic enterprise program for organizations requiring advanced safety intelligence, multi-site governance, and premium implementation support." },
   custom: { name: "Pilot Program — Platform Access", price: 5000, users: 50, sites: 2, desc: "A fixed-price pilot providing platform access for the included users and jobsites shown below, with no additional setup or licensing cost during the pilot term." },
   blank: { name: "Platform Services", price: 0, users: 0, sites: 0, desc: "Platform access and services as scoped in this proposal." },
+  none: { name: "Services Engagement", price: 0, users: 0, sites: 0, desc: "A professional services engagement. No platform subscription is included; the scope and fees are itemized in the schedule below." },
 } as const satisfies Record<string, PackageOption>);
 
 export type PackageKey = keyof typeof packageData;
@@ -240,6 +241,27 @@ export const defaultPackageKey: PackageKey = "blank";
  */
 export function isPilotPackageKey(key: string): boolean {
   return key === "custom";
+}
+
+/**
+ * True when the engagement carries NO platform subscription at all.
+ *
+ * Every other package key — including `blank` — is a platform line: the
+ * document opens section 02 with "Selected Platform Package", prints a base
+ * subscription row in the fee table, and shows Subscription Price / Included
+ * Users / Included Jobsites pills. That is correct for a pilot or a tier, and
+ * wrong for the work that has nothing to do with the platform: a training
+ * calendar, three written programs, a block of consulting hours, a monthly
+ * advisory retainer. Those proposals were printing a "Platform Services"
+ * subscription line at $0 and quoting included users nobody had bought.
+ *
+ * `none` is that missing option. buildPackageLine() omits the fee row entirely
+ * rather than pricing it at zero, and the document swaps section 02 for an
+ * engagement summary. A seller whose services deal DOES include platform
+ * access just picks a real package.
+ */
+export function isNoPlatformPackageKey(key: string): boolean {
+  return key === "none";
 }
 
 /** Narrowing helpers — a persisted state may carry a key that no longer exists. */

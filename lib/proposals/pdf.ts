@@ -717,7 +717,7 @@ export async function renderProposalPdf({ model, documentTitle }: ProposalPdfOpt
   drawCallout(layout, "Proposal Purpose: ", model.purposeCallout);
 
   /* --- 02 Package -------------------------------------------------------- */
-  drawSectionHeading(layout, "02", "Selected Platform Package");
+  drawSectionHeading(layout, "02", model.packageHeading);
   layout.text(model.packageIntro);
   layout.space(4);
   drawPills(layout, model.packagePills);

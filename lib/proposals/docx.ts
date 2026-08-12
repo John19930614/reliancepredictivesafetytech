@@ -436,7 +436,7 @@ export async function renderProposalDocx(model: ProposalDocumentModel): Promise<
         ],
       }),
     ]),
-    heading("02", "Selected Platform Package"),
+    heading("02", model.packageHeading),
     para(model.packageIntro, { size: 20 }),
     pillsTable(model),
     heading("03", "Detailed Scope of Work"),

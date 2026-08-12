@@ -158,7 +158,16 @@ function buildInitialFormState(prefill: ProposalPrefill | null): GeneratorState 
   const prefilled = buildPrefillState(prefill);
   return {
     v: prefilled?.v ?? 1,
-    fields: prefilled?.fields ?? {},
+    fields: {
+      // A blank proposal is not a platform sale yet, and the generator's
+      // fallback package printed one anyway: a "Platform Services" subscription
+      // row at $0 in the fee table, with Subscription Price pills beside it.
+      // Seeded explicitly rather than by changing defaultPackageKey, so
+      // proposals already saved without a packageSelect keep rendering exactly
+      // as they were sent.
+      packageSelect: "none",
+      ...(prefilled?.fields ?? {}),
+    },
     phases: buildDefaultPhaseItems(),
     services: [],
   };
