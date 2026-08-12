@@ -415,14 +415,31 @@
   background: var(--rp-doc-band-2);
 }
 
-.rp-doc-fee-total td {
+/*
+ * THE TOTAL ROW PRINTED WHITE-ON-WHITE. These two rules lose a specificity
+ * fight to `.rp-doc-fee tfoot td` above unless they are qualified.
+ *
+ *   .rp-doc-fee tfoot td     -> (0,1,2)  one class, two elements
+ *   .rp-doc-fee-total td     -> (0,1,1)  one class, one element
+ *
+ * Specificity beats source order, so the tfoot rule's pale `--rp-doc-band-2`
+ * won the BACKGROUND while this rule still won the COLOR — the tfoot rule sets
+ * no color — leaving white text on a near-white band. The single most important
+ * number in the document was invisible on screen. The deposit row lost the same
+ * fight and only stayed readable because its text is navy; it had silently been
+ * missing its gold tint too.
+ *
+ * Qualified with `tfoot tr` to reach (0,2,3) rather than reaching for
+ * !important, so a future rule can still override these deliberately.
+ */
+.rp-doc-fee tfoot tr.rp-doc-fee-total td {
   background: var(--rp-doc-navy);
   color: var(--rp-doc-panel);
   font-weight: 700;
   font-size: 12.5px;
 }
 
-.rp-doc-fee-deposit td {
+.rp-doc-fee tfoot tr.rp-doc-fee-deposit td {
   background: var(--rp-doc-accent-tint);
   color: var(--rp-doc-navy);
   font-weight: 700;
