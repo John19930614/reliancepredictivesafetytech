@@ -145,13 +145,17 @@ export default async function ProposalSharePage({ params }: { params: Promise<{ 
         // holder of this link is the intended recipient, and telling them the
         // pricing window closed (rather than "not available") is the difference
         // between a dead end and a phone call.
-        <div className="form-panel rp-doc-noprint" style={{ marginTop: 24 }}>
-          <h2 style={{ marginTop: 0 }}>This proposal has expired</h2>
-          <p style={{ color: "var(--portal-muted)" }}>
-            The acceptance period ended on {formatDocumentDate(view.validUntil)}, so it can no longer be accepted
-            online. Please contact your representative — they can reissue it with current pricing.
-          </p>
-        </div>
+        //
+        // The DECLINE half stays available. declineProposalViaShareLink is
+        // deliberately not gated on validity — a client declining an expired
+        // proposal is still telling us why we lost, which is the whole point of
+        // capturing the reason — but that server capability was unreachable
+        // while this branch rendered no form at all.
+        <ProposalAcceptanceForm
+          token={token}
+          revisionNumber={view.revisionNumber}
+          expiredOn={formatDocumentDate(view.validUntil)}
+        />
       ) : (
         <div className="form-panel rp-doc-noprint" style={{ marginTop: 24 }}>
           <h2 style={{ marginTop: 0 }}>Not open for acceptance</h2>

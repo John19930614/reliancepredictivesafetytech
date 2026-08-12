@@ -501,7 +501,10 @@ export function formatLineAmount(value: number): string {
 }
 
 function toFeeRow(row: ProposalLineItem): DocumentFeeRow {
-  const unit = row.source === "service" ? (lookupService(row.key)?.unit ?? "") : "";
+  // The unit now arrives on the row (stored first, catalog as fallback), so it
+  // agrees with the stored price. Reading it from the live catalog here is what
+  // made a sent proposal's $1,200 session start printing as "1 Person".
+  const unit = row.unit;
   return {
     ...row,
     unit,

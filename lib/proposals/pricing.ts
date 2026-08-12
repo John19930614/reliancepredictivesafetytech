@@ -20,6 +20,7 @@ import {
   lookupPhase,
   lookupService,
   packageData,
+  type ServiceOption,
 } from "./catalog";
 import { parseProposalTerm } from "./term";
 
@@ -257,6 +258,13 @@ export interface ProposalLineItem {
   key: string;
   name: string;
   desc: string;
+  /**
+   * Billing unit for a service row ("Person", "Session", "Hour"…), taken from
+   * the row itself and falling back to the catalog. Travels WITH the stored
+   * price so a repriced catalog entry cannot relabel a document already sent.
+   * Empty for package and phase rows, which have no unit.
+   */
+  unit: string;
   qty: number;
   price: number;
   /** qty × price, rounded to cents. */
@@ -378,6 +386,8 @@ function buildPackageLine(state: GeneratorState | null | undefined): ProposalLin
     key: resolvedKey,
     name: base.name,
     desc: `Platform access for the ${termPrefix}term${includesClause}.`,
+    // A subscription row is billed as one term, not in units.
+    unit: "",
     qty,
     price,
     amount: roundCents(qty * price),
@@ -385,9 +395,18 @@ function buildPackageLine(state: GeneratorState | null | undefined): ProposalLin
 }
 
 /**
- * A phase or service row. Name and description fall back to the catalog entry
- * for the row's key exactly as the asset's collectItems() does, so a state that
- * only stored keys and quantities still prices and reads correctly.
+ * A phase or service row. Name, description and billing unit fall back to the
+ * catalog entry for the row's key exactly as the asset's collectItems() does,
+ * so a state that only stored keys and quantities still prices and reads
+ * correctly.
+ *
+ * THE UNIT MUST TRAVEL WITH THE PRICE. The stored price always wins here, so
+ * reading the unit from the live catalog instead of the row mismatched the two
+ * the moment a catalog entry was repriced: when the training courses moved from
+ * per-session to per-participant, every proposal already sent kept its stored
+ * $1,200 session price and started printing it as "1 Person" — a $1,200 head.
+ * The totals were right the whole time; the label was quoting a price nobody
+ * had offered.
  */
 function buildItemLine(item: GeneratorItem, source: Exclude<ProposalLineSource, "package">): ProposalLineItem {
   const key = toText(item.key).trim();
@@ -396,6 +415,8 @@ function buildItemLine(item: GeneratorItem, source: Exclude<ProposalLineSource, 
   const price = clamp(toNumber(item.price, 0), 0);
   const name = toText(item.name) || option?.name || "";
   const desc = toText(item.desc) || option?.desc || "";
+  // Phases have no billing unit; only the service catalog carries one.
+  const unit = toText(item.unit) || (source === "service" ? ((option as ServiceOption | null)?.unit ?? "") : "");
 
-  return { source, key, name, desc, qty, price, amount: roundCents(qty * price) };
+  return { source, key, name, desc, unit, qty, price, amount: roundCents(qty * price) };
 }

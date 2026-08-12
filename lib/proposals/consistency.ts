@@ -19,7 +19,14 @@
 // sentence. Findings are advisory — nothing here blocks a save, because a
 // seller may have a reason to write a number the fields do not carry.
 
-import { lookupPhase, lookupService, lookupPackage, packageData, defaultPackageKey } from "./catalog";
+import {
+  lookupPhase,
+  lookupService,
+  lookupPackage,
+  packageData,
+  defaultPackageKey,
+  isNoPlatformPackageKey,
+} from "./catalog";
 import type { GeneratorItem, GeneratorState } from "./generator-state";
 import { computeProposalTotals, formatMoney } from "./pricing";
 import { parseProposalTerm } from "./term";
@@ -116,9 +123,18 @@ export function collectProposalFacts(state: GeneratorState | null | undefined): 
   // headline price when the engagement genuinely costs nothing.
   if (totals.total !== 0) moneyFigures.delete(0);
 
+  // A services-only engagement sells no seats and no jobsites, and the document
+  // prints neither (buildProposalDocumentModel zeroes them the same way). The
+  // asset nonetheless leaves 50 / 2 sitting in form_data from its own field
+  // defaults, so without this guard a training proposal handed the AI reviewer
+  // "Included users: 50 · Included jobsites: 2" as AUTHORITATIVE FACTS — under
+  // a prompt rule telling it never to introduce a number that is not in that
+  // block. The reviewer was being invited to write seats into a class roster.
+  const servicesOnly = isNoPlatformPackageKey(packageRow?.key ?? "");
+
   return {
-    users: fieldCount(state, "includedUsers", packageOption.users),
-    sites: fieldCount(state, "includedSites", packageOption.sites),
+    users: servicesOnly ? 0 : fieldCount(state, "includedUsers", packageOption.users),
+    sites: servicesOnly ? 0 : fieldCount(state, "includedSites", packageOption.sites),
     termMonths: term.months,
     termRangeLabel: term.rangeLabel,
     packageName: packageOption.name,
