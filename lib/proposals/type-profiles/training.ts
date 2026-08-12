@@ -162,12 +162,13 @@ export const trainingProfile: ProposalTypeProfile = {
   extraClauses: [
     {
       id: "training.class_size",
-      heading: "Class Size",
+      heading: "Class Size and Minimum Billing",
       anchor: { after: "scope_changes" },
       body:
-        "Each course has a minimum and a maximum number of attendees per session, stated with the course line in the schedule or confirmed in writing before scheduling. " +
-        "If the confirmed roster falls below the minimum, Seller and Client will consolidate it into another session, reschedule, or deliver the session as scheduled; a session delivered below the minimum is still billed at the session rate shown in the schedule. " +
-        "If the roster exceeds the maximum, Seller schedules an additional session at the rate shown rather than seating attendees beyond the maximum, which hands-on evaluation and equipment availability do not allow.",
+        "Courses priced per participant are billed on the confirmed roster, and each session carries a minimum of six participants. " +
+        "A session delivered to fewer than six is billed at the six-participant minimum, because instructor time, travel, and materials do not scale down below it. " +
+        "If the confirmed roster falls below the minimum, Seller and Client may instead consolidate it into another session or reschedule it at no charge, provided that is agreed before the notice periods in the cancellation terms begin. " +
+        "Each course also has a maximum roster; where a roster exceeds it, Seller schedules an additional session at the rate shown rather than seating attendees beyond the maximum, which hands-on evaluation and equipment availability do not allow.",
     },
     {
       id: "training.cancellation",
