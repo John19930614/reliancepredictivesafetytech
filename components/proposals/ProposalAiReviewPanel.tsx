@@ -1,31 +1,50 @@
 "use client";
 
-// AI review — available at every stage of the proposal workflow.
+// AI review — available at every stage of the proposal workflow, and since
+// 2026-08-11 able to APPLY the changes it proposes, with a human in the loop.
 //
-// Two layers, and the split is the point (same shape as the Figures check):
+// Three layers, and the split is the point (same shape as the Figures check):
 //
 //   AUTOMATED CHECKS are pure functions (lib/proposals/review-checks.ts) run
 //   right here against the state on screen. No API key, no network, no budget
-//   — they are always present, on the editor and on the read-only detail page,
-//   at draft, in_review, sent, accepted, declined and archived alike.
+//   — always present, at every status.
 //
 //   THE AI REVIEWER is a button. It sends the state to
 //   POST /api/proposals/[id]/review, which layers a model's judgment on top —
-//   coherence, commercial risk, clarity — screened by the AI gateway and
-//   metered like every other AI feature. When the model is unavailable the
-//   response still carries the automated layer plus the reason.
+//   screened by the AI gateway and metered like every other AI feature.
 //
-// EVERYTHING HERE IS ADVISORY. The endpoint writes nothing, this panel applies
-// nothing, and requiresHumanReview is true on every response. Approving,
-// sending and editing stay behind their existing human gates (CLAUDE.md,
-// Human Authority Rule).
+//   PROPOSED CHANGES are the reviewer's concrete rewrites, rendered as
+//   before/after diffs. NOTHING IS APPLIED until a human ticks a diff and
+//   clicks Apply — that click is the Human Authority Rule in CLAUDE.md, and it
+//   is why fully-automatic application is deliberately not offered. Applying
+//   goes through the module's existing gates: in the editor the patch is
+//   pushed into the generator bridge (the seller still saves); on the detail
+//   page it saves through saveProposalDraft(), which re-checks canManage and
+//   the content edit lock server-side. Locked statuses (sent and beyond) show
+//   the drafts read-only.
 
 import { useMemo, useState } from "react";
-import { AlertOctagon, AlertTriangle, CheckCircle2, Info, Sparkles } from "lucide-react";
-import type { GeneratorState } from "@/lib/proposals/generator-state";
+import { useRouter } from "next/navigation";
+import { AlertOctagon, AlertTriangle, Check, CheckCircle2, Info, Sparkles, X } from "lucide-react";
+import { saveProposalDraft } from "@/app/employee/proposals/actions";
+import type { GeneratorItem, GeneratorState } from "@/lib/proposals/generator-state";
+import { canEditProposalContent } from "@/lib/proposals/policy";
 import { collectReadinessFindings, type ReadinessFinding, type ReviewSeverity } from "@/lib/proposals/review-checks";
 import type { AiReviewResult } from "@/lib/proposals/review-schema";
 import { proposalStatusLabels, type ProposalStatus } from "@/lib/proposals/types";
+import type { NarrativePatch } from "./ProposalConsistencyPanel";
+
+/** One rewrite the endpoint proposes, mapped to a before/after diff. */
+interface ProposedEdit {
+  regionId: string;
+  kind: "field" | "phase" | "service";
+  target: string;
+  label: string;
+  before: string;
+  after: string;
+  note: string;
+  changed: boolean;
+}
 
 const severityRank: Record<ReviewSeverity, number> = { error: 0, warn: 1, info: 2 };
 
@@ -65,6 +84,7 @@ export function ProposalAiReviewPanel({
   state,
   validUntil,
   clientAssigned,
+  onApply,
 }: {
   proposalId: string;
   status: ProposalStatus;
@@ -72,14 +92,30 @@ export function ProposalAiReviewPanel({
   state: GeneratorState | null;
   validUntil: string | null;
   clientAssigned: boolean;
+  /**
+   * Editor mount: receives the ticked edits as a generator-bridge patch, so
+   * the change lands in the live editor and the seller saves it deliberately.
+   * Absent (detail page): ticked edits are saved through saveProposalDraft(),
+   * whose server-side gates decide whether this proposal may change at all.
+   */
+  onApply?: (patch: NarrativePatch) => void;
 }) {
+  const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [ai, setAi] = useState<AiReviewResult | null>(null);
+  const [edits, setEdits] = useState<ProposedEdit[]>([]);
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [aiSkippedReason, setAiSkippedReason] = useState("");
   const [model, setModel] = useState("");
   const [ranOnce, setRanOnce] = useState(false);
   const [serverChecks, setServerChecks] = useState<ReadinessFinding[] | null>(null);
+
+  // The same policy the server enforces; shown here so the panel does not
+  // offer an Apply the save endpoint would refuse.
+  const editable = canEditProposalContent(status).ok;
 
   // Company time, matching the server's clock choice, so the validity check
   // does not flip a day early or late for a seller on Eastern or Pacific time.
@@ -103,7 +139,10 @@ export function ProposalAiReviewPanel({
   const runReview = async () => {
     setBusy(true);
     setError("");
+    setNotice("");
     setAi(null);
+    setEdits([]);
+    setSelected({});
     setAiSkippedReason("");
     try {
       const response = await fetch(`/api/proposals/${proposalId}/review`, {
@@ -114,6 +153,7 @@ export function ProposalAiReviewPanel({
       const payload = (await response.json()) as {
         deterministic?: ReadinessFinding[];
         ai?: AiReviewResult | null;
+        edits?: ProposedEdit[];
         aiSkippedReason?: string;
         model?: string;
         error?: string;
@@ -125,6 +165,9 @@ export function ProposalAiReviewPanel({
       setRanOnce(true);
       if (Array.isArray(payload.deterministic)) setServerChecks(payload.deterministic);
       setAi(payload.ai ?? null);
+      const drafted = (payload.edits ?? []).filter((edit) => edit.changed);
+      setEdits(drafted);
+      setSelected(Object.fromEntries(drafted.map((edit) => [edit.regionId, true])));
       setAiSkippedReason(payload.aiSkippedReason ?? "");
       setModel(payload.model ?? "");
     } catch {
@@ -133,6 +176,91 @@ export function ProposalAiReviewPanel({
       setBusy(false);
     }
   };
+
+  /**
+   * Turns the ticked edits into ONE patch. Line-item edits carry the whole
+   * array: the bridge (and the saved state) rebuild the lists wholesale, so
+   * sending only the changed rows would delete the rest. Only `desc` is
+   * touched — qty, price, key and name pass straight through. Mirrors
+   * ProposalConsistencyPanel.applySelected, which learned this the hard way.
+   */
+  const buildPatch = (): { patch: NarrativePatch; count: number } | null => {
+    if (!state) return null;
+    const picked = edits.filter((edit) => selected[edit.regionId]);
+    if (picked.length === 0) return null;
+
+    const patch: NarrativePatch = {};
+
+    const fieldEdits = picked.filter((edit) => edit.kind === "field");
+    if (fieldEdits.length > 0) {
+      patch.fields = Object.fromEntries(fieldEdits.map((edit) => [edit.target, edit.after]));
+    }
+
+    const applyToItems = (items: GeneratorItem[] | undefined, kind: "phase" | "service") => {
+      const kindEdits = picked.filter((edit) => edit.kind === kind);
+      if (kindEdits.length === 0 || !Array.isArray(items)) return undefined;
+      const next = items.map((item) => ({ ...item }));
+      let touched = false;
+      for (const edit of kindEdits) {
+        const index = Number(edit.target);
+        if (!Number.isInteger(index) || index < 0 || index >= next.length) continue;
+        next[index] = { ...next[index], desc: edit.after };
+        touched = true;
+      }
+      return touched ? next : undefined;
+    };
+
+    const phases = applyToItems(state.phases, "phase");
+    if (phases) patch.phases = phases;
+    const services = applyToItems(state.services, "service");
+    if (services) patch.services = services;
+
+    return { patch, count: picked.length };
+  };
+
+  const applySelected = async () => {
+    const built = buildPatch();
+    if (!built || !state) return;
+    const { patch, count } = built;
+
+    setError("");
+
+    // Editor mount: hand the patch to the generator bridge. The seller still
+    // reads the preview and saves — the same contract as the Figures check.
+    if (onApply) {
+      onApply(patch);
+      setEdits([]);
+      setSelected({});
+      setNotice(`Applied ${count} change${count === 1 ? "" : "s"} to the editor. Save when the wording reads right.`);
+      return;
+    }
+
+    // Detail page: save through the module's own draft save, whose server-side
+    // gates (canManage, content edit lock) are the authority on whether this
+    // proposal may change.
+    setApplying(true);
+    try {
+      const patched: GeneratorState = {
+        ...state,
+        fields: { ...state.fields, ...(patch.fields ?? {}) },
+        phases: patch.phases ?? state.phases,
+        services: patch.services ?? state.services,
+      };
+      const result = await saveProposalDraft(proposalId, patched);
+      if (!result.ok) {
+        setError(result.error ?? "The changes could not be saved.");
+        return;
+      }
+      setEdits([]);
+      setSelected({});
+      setNotice(`Applied and saved ${count} change${count === 1 ? "" : "s"}.`);
+      router.refresh();
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const selectedCount = edits.filter((edit) => selected[edit.regionId]).length;
 
   return (
     <div className="form-panel" style={{ marginBottom: 16 }}>
@@ -157,8 +285,9 @@ export function ProposalAiReviewPanel({
       </div>
 
       <p style={{ color: "var(--portal-muted)", marginTop: 8, fontSize: "0.85rem" }}>
-        Advisory only, at every stage — while drafting, before an approval decision, and after the client has it.
-        Findings inform your decision; nothing is ever applied to the proposal automatically.
+        Available at every stage — while drafting, before an approval decision, and after the client has it. The
+        reviewer drafts wording fixes it can make itself; nothing lands on the proposal until you read the
+        before/after and apply it. Figures, pricing and terms stay yours to change in the editor.
       </p>
 
       {sortedChecks.length > 0 ? (
@@ -193,6 +322,7 @@ export function ProposalAiReviewPanel({
       {aiSkippedReason ? (
         <p style={{ marginTop: 10, fontSize: "0.85rem", color: "var(--portal-muted)" }}>{aiSkippedReason}</p>
       ) : null}
+      {notice ? <p style={{ marginTop: 10, fontSize: "0.85rem", color: "var(--portal-muted)" }}>{notice}</p> : null}
 
       {ai ? (
         <div style={{ marginTop: 14 }}>
@@ -217,6 +347,70 @@ export function ProposalAiReviewPanel({
           )}
           {model ? (
             <p style={{ marginTop: 8, fontSize: "0.75rem", color: "var(--portal-muted)" }}>model: {model}</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {edits.length > 0 ? (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <strong style={{ fontSize: "0.9rem" }}>Proposed changes</strong>
+            <span className="badge badge-yellow">Nothing applied yet</span>
+          </div>
+          <p style={{ color: "var(--portal-muted)", marginTop: 6, fontSize: "0.8rem" }}>
+            {editable
+              ? "Tick the rewrites you want and apply them — then read the document before it goes anywhere."
+              : "This proposal is locked, so these drafts cannot be applied. Reopen it as a draft to use them."}
+          </p>
+
+          {edits.map((edit) => (
+            <div
+              key={edit.regionId}
+              style={{ border: "1px solid var(--portal-line, #dbe2e9)", borderRadius: 8, padding: 12, marginTop: 10 }}
+            >
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: "0.85rem" }}>
+                {editable ? (
+                  <input
+                    type="checkbox"
+                    checked={Boolean(selected[edit.regionId])}
+                    onChange={(event) => setSelected((current) => ({ ...current, [edit.regionId]: event.target.checked }))}
+                  />
+                ) : null}
+                {edit.label}
+                {edit.note ? <span style={{ fontWeight: 400, color: "var(--portal-muted)" }}>· {edit.note}</span> : null}
+              </label>
+
+              <div style={{ marginTop: 8, fontSize: "0.82rem" }}>
+                <div style={{ color: "var(--portal-muted)", textDecoration: "line-through" }}>{edit.before}</div>
+                <div style={{ marginTop: 6 }}>{edit.after}</div>
+              </div>
+            </div>
+          ))}
+
+          {editable ? (
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+              <button
+                className="button button-primary"
+                type="button"
+                disabled={selectedCount === 0 || applying}
+                onClick={() => void applySelected()}
+              >
+                <Check size={16} />{" "}
+                {applying
+                  ? "Applying…"
+                  : `Apply ${selectedCount} change${selectedCount === 1 ? "" : "s"}${onApply ? "" : " and save"}`}
+              </button>
+              <button
+                className="button button-light"
+                type="button"
+                onClick={() => {
+                  setEdits([]);
+                  setSelected({});
+                }}
+              >
+                <X size={16} /> Discard
+              </button>
+            </div>
           ) : null}
         </div>
       ) : null}

@@ -13,15 +13,19 @@
 //      when it cannot (key missing, budget spent, model error, gateway block)
 //      the response still carries layer 1 plus the reason.
 //
-// It RETURNS FINDINGS AND NOTHING ELSE. Nothing is written to
-// client_proposals, no revision is minted, no status changes. Approving,
-// sending and editing stay human actions behind their existing gates — the
-// Human Authority Rule in CLAUDE.md, and the reason requiresHumanReview is
-// hardcoded true in every response.
+// It RETURNS FINDINGS AND DRAFT EDITS, AND WRITES NOTHING. The `edits` in the
+// response are proposed rewrites of narrative regions, mapped to before/after
+// diffs exactly like the narrative endpoint's — nothing is written to
+// client_proposals, no revision is minted, no status changes. Applying a
+// ticked edit is the PANEL's job, through the same gated save path the editor
+// uses, after a human has read the diff. That click is the Human Authority
+// Rule in CLAUDE.md, and the reason requiresHumanReview is hardcoded true in
+// every response.
 
 import { NextResponse } from "next/server";
 import { validateAIOutput } from "@/lib/ai/gateway";
 import { recordAuditEvent } from "@/lib/audit/events";
+import { collectNarrativeRegions } from "@/lib/proposals/consistency";
 import { getProposalAccess } from "@/lib/proposals/access";
 import { isGeneratorState } from "@/lib/proposals/generator-state";
 import { isProposalUuid } from "@/lib/proposals/policy";
@@ -104,10 +108,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
 
     // AI Gateway — everything entering an official workflow is screened. The
-    // whole review is validated as one body: a blocked finding taints the run.
+    // whole review is validated as one body, PROPOSED EDIT TEXT INCLUDED: an
+    // edit is the part a human may apply to a client document, so a blocked
+    // passage taints the entire run.
     const gateway = validateAIOutput({
       promptKey: "proposal_review",
-      rawOutput: [outcome.result.summary, ...outcome.result.findings.map((f) => `${f.message} ${f.suggestion}`)].join("\n\n"),
+      rawOutput: [
+        outcome.result.summary,
+        ...outcome.result.findings.map((f) => `${f.message} ${f.suggestion}`),
+        ...outcome.result.edits.map((edit) => edit.text),
+      ].join("\n\n"),
     });
 
     if (gateway.status === "blocked") {
@@ -131,6 +141,28 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       });
     }
 
+    // Map the model's edits onto the regions the way the narrative endpoint
+    // does: resolve before-text from the SAME state the model reviewed, drop
+    // anything targeting a region that does not exist, and mark unchanged
+    // rewrites so the panel can hide them.
+    const regionById = new Map(collectNarrativeRegions(state).map((region) => [region.id, region]));
+    const edits = outcome.result.edits
+      .map((edit) => {
+        const region = regionById.get(edit.regionId);
+        if (!region) return null;
+        return {
+          regionId: edit.regionId,
+          kind: region.kind,
+          target: region.target,
+          label: region.label,
+          before: region.text,
+          after: edit.text,
+          note: edit.note,
+          changed: edit.text.trim() !== region.text.trim(),
+        };
+      })
+      .filter((edit): edit is NonNullable<typeof edit> => edit !== null);
+
     await recordAuditEvent({
       event_type: "ai.proposal_review_completed",
       event_category: "ai",
@@ -140,13 +172,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       resource_id: id,
       summary:
         `AI review of proposal ${id} at status "${status}": verdict ${outcome.result.verdict}, ` +
-        `${outcome.result.findings.length} finding(s), ${deterministic.length} automated check(s) ` +
-        `(gateway: ${gateway.status}, model: ${outcome.model}). Advisory only — nothing applied.`,
+        `${outcome.result.findings.length} finding(s), ${edits.filter((edit) => edit.changed).length} drafted edit(s), ` +
+        `${deterministic.length} automated check(s) (gateway: ${gateway.status}, model: ${outcome.model}). Not applied.`,
       after_state: {
         gatewayStatus: gateway.status,
         confidence: gateway.overallConfidence,
         verdict: outcome.result.verdict,
         findingCount: outcome.result.findings.length,
+        editCount: edits.filter((edit) => edit.changed).length,
+        editRegionIds: edits.map((edit) => edit.regionId),
         deterministicCount: deterministic.length,
         model: outcome.model,
         proposalStatus: status,
@@ -156,10 +190,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({
       deterministic,
       ai: outcome.result,
+      edits,
       model: outcome.model,
       gatewayStatus: gateway.status,
-      // Always true. Review output informs a human decision; it is never
-      // applied to the record by this endpoint or any other.
+      // Always true. Review output informs a human decision; the drafted edits
+      // land only when a human ticks and applies them through the gated save.
       requiresHumanReview: true,
       status,
     });
