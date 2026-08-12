@@ -7,6 +7,7 @@
 // template state, the same path the screen, the PDF, the DOCX, the share page
 // and the DocuSign envelope all take.
 
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
   buildTransactionTemplateState,
@@ -128,6 +129,32 @@ describe("the terms a client actually reads", () => {
     // The lighter document: no SLA credits, no order-of-precedence ladder.
     expect(text).not.toMatch(/service credit/i);
     expect(text).not.toMatch(/order of precedence/i);
+  });
+});
+
+describe("every surface shows the same headings", () => {
+  // THE GAP THIS CLOSES. The first version of this suite asserted only against
+  // buildProposalDocumentModel and called itself end-to-end proof. It was not:
+  // pdf.ts and docx.ts had their own hardcoded "Detailed Scope of Work" /
+  // "Pricing Schedule" / "Schedule and Implementation Approach", so a training
+  // client read "Courses & Delivery" on the share page and then signed a
+  // DocuSign PDF headed "Detailed Scope of Work". Asserting on the model alone
+  // cannot see that, which is exactly why it shipped.
+  it("passes the type's headings to the PDF and DOCX renderers, not hardcoded ones", async () => {
+    const pdfSource = await readFile(new URL("../../lib/proposals/pdf.ts", import.meta.url), "utf8");
+    const docxSource = await readFile(new URL("../../lib/proposals/docx.ts", import.meta.url), "utf8");
+
+    for (const [surface, source] of [
+      ["pdf", pdfSource],
+      ["docx", docxSource],
+    ] as const) {
+      expect(source, `${surface} hardcodes section 03`).not.toContain('"Detailed Scope of Work"');
+      expect(source, `${surface} hardcodes section 05`).not.toContain('"Pricing Schedule"');
+      expect(source, `${surface} hardcodes section 06`).not.toContain('"Schedule and Implementation Approach"');
+      expect(source, `${surface} ignores scopeHeading`).toContain("model.scopeHeading");
+      expect(source, `${surface} ignores feesHeading`).toContain("model.feesHeading");
+      expect(source, `${surface} ignores termHeading`).toContain("model.termHeading");
+    }
   });
 });
 

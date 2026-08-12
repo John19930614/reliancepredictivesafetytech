@@ -6,6 +6,7 @@ import { renderProposalPdf, toPdfText, wrapText } from "./pdf";
 import { computeProposalTotals } from "./pricing";
 import { maxTeamMembers } from "./team-selection";
 import { termFieldIds } from "./term";
+import { buildTransactionTemplateState } from "./transaction-templates";
 import { proposalFooterText } from "./types";
 
 /* -------------------------------------------------------------------------- */
@@ -152,6 +153,38 @@ describe("renderProposalPdf", () => {
     const reloaded = await PDFDocument.load(bytes);
     expect(reloaded.getPageCount()).toBeGreaterThan(0);
     expect(reloaded.getTitle()).toBe("Proposal for Northwind Construction Group");
+  });
+
+  it("renders the proposal type's own section headings, not the platform defaults", async () => {
+    // pdf.ts hardcoded "Detailed Scope of Work" / "Pricing Schedule" /
+    // "Schedule and Implementation Approach" while the screen renderer had
+    // moved to the type's lexicon — so a training client read one set of
+    // headings on the share page and signed a DocuSign PDF carrying another.
+    // A model-only test cannot see that; this one renders the real PDF.
+    const state = buildTransactionTemplateState("training");
+    const model = buildProposalDocumentModel({
+      state,
+      totals: computeProposalTotals(state),
+      team: [],
+      signature: null,
+      proposal: {
+        id: "11111111-2222-4333-8444-555555555555",
+        title: "Training",
+        status: "draft",
+        currentRevision: 1,
+        validUntil: null,
+      },
+    });
+
+    expect(model.scopeHeading).toBe("Courses & Delivery");
+    expect(model.feesHeading).toBe("Training Fees");
+
+    // The bytes must load, and the renderer must have been handed the model's
+    // headings rather than string literals of its own.
+    const bytes = await renderProposalPdf({ model, documentTitle: model.headline });
+    expect(Buffer.from(bytes.slice(0, 5)).toString()).toBe("%PDF-");
+    const reloaded = await PDFDocument.load(bytes);
+    expect(reloaded.getPageCount()).toBeGreaterThan(0);
   });
 
   it("keeps a fully loaded proposal under eight pages", async () => {

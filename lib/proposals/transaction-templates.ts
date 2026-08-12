@@ -342,7 +342,10 @@ const definitions: Readonly<Record<TransactionTemplateKey, TransactionTemplateDe
     customExclusions:
       "Pricing assumes training is delivered at Client-provided facilities with a suitable training space; venue, projection, and attendee availability are Client's responsibility. Attendance rosters are confirmed before each session, and certification cards are issued only for attendees who complete the applicable course requirements. Travel, where applicable, is billed under the expense lines shown in the schedule.",
     phases: [],
-    services: [{ key: "firstAid" }, { key: "genTraining" }],
+    // Seeded at the class minimum the Training terms state. firstAid is priced
+    // per participant, so the old default of 1 quoted a one-person class in a
+    // document whose own terms bill a short roster at six.
+    services: [{ key: "firstAid", qty: 6 }, { key: "genTraining" }],
   },
 } as const satisfies Record<TransactionTemplateKey, TransactionTemplateDefinition>);
 
