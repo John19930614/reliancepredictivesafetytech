@@ -373,8 +373,10 @@ describe("computeProposalTotals — malformed and hostile input", () => {
   it("treats an empty state as the generator's default package row", () => {
     const totals = computeProposalTotals(state());
     expect(totals.lineItems).toHaveLength(1);
-    expect(totals.lineItems[0]).toMatchObject({ source: "package", key: "custom", price: 5000 });
-    expect(totals.total).toBe(5000);
+    // The generator preselects `blank` — manual price, no pilot wording — so a
+    // state with no packageSelect prices at zero rather than quoting the pilot fee.
+    expect(totals.lineItems[0]).toMatchObject({ source: "package", key: "blank", price: 0 });
+    expect(totals.total).toBe(0);
   });
 
   it("survives null, undefined, and structurally broken states", () => {
@@ -382,15 +384,15 @@ describe("computeProposalTotals — malformed and hostile input", () => {
       const totals = computeProposalTotals(broken as unknown as GeneratorState);
       expect(totals.lineItems).toHaveLength(1);
       expect(Number.isFinite(totals.total)).toBe(true);
-      expect(totals.total).toBe(5000);
+      expect(totals.total).toBe(0);
     }
   });
 
   it("falls back to the default package for an unknown or missing package key", () => {
     for (const packageSelect of ["", "nope", "constructor", 42, true]) {
       const totals = computeProposalTotals(state({ fields: { packageSelect } as GeneratorState["fields"] }));
-      expect(totals.lineItems[0].key).toBe("custom");
-      expect(totals.lineItems[0].price).toBe(5000);
+      expect(totals.lineItems[0].key).toBe("blank");
+      expect(totals.lineItems[0].price).toBe(0);
     }
   });
 
@@ -420,7 +422,9 @@ describe("computeProposalTotals — malformed and hostile input", () => {
       }),
     );
     expect(totals.lineItems[0].price).toBe(0);
-    expect(totals.lineItems[0].desc).toBe("Platform access for the term — includes 0 users and 0 sites.");
+    // Zero counts read as "not set yet", so the includes clause is omitted
+    // rather than quoting a limit of zero on the fee table.
+    expect(totals.lineItems[0].desc).toBe("Platform access for the term.");
     expect(totals.lineItems[1].qty).toBe(0);
     expect(totals.lineItems[2].price).toBe(0);
     expect(totals.subtotal).toBe(0);

@@ -58,10 +58,17 @@ export function ProposalTemplatePicker({ value, onChange, disabled }: ProposalTe
         id="proposal_template"
         name="proposal_template"
         value={value}
-        disabled={disabled || loading || templates.length === 0}
+        // Deliberately NOT disabled when the list is empty. It used to be, which
+        // hid the blank option entirely — the starting point is a real choice
+        // and has to be visible even before anyone has saved a template.
+        disabled={disabled || loading}
         onChange={(event) => onChange(event.target.value)}
       >
-        <option value="">Blank proposal (default pilot scope)</option>
+        {/* Said "(default pilot scope)", which was accurate and was the
+            problem: a blank proposal opened on the pilot package with three
+            phases whose copy ended "— included in the pilot". Both are neutral
+            now, so blank means blank. */}
+        <option value="">Blank proposal — no pilot wording</option>
         {templates.map((template) => (
           <option key={template.id} value={template.id}>
             {template.name}
@@ -75,7 +82,7 @@ export function ProposalTemplatePicker({ value, onChange, disabled }: ProposalTe
         <p style={{ color: "var(--portal-muted)", fontSize: "0.8rem", marginTop: 4 }}>Loading templates…</p>
       ) : templates.length === 0 ? (
         <p style={{ color: "var(--portal-muted)", fontSize: "0.8rem", marginTop: 4 }}>
-          No templates yet —{" "}
+          Starts blank: manual price, no pilot wording. No saved templates yet —{" "}
           <Link href="/employee/proposals/templates">
             <LayoutTemplate size={13} style={{ verticalAlign: "-2px" }} /> save one from an existing proposal
           </Link>

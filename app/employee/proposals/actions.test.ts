@@ -487,7 +487,7 @@ describe("revision 1 form state", () => {
   // Regression: seeding empty item arrays made a brand-new proposal open with
   // NO line items, because the bridge applies the persisted arrays verbatim
   // instead of leaving the generator's implicit pilot defaults in place.
-  it("seeds the generator's default pilot phase rows, not empty arrays", async () => {
+  it("seeds the generator's default phase rows, not empty arrays", async () => {
     const supabase = createSupabaseMock({
       "client_proposals:insert": { data: { id: PROPOSAL_ID } },
       "client_proposal_revisions:insert": {},
@@ -516,14 +516,17 @@ describe("revision 1 form state", () => {
     for (const phase of seeded.phases) {
       expect(phase.type).toBe("phase");
       expect(phase.qty).toBe(1);
-      // Bundled into the pilot package fee.
+      // Priced at zero so the seller sets the fee deliberately.
       expect(phase.price).toBe(0);
       expect(phase.unit).toBe("");
-      expect(phase.desc).toContain("pilot");
+      // Neutral copy: a new proposal must not announce a pilot it may not be,
+      // and must not hardcode a count or a duration no field controls.
+      expect(phase.desc).not.toMatch(/pilot/i);
+      expect(phase.desc).not.toMatch(/\d+[- ](month|user|jobsite|site)/i);
     }
   });
 
-  it("prices the seeded state at the default pilot package fee", async () => {
+  it("prices the seeded state at the default package fee", async () => {
     const supabase = createSupabaseMock({
       "client_proposals:insert": { data: { id: PROPOSAL_ID } },
       "client_proposal_revisions:insert": {},
@@ -534,8 +537,9 @@ describe("revision 1 form state", () => {
 
     const workingCopy = supabase.calls.find((c) => c.table === "client_proposals" && c.op === "update");
     const totals = computeProposalTotals(workingCopy?.payload?.form_data as GeneratorState);
-    // Zero-priced phases must not move the total off the package fee.
-    expect(totals.total).toBe(5000);
+    // Zero-priced phases must not move the total off the package fee, which is
+    // zero on the blank package the generator now preselects.
+    expect(totals.total).toBe(0);
     expect(totals.lineItems).toHaveLength(4);
   });
 
