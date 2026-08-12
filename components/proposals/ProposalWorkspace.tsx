@@ -789,15 +789,17 @@ export function ProposalWorkspace({
             onApply={(patch) => postToGenerator({ type: "proposal:load", state: { v: 1, ...patch } })}
           />
 
-          {/* Advisory AI review of the live state. The same panel sits on the
-              read-only detail page, so review is available at every workflow
-              stage — this endpoint returns findings only and writes nothing. */}
+          {/* AI review of the live state. The same panel sits on the read-only
+              detail page, so review is available at every workflow stage. Its
+              drafted edits apply here through the SAME bridge patch the
+              Figures check uses — into the editor, never past the seller. */}
           <ProposalAiReviewPanel
             proposalId={proposal.id}
             status={proposal.status}
             state={previewState}
             validUntil={proposal.valid_until}
             clientAssigned={Boolean(proposal.client_id)}
+            onApply={(patch) => postToGenerator({ type: "proposal:load", state: { v: 1, ...patch } })}
           />
 
           <iframe

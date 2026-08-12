@@ -1,6 +1,7 @@
 import "server-only";
 import OpenAI from "openai";
 import { checkAiBudget, recordAiUsage } from "@/lib/ai/metering";
+import { collectNarrativeRegions } from "./consistency";
 import type { GeneratorState } from "./generator-state";
 import type { ReadinessFinding } from "./review-checks";
 import { buildReviewPrompt, parseReviewOutput, reviewResponseSchema, type AiReviewResult } from "./review-schema";
@@ -86,7 +87,11 @@ export async function generateProposalReview(input: {
     .map((part) => part.text ?? "")
     .join("");
 
-  const result = parseReviewOutput(text);
+  // Edits are only valid against the regions the prompt actually contained.
+  const result = parseReviewOutput(
+    text,
+    collectNarrativeRegions(input.state).map((region) => region.id),
+  );
   if (!result) {
     const snippet = text.slice(0, 300).replace(/\s+/g, " ").trim();
     throw new Error(`The review could not be parsed. Model returned: "${snippet}…".`);
