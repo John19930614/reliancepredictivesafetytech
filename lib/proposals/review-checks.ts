@@ -11,12 +11,15 @@
 // advisory — nothing here blocks a save, a submit, or a send. The maker–checker
 // gates in lib/proposals/approval.ts stay the only enforcement.
 
+import { isPilotPackageKey } from "./catalog";
 import { parseClientContacts } from "./client-contacts";
 import { scanProposalConsistency } from "./consistency";
 import type { GeneratorState } from "./generator-state";
 import { computeProposalTotals, formatMoney } from "./pricing";
 import { parseSignerId, parseTeamMemberIds } from "./team-selection";
+import { parseProposalTerm } from "./term";
 import type { ProposalStatus } from "./types";
+import { daysUntilProposalExpiry, expiringSoonDays, isProposalExpired } from "./validity";
 
 export type ReviewSeverity = "error" | "warn" | "info";
 
@@ -182,13 +185,127 @@ export function collectReadinessFindings(state: GeneratorState | null, meta: Rea
   });
 
   // -- Validity ---------------------------------------------------------------
-  // Date-only strings compare correctly as strings; both sides are YYYY-MM-DD.
-  if (meta.validUntil && preAcceptanceStatuses.includes(meta.status) && meta.validUntil < meta.today) {
+  if (preAcceptanceStatuses.includes(meta.status)) {
+    if (isProposalExpired(meta.validUntil, meta.today)) {
+      findings.push({
+        id: "valid_until_past",
+        severity: "error",
+        area: "Validity",
+        message: `The validity date (${meta.validUntil}) has passed, so the share page now refuses acceptance. Extend the acceptance window or reissue the proposal.`,
+      });
+    } else {
+      const daysLeft = daysUntilProposalExpiry(meta.validUntil, meta.today);
+      if (daysLeft !== null && daysLeft <= expiringSoonDays && meta.status === "sent") {
+        findings.push({
+          id: "valid_until_soon",
+          severity: "warn",
+          area: "Validity",
+          message:
+            daysLeft === 0
+              ? `Today is the last day this proposal can be accepted (${meta.validUntil}).`
+              : `This proposal stops being acceptable in ${daysLeft} day${daysLeft === 1 ? "" : "s"} (${meta.validUntil}).`,
+        });
+      }
+    }
+  }
+
+  findings.push(...collectTermsFindings(state, meta));
+  return findings;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Commercial terms                                                            */
+/*                                                                             */
+/* collectProposalFacts() has always gathered validDays, paymentTerms and      */
+/* billingTerm and handed them to the AI reviewer as ground truth — and no     */
+/* deterministic rule ever read them. So the free checks caught "20 users vs   */
+/* 50 users" while waving through a deposit due at acceptance sitting under a  */
+/* Net-30-from-invoice clause, a validity date that contradicts the sentence   */
+/* printed beside it, and an engagement term that runs backwards.              */
+/*                                                                             */
+/* These are the terms a signer actually argues about. All deterministic.      */
+/* -------------------------------------------------------------------------- */
+
+/** Words that make a payment clause acknowledge money due before invoicing. */
+const upfrontPaymentPattern = /\b(deposit|acceptance|signing|advance|upfront|up front|retainer|mobilization)\b/i;
+
+function fieldNumber(state: GeneratorState, id: string): number {
+  const raw = state.fields[id];
+  const parsed = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function collectTermsFindings(state: GeneratorState, meta: ReadinessMeta): ReadinessFinding[] {
+  const findings: ReadinessFinding[] = [];
+  const totals = computeProposalTotals(state);
+  const term = parseProposalTerm(state.fields);
+
+  // A deposit is money due at acceptance. A payment clause that only describes
+  // invoicing does not authorise collecting it, and the two print a page apart.
+  const paymentTerms = fieldText(state, "paymentTerms");
+  if (totals.deposit > 0 && paymentTerms !== "" && !upfrontPaymentPattern.test(paymentTerms)) {
     findings.push({
-      id: "valid_until_past",
+      id: "deposit_vs_payment_terms",
+      severity: "warn",
+      area: "Payment terms",
+      message: `The schedule shows ${formatMoney(totals.deposit)} due at acceptance, but the payment terms only say "${paymentTerms}" — nothing there covers money due before an invoice.`,
+    });
+  }
+
+  // Two independent sources for the same promise, printed in one sentence:
+  // "Open for acceptance for N calendar days from proposal date. Valid until X."
+  const validDaysRaw = fieldNumber(state, "validDays");
+  const proposalDate = fieldText(state, "proposalDate");
+  if (validDaysRaw > 0 && meta.validUntil && /^\d{4}-\d{2}-\d{2}$/.test(proposalDate)) {
+    const impliedDays = daysUntilProposalExpiry(meta.validUntil, proposalDate);
+    // A couple of days of slack: sellers round to "60 days" from a date that is
+    // 58 or 61 days out, and flagging that is noise, not a finding.
+    if (impliedDays !== null && Math.abs(impliedDays - validDaysRaw) > 2) {
+      findings.push({
+        id: "valid_days_vs_valid_until",
+        severity: "warn",
+        area: "Validity",
+        message: `The document says it is open for ${validDaysRaw} days from ${proposalDate}, but the validity date is ${meta.validUntil} — ${impliedDays} days. One of the two is wrong.`,
+      });
+    }
+  }
+
+  // A range that cannot be measured. parseProposalTerm already refuses to state
+  // a duration for it; nothing told the seller why the durations vanished.
+  if (term.reversed) {
+    findings.push({
+      id: "term_reversed",
       severity: "error",
-      area: "Validity",
-      message: `The validity date (${meta.validUntil}) has passed — the client can no longer accept this proposal as written.`,
+      area: "Engagement term",
+      message: "The engagement term ends before it starts, so every duration the document would print has been suppressed.",
+    });
+  }
+
+  // Selling work that starts after the offer dies.
+  if (term.start && meta.validUntil && /^\d{4}-\d{2}-\d{2}$/.test(meta.validUntil)) {
+    const [validYear, validMonth] = meta.validUntil.split("-").map(Number);
+    const startsAfterValidity =
+      term.start.year > validYear || (term.start.year === validYear && term.start.month > validMonth);
+    if (startsAfterValidity) {
+      findings.push({
+        id: "term_starts_after_validity",
+        severity: "warn",
+        area: "Engagement term",
+        message: `The engagement starts ${term.start.label}, after the proposal stops being acceptable (${meta.validUntil}). The client cannot accept it in time to begin as scheduled.`,
+      });
+    }
+  }
+
+  // "One-time (pilot)" billing on a proposal that is not a pilot: the billing
+  // line and the package are describing two different deals.
+  const billingTerm = fieldText(state, "billingTerm");
+  const packageKey = fieldText(state, "packageSelect");
+  if (/pilot/i.test(billingTerm) && !isPilotPackageKey(packageKey)) {
+    findings.push({
+      id: "billing_term_says_pilot",
+      severity: "warn",
+      area: "Billing",
+      message: `The billing term reads "${billingTerm}" on a proposal that is not a pilot. Pick the billing term that matches what is being sold.`,
     });
   }
 

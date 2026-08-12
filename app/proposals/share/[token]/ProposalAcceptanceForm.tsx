@@ -11,8 +11,9 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, PenLine } from "lucide-react";
-import { acceptProposalViaShareLink } from "@/app/employee/proposals/actions";
+import { CheckCircle2, MessageSquare, PenLine } from "lucide-react";
+import { acceptProposalViaShareLink, declineProposalViaShareLink } from "@/app/employee/proposals/actions";
+import { declineReasonOptions } from "@/app/employee/proposals/share-link-policy";
 
 export function ProposalAcceptanceForm({
   token,
@@ -29,6 +30,28 @@ export function ProposalAcceptanceForm({
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [accepted, setAccepted] = useState(false);
+  // The decline half. Collapsed behind a link rather than shown as a second
+  // button of equal weight: this page's job is acceptance, and a decline is a
+  // deliberate act, not a mis-click. But it has to EXIST — a client with no way
+  // to say no simply goes silent, and the reason is lost with them.
+  const [decliningOpen, setDecliningOpen] = useState(false);
+  const [declineReason, setDeclineReason] = useState("");
+  const [declineDetail, setDeclineDetail] = useState("");
+  const [declined, setDeclined] = useState(false);
+
+  if (declined) {
+    return (
+      <div className="form-panel rp-doc-noprint" style={{ marginTop: 24 }}>
+        <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <MessageSquare size={20} color="var(--portal-gold)" /> Response recorded
+        </h2>
+        <p style={{ color: "var(--portal-muted)", marginTop: 8 }}>
+          Thank you for letting us know. Your response has been sent to your representative, who will follow up if
+          there is anything worth revisiting.
+        </p>
+      </div>
+    );
+  }
 
   if (accepted) {
     return (
@@ -55,6 +78,25 @@ export function ProposalAcceptanceForm({
         return;
       }
       setAccepted(true);
+      router.refresh();
+    });
+  }
+
+  function submitDecline() {
+    setError("");
+    setFieldErrors({});
+    startTransition(async () => {
+      const result = await declineProposalViaShareLink(token, {
+        name,
+        reason: declineReason,
+        detail: declineDetail,
+      });
+      if (!result.ok) {
+        setError(result.error ?? "Your response could not be recorded.");
+        setFieldErrors(result.fieldErrors ?? {});
+        return;
+      }
+      setDeclined(true);
       router.refresh();
     });
   }
@@ -143,6 +185,95 @@ export function ProposalAcceptanceForm({
           </button>
         </div>
       </form>
+
+      <div style={{ borderTop: "1px solid var(--portal-line, #dbe2e9)", marginTop: 20, paddingTop: 16 }}>
+        {!decliningOpen ? (
+          <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem", margin: 0 }}>
+            Not moving forward?{" "}
+            <button
+              type="button"
+              onClick={() => setDecliningOpen(true)}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                font: "inherit",
+                color: "var(--portal-gold)",
+                textDecoration: "underline",
+                cursor: "pointer",
+              }}
+            >
+              Let us know why
+            </button>
+            . It takes a moment and helps us make a better proposal next time.
+          </p>
+        ) : (
+          <form
+            className="form-grid"
+            style={{ gridTemplateColumns: "1fr" }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!isPending) submitDecline();
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: "0.95rem" }}>Decline this proposal</h3>
+            <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem", margin: 0 }}>
+              This records your response so your representative knows where things stand. Enter your name above, then
+              tell us the main reason.
+            </p>
+
+            <div className="field">
+              <label htmlFor="decline-reason">Main reason</label>
+              <select
+                id="decline-reason"
+                value={declineReason}
+                disabled={isPending}
+                onChange={(event) => setDeclineReason(event.target.value)}
+                required
+              >
+                <option value="">Select a reason…</option>
+                {declineReasonOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {fieldErrors.reason ? (
+                <span style={{ color: "#ef4444", fontSize: "0.85rem" }}>{fieldErrors.reason}</span>
+              ) : null}
+            </div>
+
+            <div className="field">
+              <label htmlFor="decline-detail">Anything else? (optional)</label>
+              <textarea
+                id="decline-detail"
+                rows={3}
+                value={declineDetail}
+                disabled={isPending}
+                onChange={(event) => setDeclineDetail(event.target.value)}
+                placeholder="Budget, timing, scope — whatever would be useful for us to know."
+              />
+              {fieldErrors.detail ? (
+                <span style={{ color: "#ef4444", fontSize: "0.85rem" }}>{fieldErrors.detail}</span>
+              ) : null}
+            </div>
+
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button className="button button-light" type="submit" disabled={isPending}>
+                {isPending ? "Sending…" : "Send response"}
+              </button>
+              <button
+                className="button button-light"
+                type="button"
+                disabled={isPending}
+                onClick={() => setDecliningOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
     </div>
   );
 }

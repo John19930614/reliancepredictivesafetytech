@@ -245,6 +245,61 @@ async function updateEnvelopeEvent(db: LooseClient, input: RecordDocusignEnvelop
     .maybeSingle();
 }
 
+/**
+ * Flips the proposal to `declined` when its envelope is declined, recording who
+ * declined and that it happened in DocuSign.
+ *
+ * Best-effort and conditional: the transition gate is consulted the same way
+ * markProposalSentIfAllowed consults it, so a proposal that has already been
+ * accepted or archived is left exactly as it is rather than being dragged
+ * backwards by a late webhook. A write failure is not surfaced to DocuSign —
+ * the envelope row is already correct, and returning an error would make
+ * DocuSign retry a delivery that cannot succeed.
+ */
+async function markProposalDeclined(
+  db: LooseClient,
+  envelope: { proposal_id: string; recipient_name?: string | null; recipient_email?: string | null },
+  input: RecordDocusignEnvelopeEventInput,
+) {
+  const { data: proposal } = await db
+    .from("client_proposals")
+    .select("id, title, status")
+    .eq("id", envelope.proposal_id)
+    .maybeSingle();
+  if (!proposal) return;
+
+  const currentStatus = (proposal.status as ProposalStatus) ?? "sent";
+  if (!canTransitionProposal(currentStatus, "declined").ok) return;
+
+  const who = envelope.recipient_name || envelope.recipient_email || "the recipient";
+  const reason = `Declined in DocuSign by ${who}`.slice(0, 500);
+
+  const { error } = await db
+    .from("client_proposals")
+    .update({
+      status: "declined",
+      declined_at: input.occurredAt ?? new Date().toISOString(),
+      decline_reason: reason,
+    })
+    .eq("id", proposal.id)
+    .eq("status", currentStatus);
+  if (error) return;
+
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "update",
+      "client_proposal",
+      proposal.id as string,
+      null,
+      `Proposal "${proposal.title}" was declined in DocuSign by ${who}`,
+      { status: currentStatus },
+      { status: "declined", decline_reason: reason, envelope_id: input.envelopeId },
+    ),
+    severity: "warn",
+    actor_role: "docusign_webhook",
+  });
+}
+
 export async function recordDocusignEnvelopeEvent(
   input: RecordDocusignEnvelopeEventInput,
 ): Promise<{ ok: boolean; error?: string; ignored?: boolean }> {
@@ -254,7 +309,19 @@ export async function recordDocusignEnvelopeEvent(
   const { data: envelope, error } = await updateEnvelopeEvent(db, input);
   if (error) return { ok: false, error: error.message };
   if (!envelope) return { ok: true, ignored: true };
-  if (normalizeEnvelopeStatus(input.status) !== "completed") return { ok: true };
+
+  const eventStatus = normalizeEnvelopeStatus(input.status);
+
+  // A recipient declining in DocuSign IS the client declining the proposal.
+  // Before this, the envelope was stamped `declined` and the function returned
+  // immediately — so the panel showed a red "Declined" badge while the proposal
+  // itself sat at `sent` forever, invisible to every list, filter and report.
+  if (eventStatus === "declined") {
+    await markProposalDeclined(db, envelope, input);
+    return { ok: true };
+  }
+
+  if (eventStatus !== "completed") return { ok: true };
   if (envelope.completed_file_id) return { ok: true };
 
   const { data: proposal } = await db

@@ -161,6 +161,84 @@ export interface AcceptanceValidation {
   value?: { name: string; email: string };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Decline input                                                               */
+/*                                                                             */
+/* A client who is out currently just goes dark: there is no decline control on */
+/* the share page, and the columns built to hold the answer (declined_at,       */
+/* decline_reason) have never been written. For a two-person shop, why a        */
+/* proposal was lost is the highest-value fact the workflow produces.           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The reason picklist. Free text alone produces "no thanks" and nothing
+ * countable; a fixed list makes loss reasons comparable across proposals, and
+ * the optional detail box keeps the nuance.
+ */
+export const declineReasonOptions = Object.freeze([
+  { value: "price", label: "Price / budget" },
+  { value: "timing", label: "Timing — not now" },
+  { value: "scope", label: "Scope did not fit" },
+  { value: "competitor", label: "Went with another provider" },
+  { value: "internal", label: "Handled internally" },
+  { value: "no_response", label: "Project cancelled or on hold" },
+  { value: "other", label: "Other" },
+] as const);
+
+export type DeclineReasonValue = (typeof declineReasonOptions)[number]["value"];
+
+export function declineReasonLabel(value: string): string | null {
+  return declineReasonOptions.find((option) => option.value === value)?.label ?? null;
+}
+
+export interface DeclineInput {
+  name?: unknown;
+  reason?: unknown;
+  detail?: unknown;
+}
+
+export interface DeclineValidation {
+  ok: boolean;
+  errors: Record<string, string>;
+  error?: string;
+  /** `reason` is the stored sentence: the picked label plus any detail. */
+  value?: { name: string; reasonValue: DeclineReasonValue; reason: string };
+}
+
+/**
+ * Validates a decline submitted from the public share page.
+ *
+ * Deliberately lighter than acceptance: no email and no agreement checkbox. A
+ * decline creates no obligation, and demanding contact details from someone
+ * telling us no is how the reason stops being recorded at all.
+ */
+export function validateDeclineInput(input: DeclineInput): DeclineValidation {
+  const errors: Record<string, string> = {};
+
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  if (!name) errors.name = "Enter your name.";
+  else if (name.length > acceptanceNameMaxLength) {
+    errors.name = `Keep the name to ${acceptanceNameMaxLength} characters or fewer.`;
+  }
+
+  const reasonValue = typeof input.reason === "string" ? input.reason.trim() : "";
+  const label = declineReasonLabel(reasonValue);
+  if (!label) errors.reason = "Choose a reason.";
+
+  const detail = typeof input.detail === "string" ? input.detail.trim() : "";
+  if (detail.length > declineReasonMaxLength) {
+    errors.detail = `Keep the note to ${declineReasonMaxLength} characters or fewer.`;
+  }
+
+  const first = Object.values(errors)[0];
+  if (first) return { ok: false, errors, error: first };
+
+  // One column, one sentence: the label carries the countable part, the detail
+  // the nuance. Capped at the column's own limit rather than trusting the sum.
+  const reason = (detail ? `${label} — ${detail}` : (label as string)).slice(0, declineReasonMaxLength);
+  return { ok: true, errors, value: { name, reasonValue: reasonValue as DeclineReasonValue, reason } };
+}
+
 export function validateAcceptanceInput(input: AcceptanceInput): AcceptanceValidation {
   const errors: Record<string, string> = {};
 

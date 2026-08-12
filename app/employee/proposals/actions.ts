@@ -27,12 +27,16 @@ import {
   buildShareLinkUrl,
   canShareProposal,
   clampShareLinkDays,
+  declineReasonMaxLength,
   extractClientIp,
   shareLinkExpiryIso,
   validateAcceptanceInput,
+  validateDeclineInput,
+  type DeclineInput,
 } from "./share-link-policy";
 import { generateShareToken, hashShareToken } from "./share-token";
-import { applyShareLinkAcceptance, resolveShareLink } from "./share-link-server";
+import { applyShareLinkAcceptance, applyShareLinkDecline, resolveShareLink } from "./share-link-server";
+import { isProposalExpired } from "@/lib/proposals/validity";
 import {
   buildPrefillState,
   isGeneratorState,
@@ -789,7 +793,21 @@ export async function duplicateProposal(proposalId: string): Promise<ActionResul
   return { ok: true, proposalId: created.id };
 }
 
-export async function setProposalStatus(proposalId: string, status: ProposalStatus): Promise<ActionResult> {
+export interface SetProposalStatusOptions {
+  /**
+   * Why the client said no, when moving to `declined`. Required by the UI
+   * rather than by this action: a decline recorded here with no reason is worse
+   * data than one recorded with it, but refusing the transition outright would
+   * leave a lost deal sitting in `sent` forever.
+   */
+  declineReason?: string | null;
+}
+
+export async function setProposalStatus(
+  proposalId: string,
+  status: ProposalStatus,
+  options: SetProposalStatusOptions = {},
+): Promise<ActionResult> {
   const { supabase, userId, canManage, canApprove, role } = await getProposalAccess();
   if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
   if (!canManage) return { ok: false, error: "You do not have permission to update proposals." };
@@ -820,9 +838,24 @@ export async function setProposalStatus(proposalId: string, status: ProposalStat
     if (!sendGate.ok) return { ok: false, error: sendGate.reason };
   }
 
+  // Stamp the MOMENT, not just the state. A status that flips with no timestamp
+  // is why the timeline's decline branch was unreachable and why decline_reason
+  // — a column that has existed since 20260804101000 — had never been written by
+  // anything. The transition gate above already guarantees these are reached
+  // only from `sent`, so neither stamp can overwrite an earlier one.
+  const patch: Record<string, unknown> = { status };
+  if (status === "declined") {
+    patch.declined_at = new Date().toISOString();
+    const reason = typeof options.declineReason === "string" ? options.declineReason.trim() : "";
+    if (reason) patch.decline_reason = reason.slice(0, declineReasonMaxLength);
+  }
+  if (status === "accepted") {
+    patch.accepted_at = new Date().toISOString();
+  }
+
   const { data: updated, error } = await supabase
     .from("client_proposals")
-    .update({ status })
+    .update(patch)
     .eq("id", proposalId)
     .select("id");
   if (error) return { ok: false, error: error.message };
@@ -833,9 +866,10 @@ export async function setProposalStatus(proposalId: string, status: ProposalStat
     "update",
     proposalId,
     userId,
-    `Moved proposal "${proposal.title}" from ${proposal.status} to ${status}`,
+    `Moved proposal "${proposal.title}" from ${proposal.status} to ${status}` +
+      (status === "declined" && patch.decline_reason ? ` (reason: ${patch.decline_reason})` : ""),
     { status: proposal.status },
-    { status },
+    patch,
   );
 
   // Best-effort convenience copy: the accepted document is filed into the
@@ -1141,6 +1175,18 @@ export async function acceptProposalViaShareLink(
   const gate = canTransitionProposal(view.status, "accepted");
   if (!gate.ok) return { ok: false, error: "This proposal is no longer open for acceptance." };
 
+  // The validity date is PRINTED on the document the client is looking at, and
+  // until now it was decorative: the gate above checks status and nothing else,
+  // so a client could accept in month four at month-one pricing. The date the
+  // document states is now the date the platform enforces.
+  if (isProposalExpired(view.validUntil, todayInCompanyTimezone())) {
+    return {
+      ok: false,
+      error:
+        "This proposal's validity period has passed, so it can no longer be accepted online. Please contact your representative for a current version.",
+    };
+  }
+
   let ip: string | null = null;
   let userAgent: string | null = null;
   try {
@@ -1212,5 +1258,140 @@ export async function acceptProposalViaShareLink(
   }
 
   revalidateProposals(view.proposalId);
+  return { ok: true };
+}
+
+/**
+ * Records a client's DECLINE from the public share page.
+ *
+ * Mirrors acceptProposalViaShareLink exactly — same token resolution, same
+ * uniform rejection message, same conditional write — because a decline is the
+ * other half of the same decision and must be no harder to give than a yes.
+ * Until now there was no way to say no: the client went dark, and the columns
+ * built to hold the answer were never written by anything.
+ *
+ * Deliberately NOT gated on validity. A client declining an expired proposal is
+ * still telling us why we lost, and that is the whole point of the feature.
+ */
+export async function declineProposalViaShareLink(token: string, input: DeclineInput): Promise<ActionResult> {
+  const genericRejection = "This proposal link is no longer available.";
+
+  const validation = validateDeclineInput(input ?? {});
+  if (!validation.ok || !validation.value) {
+    return { ok: false, error: validation.error, fieldErrors: validation.errors };
+  }
+
+  const resolved = await resolveShareLink(token);
+  if (resolved.state !== "valid" || !resolved.view) return { ok: false, error: genericRejection };
+  const view = resolved.view;
+
+  const gate = canTransitionProposal(view.status, "declined");
+  if (!gate.ok) return { ok: false, error: "This proposal is no longer open for a response." };
+
+  let ip: string | null = null;
+  let userAgent: string | null = null;
+  try {
+    const store = await headers();
+    ip = extractClientIp(store.get("x-forwarded-for"));
+    userAgent = store.get("user-agent")?.slice(0, 500) ?? null;
+  } catch {
+    // Header access can fail outside a request scope; the decline still stands.
+  }
+
+  const written = await applyShareLinkDecline({
+    proposalId: view.proposalId,
+    name: validation.value.name,
+    reason: validation.value.reason,
+  });
+  if (!written.ok) return { ok: false, error: written.error };
+
+  // Like acceptance, this has no signed-in actor, so the audit trail is the
+  // only record of who declined and why.
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "update",
+      "client_proposal",
+      view.proposalId,
+      null,
+      `Client declined proposal "${view.title}" (revision v${view.revisionNumber}) via share link: ${validation.value.reason}`,
+      { status: view.status, declined_at: null },
+      {
+        status: "declined",
+        declined_by_name: validation.value.name,
+        decline_reason: validation.value.reason,
+        decline_reason_code: validation.value.reasonValue,
+        revision_number: view.revisionNumber,
+        share_link_id: view.linkId,
+      },
+    ),
+    event_category: "data",
+    severity: "warn",
+    actor_role: "client_share_link",
+    ip_address: ip,
+    user_agent: userAgent,
+    evidence_links: [view.linkId],
+  });
+
+  revalidateProposals(view.proposalId);
+  return { ok: true };
+}
+
+/**
+ * Extends (or clears) the acceptance window on a proposal that is already out
+ * with the client.
+ *
+ * Its own action rather than a loosening of canEditProposalMeta, which freezes
+ * valid_until outside `draft` for good reason: everything else in that gate is
+ * part of the offer. Without this, enforcing expiry at acceptance would be a
+ * dead end — the only way to give a client another week would be reopening the
+ * proposal to draft, which VOIDS the standing approval (editVoidsApproval) and
+ * forces a re-approval to send the same document again.
+ *
+ * The document's own body is untouched, so no revision is minted and no
+ * approval is disturbed. `validDays` inside form_data is deliberately left
+ * alone: it is the seller's prose, and rewriting saved content from here would
+ * edit a document that is locked for editing.
+ */
+export async function extendProposalValidity(proposalId: string, validUntil: string | null): Promise<ActionResult> {
+  const { supabase, userId, canManage, role } = await getProposalAccess();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+  if (!canManage) return { ok: false, error: "You do not have permission to update proposals." };
+  if (!proposalId) return { ok: false, error: "Missing proposal id." };
+
+  const validation = validateProposalFields({ validUntil });
+  if (!validation.ok) return { ok: false, error: validation.error, fieldErrors: validation.errors };
+
+  const { data: proposal } = await supabase
+    .from("client_proposals")
+    .select("id, status, title, valid_until")
+    .eq("id", proposalId)
+    .maybeSingle();
+  if (!proposal) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  // A closed proposal's validity is history. Reopening is the deliberate path.
+  const status = proposal.status as ProposalStatus;
+  if (status === "accepted" || status === "declined" || status === "archived") {
+    return { ok: false, error: `This proposal is ${status}, so its validity period can no longer be changed.` };
+  }
+
+  const { data: updated, error } = await supabase
+    .from("client_proposals")
+    .update({ valid_until: validUntil || null })
+    .eq("id", proposalId)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!updated || updated.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  await recordProposalAudit(
+    role,
+    "update",
+    proposalId,
+    userId,
+    `Changed the validity date on proposal "${proposal.title}" from ${proposal.valid_until ?? "none"} to ${validUntil || "none"}`,
+    { valid_until: proposal.valid_until ?? null },
+    { valid_until: validUntil || null },
+  );
+
+  revalidateProposals(proposalId);
   return { ok: true };
 }

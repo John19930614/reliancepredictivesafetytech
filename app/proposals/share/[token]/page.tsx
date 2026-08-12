@@ -4,6 +4,7 @@ import { formatDocumentDate } from "@/components/proposals/proposal-document-mod
 import { isGeneratorState } from "@/lib/proposals/generator-state";
 import { computeProposalTotals } from "@/lib/proposals/pricing";
 import { resolveDocumentExtras } from "@/lib/proposals/team-server";
+import { isProposalExpired } from "@/lib/proposals/validity";
 import { recordShareLinkView, resolveShareLink } from "@/app/employee/proposals/share-link-server";
 import { ProposalAcceptanceForm } from "./ProposalAcceptanceForm";
 
@@ -90,7 +91,12 @@ export default async function ProposalSharePage({ params }: { params: Promise<{ 
   // unauthenticated and cannot fetch the private signature object itself.
   const { team, signature } = await resolveDocumentExtras(state, view.acceptedAt ?? null);
 
-  const openForAcceptance = view.status === "sent" && !view.acceptedAt && !view.declinedAt;
+  // The validity date is printed on the document above; it now governs the
+  // panel below it too, rather than being decorative. Company time, matching
+  // the clock the acceptance action enforces with.
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" }).format(new Date());
+  const expired = isProposalExpired(view.validUntil, today);
+  const openForAcceptance = view.status === "sent" && !view.acceptedAt && !view.declinedAt && !expired;
 
   return (
     <main style={{ maxWidth: 1000, margin: "0 auto", padding: "28px 16px 64px" }}>
@@ -132,6 +138,18 @@ export default async function ProposalSharePage({ params }: { params: Promise<{ 
             This proposal was accepted on {formatDocumentDate(view.acceptedAt)}
             {view.acceptedByName ? ` by ${view.acceptedByName}` : ""}. Contact your representative if anything needs
             to change.
+          </p>
+        </div>
+      ) : expired && view.status === "sent" && !view.declinedAt ? (
+        // Named explicitly rather than folded into the generic panel: the
+        // holder of this link is the intended recipient, and telling them the
+        // pricing window closed (rather than "not available") is the difference
+        // between a dead end and a phone call.
+        <div className="form-panel rp-doc-noprint" style={{ marginTop: 24 }}>
+          <h2 style={{ marginTop: 0 }}>This proposal has expired</h2>
+          <p style={{ color: "var(--portal-muted)" }}>
+            The acceptance period ended on {formatDocumentDate(view.validUntil)}, so it can no longer be accepted
+            online. Please contact your representative — they can reissue it with current pricing.
           </p>
         </div>
       ) : (

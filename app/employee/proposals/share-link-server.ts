@@ -212,6 +212,51 @@ export async function applyShareLinkAcceptance(
   return { ok: true };
 }
 
+export interface DeclineWrite {
+  proposalId: string;
+  /** Who declined, as they typed it. */
+  name: string;
+  /** The picked label plus any detail, already capped by validateDeclineInput. */
+  reason: string;
+}
+
+/**
+ * Records a client's decline: stamps the columns and flips the status, in ONE
+ * conditional write.
+ *
+ * Same shape as applyShareLinkAcceptance and for the same reason — the
+ * `status = 'sent'` / `accepted_at is null` / `declined_at is null` predicates
+ * live in the UPDATE rather than a preceding read, so a client who declines
+ * twice (or races their own acceptance) cannot record two outcomes: the second
+ * write matches zero rows.
+ *
+ * `declined_at` and `decline_reason` have existed since 20260804101000 and were
+ * never written by anything. This is the first writer.
+ */
+export async function applyShareLinkDecline(input: DeclineWrite): Promise<{ ok: boolean; error?: string }> {
+  const db = adminDb();
+  if (!db) return { ok: false, error: "This action is temporarily unavailable. Please contact your representative." };
+
+  const { data: updated, error } = await db
+    .from("client_proposals")
+    .update({
+      status: "declined",
+      declined_at: new Date().toISOString(),
+      decline_reason: input.reason,
+    })
+    .eq("id", input.proposalId)
+    .eq("status", "sent")
+    .is("accepted_at", null)
+    .is("declined_at", null)
+    .select("id");
+
+  if (error) return { ok: false, error: "Your response could not be recorded. Please contact your representative." };
+  if (!updated || updated.length === 0) {
+    return { ok: false, error: "This proposal is no longer open for a response. Please contact your representative." };
+  }
+  return { ok: true };
+}
+
 /**
  * Best-effort view tracking. Never throws and never blocks the render from
  * succeeding: a counter that fails to increment must not stop a client reading
