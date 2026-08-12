@@ -4,14 +4,17 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FilePlus2, Loader2 } from "lucide-react";
 import { createProposal } from "@/app/employee/proposals/actions";
-import { createProposalFromTemplate } from "@/app/employee/proposals/templates/actions";
+import {
+  createProposalFromTemplate,
+  createProposalFromTransactionType,
+} from "@/app/employee/proposals/templates/actions";
 import { assignClientCode } from "@/app/employee/clients/[id]/actions";
 import {
   clientCodeRule,
   formatClientProposalNumber,
   suggestClientCode,
 } from "@/lib/proposals/client-codes";
-import { ProposalTemplatePicker } from "./ProposalTemplatePicker";
+import { ProposalTemplatePicker, transactionTypeOptionPrefix } from "./ProposalTemplatePicker";
 
 interface ClientOption {
   id: string;
@@ -85,13 +88,20 @@ export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
       }
     }
 
-    // Two distinct create paths. The blank path still calls createProposal(),
-    // which seeds its own default pilot state and is deliberately unchanged; the
-    // template path uses the Proposal Templates module's own action, which
-    // scrubs the captured client's identity out and layers this company's in.
-    const result = templateId
-      ? await createProposalFromTemplate({ ...shared, templateId })
-      : await createProposal(shared);
+    // Three create paths, all landing in the same editor. The blank path calls
+    // createProposal(), which seeds neutral zero-price phases and no pilot
+    // wording (df4d47e); the proposal-type path seeds from the built-in
+    // transaction-type registry; the saved-template path uses the Proposal
+    // Templates module's own action. Both template paths scrub any captured
+    // client identity out and layer this company's in.
+    const result = templateId.startsWith(transactionTypeOptionPrefix)
+      ? await createProposalFromTransactionType({
+          ...shared,
+          typeKey: templateId.slice(transactionTypeOptionPrefix.length),
+        })
+      : templateId
+        ? await createProposalFromTemplate({ ...shared, templateId })
+        : await createProposal(shared);
 
     if (!result.ok || !result.proposalId) {
       setError(result.error ?? "Failed to create the proposal.");

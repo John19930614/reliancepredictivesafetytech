@@ -32,6 +32,11 @@ import {
   loadCompanyProfile,
   loadPreparedByName,
 } from "@/lib/proposals/company-server";
+import {
+  buildTransactionTemplateState,
+  getTransactionTemplateLabel,
+  isTransactionTemplateKey,
+} from "@/lib/proposals/transaction-templates";
 import type { GeneratorState } from "@/lib/proposals/generator-state";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
 
@@ -456,6 +461,140 @@ export async function createProposalFromTemplate(
     null,
     { proposal_id: proposal.id, client_id: clientId },
   );
+
+  revalidateTemplates(proposal.id);
+  return { ok: true, proposalId: proposal.id };
+}
+
+export interface CreateProposalFromTransactionTypeInput {
+  /** A key from lib/proposals/transaction-templates.ts, e.g. "pilot". */
+  typeKey: string;
+  title: string;
+  clientId?: string | null;
+  owner?: string | null;
+  proposalValue?: number | null;
+  validUntil?: string | null;
+}
+
+/**
+ * Creates a proposal seeded from one of the BUILT-IN transaction-type
+ * templates (lib/proposals/transaction-templates.ts): Pilot, Time & Materials,
+ * Fixed Price, Enterprise, Retainer, Training.
+ *
+ * Mirrors createProposalFromTemplate() above rather than branching inside it —
+ * the saved-template path loads a database row and must handle archived and
+ * unusable bodies, while this path resolves a code-defined registry that can
+ * do neither. The seeding, numbering and revision-1 behaviour are identical,
+ * and the built-in body still goes through buildStateFromTemplate() so the
+ * scrub + client-prefill layering has exactly one implementation, whatever the
+ * template's origin.
+ */
+export async function createProposalFromTransactionType(
+  input: CreateProposalFromTransactionTypeInput,
+): Promise<TemplateActionResult & { proposalId?: string }> {
+  const { supabase, userId, canManage, role } = await getProposalAccess();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+  if (!canManage) return { ok: false, error: "You do not have permission to create proposals." };
+  if (typeof input.typeKey !== "string" || !isTransactionTemplateKey(input.typeKey)) {
+    return { ok: false, error: "That proposal type is not one the platform offers." };
+  }
+
+  const validation = validateProposalFields({
+    title: input.title,
+    clientId: input.clientId,
+    proposalValue: input.proposalValue,
+    validUntil: input.validUntil,
+  });
+  if (!validation.ok) return { ok: false, error: validation.error, fieldErrors: validation.errors };
+
+  const label = getTransactionTemplateLabel(input.typeKey);
+  const title = input.title.trim();
+  const clientId = input.clientId || null;
+
+  const [clientCompany, companyProfile, preparedByName] = await Promise.all([
+    loadClientCompanyDetail(supabase, clientId),
+    loadCompanyProfile(supabase),
+    loadPreparedByName(supabase, userId),
+  ]);
+
+  const formData = buildStateFromTemplate(buildTransactionTemplateState(input.typeKey), {
+    company: clientCompany,
+    companyProfile,
+    preparedBy: preparedByName,
+    today: todayInCompanyTimezone(),
+  });
+  if (!formData) {
+    return { ok: false, error: "The proposal type's template could not be built." };
+  }
+
+  // Price from the type's own line items unless the seller typed a value.
+  const computed = computeProposalTotals(formData).total;
+  const derivedValue = validateProposalFields({ proposalValue: computed }).ok ? computed : null;
+  const proposalValue = input.proposalValue ?? derivedValue;
+  const summary = `Started from the ${label} proposal type`;
+
+  const { data: proposal, error } = await supabase
+    .from("client_proposals")
+    .insert({
+      title,
+      client_id: clientId,
+      owner: input.owner?.trim() || null,
+      proposal_value: proposalValue,
+      valid_until: input.validUntil || null,
+      summary,
+      body_markdown: null,
+      status: "draft",
+      current_revision: 1,
+      form_data: formData,
+      created_by: userId,
+    })
+    .select("id, proposal_number")
+    .single();
+  if (error || !proposal) return { ok: false, error: error?.message ?? "Failed to create the proposal." };
+
+  // Stamp the reference the database just allocated onto the saved state, so
+  // the document prints this proposal's number. A NEW object, for the same
+  // reason as the saved-template path above.
+  const allocatedNumber = (proposal.proposal_number ?? null) as string | null;
+  const savedFormData: GeneratorState = allocatedNumber
+    ? { ...formData, fields: { ...formData.fields, proposalNo: allocatedNumber } }
+    : formData;
+
+  if (allocatedNumber) {
+    const { error: numberError } = await supabase
+      .from("client_proposals")
+      .update({ form_data: savedFormData })
+      .eq("id", proposal.id);
+    if (numberError) {
+      return { ok: false, error: `Proposal created but its reference number failed to save: ${numberError.message}` };
+    }
+  }
+
+  const { error: revisionError } = await supabase.from("client_proposal_revisions").insert({
+    proposal_id: proposal.id,
+    revision_number: 1,
+    title,
+    summary,
+    body_markdown: null,
+    change_note: `Created from the ${label} proposal type template`,
+    status_at_save: "draft",
+    form_data: savedFormData,
+    created_by: userId,
+  });
+  if (revisionError) return { ok: false, error: `Proposal created but revision 1 failed: ${revisionError.message}` };
+
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "create",
+      "client_proposal",
+      proposal.id,
+      userId,
+      `Created proposal "${title}" from the ${label} proposal type template`,
+      null,
+      { client_id: clientId, transaction_type: input.typeKey },
+    ),
+    actor_role: role,
+  });
 
   revalidateTemplates(proposal.id);
   return { ok: true, proposalId: proposal.id };
