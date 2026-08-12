@@ -596,12 +596,23 @@
 
 /* ---------- Print / Save as PDF ----------
  *
- * Ported from the asset's @media print block. This stylesheet only loads on the
- * routes that render a proposal document, so hiding the portal shell chrome here
- * cannot affect any other page. Anything the app adds around the document —
- * back links, toolbars, page headers — carries .rp-doc-noprint.
+ * Ported from the asset's @media print block.
  *
- * TWO THINGS THIS BLOCK IS DOING DELIBERATELY
+ * SCOPING. An earlier version of this comment claimed the stylesheet "only
+ * loads on the routes that render a proposal document, so hiding the portal
+ * shell chrome here cannot affect any other page". That is not true under the
+ * App Router: a stylesheet inserted during a client-side navigation stays in the
+ * document for the rest of the session, so once a seller has opened one
+ * proposal these rules are live on every page they visit afterwards. The rules
+ * that hide page furniture are therefore scoped with `:has(.rp-doc)` — they
+ * apply only while a proposal document is actually on the page — and the
+ * structural overrides carry `!important` so they cannot lose a cascade tie to
+ * app/globals.css, whose emit order relative to this file is a build detail we
+ * do not control. (`.portal-shell` in particular is declared TWICE in
+ * globals.css, the second time as a `display: grid` with a 292px sidebar track,
+ * at exactly the specificity of the override below.)
+ *
+ * THREE THINGS THIS BLOCK IS DOING DELIBERATELY
  *
  * 1. `@page { margin: 0 }` with the page margin moved onto .rp-doc as padding.
  *    Browsers draw their own header/footer (document title, the file:// or
@@ -615,6 +626,19 @@
  * 2. The document's own repeating footer. `position: fixed` inside a print
  *    context repeats the element on every sheet, giving us the company name and
  *    the form revision the browser footer used to occupy.
+ *
+ * 3. ONLY THE DOCUMENT PRINTS — see the `:has(.rp-doc)` block below. This is
+ *    the fix for "Ctrl+P saves a blank page", which was reported from the
+ *    editor and is not subtle once you see it: /employee/proposals/[id]/edit
+ *    puts the generator in an <iframe> whose HEIGHT IS AN INLINE STYLE sized to
+ *    the asset's reported document height (clamped 720-8000px), and inside that
+ *    iframe the asset hides BOTH of its own children when printing embedded —
+ *    `.panel, .noprint-only { display: none !important }` in the asset's own
+ *    @media print block, and `body.embedded .proposal { display: none }` for
+ *    the copy the platform replaced. No CSS in this file can shrink an inline
+ *    height, so print laid out a guaranteed-empty box up to eight letter sheets
+ *    tall BEFORE the document. The seller pressed Ctrl+P, the preview opened on
+ *    sheet 1 of 8+, and every one of them was blank.
  *
  * Density is tuned here rather than in the screen rules: the same document was
  * running 12-13 sheets, most of it the 28 commercial terms.
@@ -639,13 +663,64 @@
     display: none !important;
   }
 
+  /* !important, not because anything here is fighting an inline style, but
+     because globals.css declares `.portal-shell` twice at this same specificity
+     and which file the bundler emits first is not ours to decide. Today the
+     override happens to be unnecessary — a letter sheet lays out at well under
+     980px, so globals' own `@media (max-width: 980px)` has already collapsed the
+     shell to one column — but that is luck, not design, and it evaporates on any
+     wider sheet or if that breakpoint moves. */
   .portal-shell {
-    display: block;
+    display: block !important;
     background: #fff;
   }
 
   .portal-main {
-    padding: 0;
+    padding: 0 !important;
+  }
+
+  /* ---- Only the document prints ----
+   *
+   * Every internal view that renders <ProposalDocument> wraps it in chrome that
+   * is not part of the client's document, and each wraps it differently: the
+   * editor in a controls column (the generator iframe — see note 3 above — plus
+   * the client, consistency, AI-review and team panels), the detail page in
+   * review / share / DocuSign / revision-history panels.
+   *
+   * Rather than name those panels — they live in files this stylesheet does not
+   * own and would drift the moment one is renamed — say the actual rule:
+   * anything on the page that is neither the document nor an ancestor of it is
+   * page furniture. `:not(.rp-doc)` is load-bearing, not defensive: on the
+   * revision route <ProposalDocument> IS a direct child of .portal-main, and it
+   * does not contain a second .rp-doc, so without that guard this rule would
+   * hide the very thing it exists to protect.
+   *
+   * This also stops a seller printing the detail page from handing a client a
+   * trailing sheet of share-link history and DocuSign envelope status. */
+  .portal-main:has(.rp-doc) > :not(.rp-doc):not(:has(.rp-doc)),
+  .document-grid:has(.rp-doc) > :not(.rp-doc):not(:has(.rp-doc)),
+  .proposal-editor-grid:has(.rp-doc) > :not(.rp-doc):not(:has(.rp-doc)),
+  :has(> .proposal-editor-grid .rp-doc) > :not(.proposal-editor-grid) {
+    display: none !important;
+  }
+
+  /* Whatever the grid was doing on screen, the document gets the full sheet.
+     Left as a grid, the editor would print the document in a 1fr track beside an
+     empty 360-560px controls track. */
+  .document-grid,
+  .proposal-editor-grid {
+    display: block !important;
+  }
+
+  /* The editor's preview pane is `position: sticky; max-height: calc(100vh -
+     24px); overflow-y: auto` on screen — a scroll box exactly one viewport tall.
+     In paged media a viewport is a SHEET, so left alone it clips the proposal to
+     its first page and silently drops everything after it. globals.css happens
+     to neutralise this under 980px too; same luck, same fix. */
+  .proposal-editor-preview {
+    position: static !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
 
   .rp-doc {

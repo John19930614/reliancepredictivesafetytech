@@ -1,4 +1,5 @@
-import { PDFDocument, StandardFonts } from "pdf-lib";
+import { inflateSync } from "node:zlib";
+import { PDFArray, PDFDocument, PDFName, PDFRawStream, StandardFonts } from "pdf-lib";
 import { describe, expect, it } from "vitest";
 import { buildProposalDocumentModel } from "@/components/proposals/proposal-document-model";
 import type { GeneratorState } from "./generator-state";
@@ -98,6 +99,52 @@ function modelFor(state: GeneratorState, extras: Parameters<typeof buildProposal
 }
 
 /* -------------------------------------------------------------------------- */
+/* Reading the rendered file back                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The text a rendered PDF actually DRAWS, one entry per sheet.
+ *
+ * Page counts measure sheets, not ink: a renderer that laid out eight blank
+ * pages would satisfy every "getPageCount() is greater than 0 / at most 8"
+ * assertion in this file. The blank-page report that prompted this helper was
+ * exactly that failure mode on the browser-print path, so the PDF route is held
+ * to the stronger claim — that every sheet it emits carries the document's own
+ * words.
+ *
+ * pdf-lib flate-encodes content streams on save() and writes drawn strings as
+ * hex, so neither the words nor the URL-absence assertion below can be checked
+ * by scanning the raw bytes; both need the stream decoded first.
+ */
+async function drawnPages(bytes: Uint8Array): Promise<string[]> {
+  const doc = await PDFDocument.load(bytes);
+
+  return doc.getPages().map((page) => {
+    const contents = page.node.context.lookup(page.node.get(PDFName.of("Contents")));
+    const streams =
+      contents instanceof PDFArray
+        ? contents.asArray().map((ref) => page.node.context.lookup(ref))
+        : [contents];
+
+    const operators = streams
+      .map((stream) => {
+        if (!(stream instanceof PDFRawStream)) return "";
+        const raw = Buffer.from(stream.contents);
+        try {
+          return inflateSync(raw).toString("latin1");
+        } catch {
+          return raw.toString("latin1");
+        }
+      })
+      .join("\n");
+
+    return [...operators.matchAll(/<([0-9A-Fa-f]*)>\s*Tj/g)]
+      .map(([, hex]) => Buffer.from(hex, "hex").toString("latin1"))
+      .join("\n");
+  });
+}
+
+/* -------------------------------------------------------------------------- */
 /* Text handling                                                               */
 /* -------------------------------------------------------------------------- */
 
@@ -187,6 +234,49 @@ describe("renderProposalPdf", () => {
     expect(reloaded.getPageCount()).toBeGreaterThan(0);
   });
 
+  it("draws real text on every sheet it emits", async () => {
+    // The anti-blank-page assertion. Nothing else in this file would fail if the
+    // renderer started emitting empty sheets — page counts and "%PDF-" survive a
+    // document with no ink on it at all.
+    const model = modelFor(heavyState());
+    const pages = await drawnPages(await renderProposalPdf({ model, documentTitle: model.headline }));
+
+    expect(pages.length).toBeGreaterThanOrEqual(4);
+    expect(pages.length).toBeLessThanOrEqual(8);
+
+    // A sheet carrying only the stamped footer sits near 60 characters, so the
+    // floor is set well above it: every sheet must hold real body text. Reported
+    // as a list so a failure names the blank sheets.
+    const thin = pages
+      .map((text, index) => ({ page: index + 1, characters: text.length }))
+      .filter((sheet) => sheet.characters < 400);
+    expect(thin).toEqual([]);
+  });
+
+  it("puts the document's own sections, party and figures into the file", async () => {
+    const model = modelFor(heavyState());
+    const bytes = await renderProposalPdf({ model, documentTitle: model.headline });
+    const text = (await drawnPages(bytes)).join("\n");
+
+    for (const expected of [
+      "Executive Summary",
+      "Deliverables",
+      "Commercial and Legal Terms",
+      "Acceptance Statement",
+      "Northwind Construction Group",
+      "RPS-2026-PILOT-01",
+    ]) {
+      expect(text).toContain(expected);
+    }
+    // Priced, not just laid out: at least one money figure reached a page.
+    expect(text).toMatch(/\$[\d,]+\.\d{2}/);
+
+    // Well clear of an empty document. pdf-lib writes a page-less file in ~580
+    // bytes and a one-line page in under 1 kB; the embedded seal alone puts a
+    // real proposal into the hundreds of kB.
+    expect(bytes.byteLength).toBeGreaterThan(50_000);
+  });
+
   it("keeps a fully loaded proposal under eight pages", async () => {
     // The whole point of the density work: this document ran to 12-13 sheets,
     // most of it the 28 commercial terms at full size. Eight is the ceiling the
@@ -238,11 +328,18 @@ describe("renderProposalPdf", () => {
     expect(reloaded.getPageCount()).toBeLessThanOrEqual(8);
   });
 
-  it("renders an all-but-empty proposal without throwing", async () => {
+  it("renders an all-but-empty proposal without throwing, and still draws its structure", async () => {
     const empty: GeneratorState = { v: 1, fields: {}, phases: [], services: [] };
     const model = modelFor(empty);
-    const reloaded = await PDFDocument.load(await renderProposalPdf({ model, documentTitle: "Proposal" }));
+    const bytes = await renderProposalPdf({ model, documentTitle: "Proposal" });
+    const reloaded = await PDFDocument.load(bytes);
     expect(reloaded.getPageCount()).toBeGreaterThan(0);
+
+    // A proposal with nothing filled in still has a masthead, numbered section
+    // headings and the commercial terms, so "empty" must never mean "blank".
+    const text = (await drawnPages(bytes)).join("\n");
+    expect(text).toContain("Executive Summary");
+    expect(text).toContain("Acceptance Statement");
   });
 
   it("survives a signature that is not a usable image", async () => {
@@ -255,16 +352,25 @@ describe("renderProposalPdf", () => {
     expect(Buffer.from(bytes.slice(0, 5)).toString()).toBe("%PDF-");
   });
 
-  it("puts the company name and form revision in the footer, and no file route", async () => {
+  it("puts the company name and form revision in the footer of every sheet, and no file route", async () => {
     // This is the reason the export exists: the browser's own footer prints the
     // page URL, and no stylesheet can suppress it everywhere.
+    //
+    // Asserted against the DECODED pages. The previous version of this test
+    // scanned Buffer.toString("latin1"), which cannot see the drawn text at all
+    // — pdf-lib flate-encodes content streams, so "does not contain
+    // /employee/proposals" passed no matter what the renderer drew.
     const model = modelFor(heavyState());
-    const bytes = await renderProposalPdf({ model, documentTitle: model.headline });
-    const raw = Buffer.from(bytes).toString("latin1");
+    const pages = await drawnPages(await renderProposalPdf({ model, documentTitle: model.headline }));
 
     expect(proposalFooterText()).toContain("Reliance Predictive Safety Technologies");
     expect(proposalFooterText()).toContain("Proposal Form Rev.");
-    expect(raw).not.toContain("/employee/proposals");
-    expect(raw).not.toContain("http://localhost");
+
+    pages.forEach((text, index) => {
+      expect(text).toContain("Proposal Form Rev.");
+      expect(text).toContain(`Page ${index + 1} of ${pages.length}`);
+      expect(text).not.toContain("/employee/proposals");
+      expect(text).not.toContain("http://localhost");
+    });
   });
 });

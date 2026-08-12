@@ -43,7 +43,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       .maybeSingle();
     if (!revision) return NextResponse.json({ error: "Not found" }, { status: 404 });
     state = revision.form_data;
-    revisionNumber = Number(revision.revision_number);
+    // Coerced defensively: a null or non-numeric revision_number would otherwise
+    // reach the filename as "-vNaN.docx".
+    const parsed = Number(revision.revision_number);
+    revisionNumber = Number.isFinite(parsed) ? parsed : undefined;
   }
 
   if (!isGeneratorState(state)) {
@@ -67,7 +70,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     signature,
   });
 
-  const bytes = await renderProposalDocx(model);
+  // Same reasoning as the PDF route: the link carries `download`, so an
+  // uncaught throw would be saved as "<client>-v3.docx" containing Next's HTML
+  // error page — a file Word opens as empty or refuses outright.
+  let bytes: Buffer;
+  try {
+    bytes = await renderProposalDocx(model);
+  } catch (error) {
+    console.error("Could not render the proposal DOCX.", error);
+    return NextResponse.json({ error: "This proposal could not be rendered as a Word document." }, { status: 500 });
+  }
 
   return new NextResponse(new Uint8Array(bytes), {
     headers: {

@@ -327,6 +327,172 @@ describe("computeProposalTotals — line items", () => {
   });
 });
 
+/* -------------------------------------------------------------------------- */
+/* Qty means whatever the billing unit says it means                           */
+/*                                                                             */
+/* Since 2026-08-12 the certification courses are billed per participant, so a */
+/* service row's qty is a HEADCOUNT on one line, a session count on the next,  */
+/* hours on the one after that and miles on the last. Nothing in this module   */
+/* may assume qty is small, whole, or 1.                                       */
+/* -------------------------------------------------------------------------- */
+
+describe("computeProposalTotals — per-unit quantities", () => {
+  const services = (rows: Partial<GeneratorItem>[]) =>
+    computeProposalTotals(state({ fields: { packageSelect: "none" }, services: rows.map((row) => item(row)) }));
+
+  it("prices a full OSHA 10 class by the head, not by the session", () => {
+    // 25 attendees × $210 = $5,250. The old per-session price was $2,100 for
+    // the room, so a qty this module clamped or truncated would misquote a
+    // real class by thousands.
+    const totals = services([{ key: "osha10", qty: 25, price: 210, unit: "Person" }]);
+    expect(totals.lineItems[0]).toMatchObject({ qty: 25, unit: "Person", amount: 5250 });
+    expect(totals.subtotal).toBe(5250);
+    expect(totals.total).toBe(5250);
+  });
+
+  it("carries a large headcount without truncating or capping it", () => {
+    const totals = services([{ key: "respiratory", qty: 250, price: 85, unit: "Person" }]);
+    expect(totals.lineItems[0].amount).toBe(21250);
+  });
+
+  it("keeps a fractional quantity where the unit is divisible", () => {
+    // Half a field day, and a quarter-hour of consulting — both legitimate.
+    const totals = services([
+      { key: "fieldDay", qty: 0.5, price: 1250, unit: "Day" },
+      { key: "reviewHour", qty: 0.25, price: 150, unit: "Hour" },
+    ]);
+    expect(totals.lineItems.map((row) => row.amount)).toEqual([625, 37.5]);
+    expect(totals.subtotal).toBe(662.5);
+  });
+
+  it("prices four different billing units on one proposal, each by its own qty", () => {
+    const totals = services([
+      { key: "osha30", qty: 12, price: 510, unit: "Person" },
+      { key: "culture", qty: 2, price: 1250, unit: "Session" },
+      { key: "customWorkflow", qty: 8, price: 225, unit: "Hour" },
+      { key: "mileage", qty: 120, price: 0.7, unit: "Mile" },
+    ]);
+    expect(totals.lineItems.map((row) => [row.unit, row.amount])).toEqual([
+      ["Person", 6120],
+      ["Session", 2500],
+      ["Hour", 1800],
+      ["Mile", 84],
+    ]);
+    expect(totals.subtotal).toBe(10504);
+  });
+
+  it("still bills the base subscription as one term, whatever the service rows do", () => {
+    const totals = computeProposalTotals(
+      state({
+        fields: { packageSelect: "enterprise", annualPrice: "99500" },
+        services: [item({ key: "osha10", qty: 25, price: 210, unit: "Person" })],
+      }),
+    );
+    expect(totals.lineItems[0]).toMatchObject({ source: "package", qty: 1, unit: "", amount: 99500 });
+    expect(totals.subtotal).toBe(104750);
+  });
+
+  it("makes the subtotal the sum of the amounts the client can see", () => {
+    // Two three-mile trips at the IRS $0.655 rate. Each line prints $1.97, so
+    // the subtotal printed under them must be $3.94 — summing the raw products
+    // gave $3.93 and left the fee table one cent short of its own rows.
+    const totals = services([
+      { key: "mileage", qty: 3, price: 0.655, unit: "Mile" },
+      { key: "mileage", qty: 3, price: 0.655, unit: "Mile" },
+    ]);
+    expect(totals.lineItems.map((row) => row.amount)).toEqual([1.97, 1.97]);
+    expect(totals.subtotal).toBe(3.94);
+    expect(totals.total).toBe(3.94);
+  });
+
+  it("leaves an ordinary whole-dollar proposal exactly where it was", () => {
+    const totals = services([
+      { key: "docMedium", qty: 3, price: 1150, unit: "Document" },
+      { key: "complianceAudit", qty: 2, price: 1750, unit: "Audit" },
+    ]);
+    expect(totals.subtotal).toBe(6950);
+    expect(totals.subtotal).toBe(totals.lineItems.reduce((sum, row) => sum + row.amount, 0));
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Legacy states — these are documents already in clients' hands               */
+/*                                                                             */
+/* A proposal saved before the per-participant repricing, before `unit` was    */
+/* part of a row, or before proposalType existed must still price and label    */
+/* exactly as it did on the day it was sent.                                   */
+/* -------------------------------------------------------------------------- */
+
+describe("computeProposalTotals — legacy saved states", () => {
+  it("keeps a pre-repricing training row at its session price AND its session label", () => {
+    // The shape a proposal sent before 2026-08-12 holds: First Aid was $1,200
+    // for the session then and is $145 per participant now. Reading the unit
+    // from the live catalog printed this row as "1 Person" — a $1,200 head.
+    const totals = computeProposalTotals(
+      state({
+        fields: { packageSelect: "none" },
+        services: [item({ key: "firstAid", qty: 1, price: 1200, unit: "Session" })],
+      }),
+    );
+    expect(totals.lineItems[0]).toMatchObject({ price: 1200, qty: 1, unit: "Session", amount: 1200 });
+    expect(totals.lineItems[0].unit).not.toBe(serviceOptions.firstAid.unit);
+    expect(totals.total).toBe(1200);
+  });
+
+  it("prices a row that stored nothing but a key, a qty and a price", () => {
+    // No name, no desc, no unit — the catalog supplies all three, which is what
+    // a template-seeded row (unit: "") relies on. The stored PRICE still wins,
+    // so a repriced catalog cannot move a number on a sent document.
+    const bare = { type: "service", key: "firstAid", qty: 6, price: 1200 } as unknown as GeneratorItem;
+    const totals = computeProposalTotals(state({ fields: { packageSelect: "none" }, services: [bare] }));
+    expect(totals.lineItems[0]).toMatchObject({
+      name: serviceOptions.firstAid.name,
+      desc: serviceOptions.firstAid.desc,
+      price: 1200,
+      amount: 7200,
+    });
+    // Nothing travelled with the price, so the only unit available is today's.
+    // A row in this shape is the one case the stored-unit fix cannot cover.
+    expect(totals.lineItems[0].unit).toBe(serviceOptions.firstAid.unit);
+  });
+
+  it("prices a proposal that predates proposalType and the term selects", () => {
+    const totals = computeProposalTotals(
+      state({
+        fields: { packageSelect: "custom", annualPrice: "5000", depositPct: "25" },
+        phases: [item({ type: "phase", key: "discovery", qty: 1, price: 3500 })],
+        services: [item({ key: "genTraining", qty: 4, price: 750, unit: "Session" })],
+      }),
+    );
+    // No proposalType, no termStart*/termEnd*: the package row states the term
+    // without a duration rather than inventing one.
+    expect(totals.lineItems[0].desc).toBe("Platform access for the term — includes 50 users and 2 sites.");
+    expect(totals.subtotal).toBe(11500);
+    expect(totals.deposit).toBe(2875);
+  });
+
+  it("prices a phase row that stored the old ordinal-prefixed name", () => {
+    // stripPhaseOrdinal() is a render-time concern; the math must not care.
+    const totals = computeProposalTotals(
+      state({
+        fields: { packageSelect: "none" },
+        phases: [item({ type: "phase", key: "build", name: "Phase 2 — Build & Configure", qty: 1, price: 10000 })],
+      }),
+    );
+    expect(totals.lineItems[0]).toMatchObject({ name: "Phase 2 — Build & Configure", unit: "", amount: 10000 });
+  });
+
+  it("prices a row whose catalog key no longer exists", () => {
+    const totals = computeProposalTotals(
+      state({
+        fields: { packageSelect: "none" },
+        services: [item({ key: "retiredCourse", name: "Retired Course", qty: 9, price: 95, unit: "Person" })],
+      }),
+    );
+    expect(totals.lineItems[0]).toMatchObject({ name: "Retired Course", unit: "Person", amount: 855 });
+  });
+});
+
 describe("computeProposalTotals — the discount / tax / deposit chain", () => {
   const priced = (fields: GeneratorState["fields"]) =>
     computeProposalTotals(

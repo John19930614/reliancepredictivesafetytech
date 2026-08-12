@@ -76,6 +76,44 @@ describe("buildNarrativePrompt", () => {
   it("publishes the per-passage character ceiling", () => {
     expect(promptFor(state())).toContain(`maximum_characters: ${narrativeMaxChars.field}`);
   });
+
+  it("does not hand a services proposal a subscription to write about", () => {
+    // Rule 2 forbids the model from writing any figure that is not in the facts
+    // block, which makes everything IN it fair game. This block used to open
+    // with "Included users: 50 · Included jobsites: 2 · Base subscription /
+    // package: Platform Services at $0.00" on a training proposal — the asset's
+    // field defaults plus a package the document deliberately omits.
+    const training: GeneratorState = {
+      v: 1,
+      fields: {
+        packageSelect: "none",
+        proposalType: "training",
+        includedUsers: "50",
+        includedSites: "2",
+        customSummary: "Instructor-led courses delivered to your crews.",
+      },
+      phases: [],
+      services: [{ type: "service", key: "firstAid", name: "", qty: 6, price: 145, desc: "", unit: "" }],
+    };
+    const prompt = promptFor(training);
+
+    expect(prompt).not.toContain("Included users:");
+    expect(prompt).not.toContain("Included jobsites:");
+    expect(prompt).not.toContain("Base subscription");
+    expect(prompt).toContain("This proposal sells NO platform subscription");
+    expect(prompt).toContain("never state a seat, user, or jobsite count");
+    // And the opening line stops calling it a platform proposal.
+    expect(prompt).toContain("training services proposal");
+    expect(prompt).not.toContain("safety-platform proposal");
+  });
+
+  it("tells the model not to invent a billing cadence nobody chose", () => {
+    const bare = state();
+    bare.fields.proposalType = "training";
+    bare.fields.packageSelect = "none";
+    delete bare.fields.billingTerm;
+    expect(promptFor(bare)).toContain("Billing term: not chosen — do not state a billing cadence");
+  });
 });
 
 describe("narrativeResponseSchema", () => {

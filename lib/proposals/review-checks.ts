@@ -11,13 +11,19 @@
 // advisory — nothing here blocks a save, a submit, or a send. The maker–checker
 // gates in lib/proposals/approval.ts stay the only enforcement.
 
-import { isPilotPackageKey } from "./catalog";
+import { isNoPlatformPackageKey, isPilotPackageKey } from "./catalog";
 import { parseClientContacts } from "./client-contacts";
 import { scanProposalConsistency } from "./consistency";
 import type { GeneratorState } from "./generator-state";
 import { computeProposalTotals, formatMoney } from "./pricing";
 import { parseSignerId, parseTeamMemberIds } from "./team-selection";
 import { parseProposalTerm } from "./term";
+import {
+  buildTransactionTemplateState,
+  isTransactionTemplateKey,
+  proposalTypeFieldId,
+  type TransactionTemplateKey,
+} from "./transaction-templates";
 import type { ProposalStatus } from "./types";
 import { daysUntilProposalExpiry, expiringSoonDays, isProposalExpired } from "./validity";
 
@@ -307,6 +313,95 @@ function collectTermsFindings(state: GeneratorState, meta: ReadinessMeta): Readi
       area: "Billing",
       message: `The billing term reads "${billingTerm}" on a proposal that is not a pilot. Pick the billing term that matches what is being sold.`,
     });
+  }
+
+  findings.push(...collectTypeFindings(state, typeKeyOf(state), packageKey));
+  return findings;
+}
+
+/* -------------------------------------------------------------------------- */
+/* What this TYPE of proposal is supposed to be selling                       */
+/*                                                                            */
+/* Every check above this point was written when the practice sold one thing. */
+/* Four of the seven proposal types sell no subscription at all, and nothing  */
+/* deterministic had ever asked whether what is priced matches what the       */
+/* document calls itself — so a Platform Subscription proposal with the       */
+/* subscription switched off, and a training proposal quoting a class smaller */
+/* than its own printed minimum, both passed the free checks in silence.      */
+/* -------------------------------------------------------------------------- */
+
+/** The proposal type stamped on the state, or null (legacy / started blank). */
+function typeKeyOf(state: GeneratorState): TransactionTemplateKey | null {
+  const raw = state.fields[proposalTypeFieldId];
+  const key = typeof raw === "string" ? raw.trim() : "";
+  return isTransactionTemplateKey(key) ? key : null;
+}
+
+/**
+ * Whether a proposal type sells a subscription, read from the type's own seed
+ * rather than a hardcoded list here — one place decides what a type is, and it
+ * is the registry, not this file.
+ */
+function typeSellsSubscription(key: TransactionTemplateKey): boolean {
+  const seeded = buildTransactionTemplateState(key).fields.packageSelect;
+  return typeof seeded === "string" ? !isNoPlatformPackageKey(seeded) : true;
+}
+
+/**
+ * The class minimum the Training profile's "Class Size and Minimum Billing"
+ * clause states, and bills at, on the same document.
+ *
+ * Duplicated from that clause's prose deliberately: the clause is the client-
+ * facing statement and this is the check, and there is nowhere structured to
+ * read it from. If the profile's minimum ever changes, this changes with it.
+ */
+const trainingClassMinimum = 6;
+
+function collectTypeFindings(
+  state: GeneratorState,
+  typeKey: TransactionTemplateKey | null,
+  packageKey: string,
+): ReadinessFinding[] {
+  if (!typeKey) return [];
+  const findings: ReadinessFinding[] = [];
+
+  // A subscription type with the subscription switched off. The document still
+  // headlines itself "Platform Subscription Proposal" and opens section 02 as
+  // an engagement summary with no subscription row anywhere in the fee table —
+  // it announces one deal and prices another.
+  if (typeSellsSubscription(typeKey) && isNoPlatformPackageKey(packageKey)) {
+    findings.push({
+      id: "subscription_type_without_package",
+      severity: "error",
+      area: "Selected package",
+      message:
+        "This proposal is a subscription type, but the package is set to the services-only option, so the document " +
+        "names a subscription in its title and then prices none. Select the platform package being sold, or start " +
+        "the proposal from a services type.",
+    });
+  }
+
+  // Per-participant course lines below the roster minimum the same document's
+  // Class Size terms state and bill at. The fee table quotes four seats, the
+  // terms three pages later say the session is billed at six — a client reads
+  // both and asks which number is real.
+  if (typeKey === "training") {
+    const short = computeProposalTotals(state)
+      .lineItems.filter(
+        (row) => row.source === "service" && row.unit === "Person" && row.qty > 0 && row.qty < trainingClassMinimum,
+      )
+      .map((row) => `${row.name.trim() || "an unnamed course"} (${row.qty})`);
+    if (short.length > 0) {
+      findings.push({
+        id: "training_below_class_minimum",
+        severity: "warn",
+        area: "Training fees",
+        message:
+          `Priced per participant below the ${trainingClassMinimum}-participant minimum this proposal's own Class ` +
+          `Size terms state and bill at: ${short.join(", ")}. Quote the minimum, or say in the scope why this ` +
+          "session is an exception.",
+      });
+    }
   }
 
   return findings;

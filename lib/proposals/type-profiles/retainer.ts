@@ -110,6 +110,25 @@ export const retainerProfile: ProposalTypeProfile = {
   ],
 
   overrideClauses: {
+    // THE SHARED CLAUSE licenses "purchased deliverables solely during the
+    // active paid term". A retainer DOES have a term, so that limitation reads
+    // plausibly - and is still wrong: the written summaries, recommendations
+    // and reviews delivered in a paid period were bought in that period, and a
+    // client who ends the retainer does not lose the right to keep and act on
+    // the advice they already paid for.
+    intellectual_property: {
+      body:
+        "Seller retains all rights in its methods, templates, checklists, assessment tools, and pre-existing intellectual property, and may reuse the general knowledge, skills, and know-how gained performing this engagement. " +
+        "Written summaries, recommendations, and reviews delivered in a period Client has paid for belong to Client, without time limit, for its own internal safety and compliance purposes, and survive the end of the retainer. " +
+        "Client shall not sell, license, or distribute Seller's templates or methods as a product or service. " +
+        "All rights not expressly granted are reserved by Seller.",
+    },
+    data_ai_use: {
+      body:
+        "Incident, inspection, training, and program information Client shares with the assigned advisor is processed only to provide the advisory services this proposal describes. " +
+        "It is not used for cross-client model training, sold, or shared with third parties without written authorization, except as required by law. " +
+        "Seller complies with applicable state data laws, including CCPA/CPRA (Cal. Civ. Code sec.1798.100) and Wis. Stat. sec.134.98.",
+    },
     // Shared text governs "scope, sites, users, modules, or support" - three of
     // those five nouns are subscription counters that do not exist here.
     scope_changes: {

@@ -100,6 +100,26 @@ export const timeAndMaterialsProfile: ProposalTypeProfile = {
   ],
 
   overrideClauses: {
+    // THE SHARED CLAUSE licenses "purchased deliverables solely during the
+    // active paid term". A T&M engagement has no term: the client pays for
+    // hours already worked, and the reports and records those hours produced
+    // are theirs. A licence that lapses would mean an audit report bought in
+    // March stops being usable, which is not what was sold.
+    intellectual_property: {
+      body:
+        "Seller retains all rights in its methods, templates, checklists, assessment tools, and pre-existing intellectual property, and may reuse the general knowledge, skills, and know-how gained performing this work. " +
+        "Written work product delivered and paid for under this proposal — inspection records, audit findings, reports, and written program documents — belongs to Client on payment for the time that produced it, without time limit, for its own internal safety and compliance purposes, including production to a regulator, an insurer, or a customer. " +
+        "Client shall not sell, license, or distribute Seller's templates or methods as a product or service. " +
+        "All rights not expressly granted are reserved by Seller.",
+    },
+    // "deliver, configure, and support the client account" describes software.
+    // T&M processes jobsite and personnel information gathered in the field.
+    data_ai_use: {
+      body:
+        "Jobsite, incident, inspection, and personnel information Client provides or Seller's personnel record in the field is processed only to perform the authorized tasks and produce the records this proposal describes. " +
+        "It is not used for cross-client model training, sold, or shared with third parties without written authorization, except as required by law. " +
+        "Seller complies with applicable state data laws, including CCPA/CPRA (Cal. Civ. Code sec.1798.100) and Wis. Stat. sec.134.98.",
+    },
     // A T&M quantity that moves is not a change order — that is the whole
     // billing model. Reserve the change-order requirement for NEW task types,
     // new locations and scope, which is where it actually protects both parties.

@@ -64,7 +64,10 @@ export async function GET(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
     state = revision.form_data;
-    revisionNumber = Number(revision.revision_number);
+    // Coerced defensively: a null or non-numeric revision_number would otherwise
+    // reach the filename as "-vNaN.pdf".
+    const parsed = Number(revision.revision_number);
+    revisionNumber = Number.isFinite(parsed) ? parsed : undefined;
   }
 
   if (!isGeneratorState(state)) {
@@ -95,7 +98,18 @@ export async function GET(
     signature,
   });
 
-  const bytes = await renderProposalPdf({ model, documentTitle: model.headline });
+  // A throw here would be answered with Next's HTML error page — and because the
+  // link that reaches this route carries `download`, the browser would write
+  // that HTML straight into "<client>-v3.pdf". The seller would get a file that
+  // opens blank rather than an error they can act on, so the failure is caught
+  // and answered as JSON with the real content type.
+  let bytes: Uint8Array;
+  try {
+    bytes = await renderProposalPdf({ model, documentTitle: model.headline });
+  } catch (error) {
+    console.error("Could not render the proposal PDF.", error);
+    return NextResponse.json({ error: "This proposal could not be rendered as a PDF." }, { status: 500 });
+  }
 
   return new NextResponse(Buffer.from(bytes), {
     headers: {

@@ -285,7 +285,7 @@ export interface ProposalTotals {
 /**
  * Recomputes the whole fee table from a saved generator state.
  *
- *   subtotal = Σ(qty × price) over every row, including the package row
+ *   subtotal = Σ(row amount) over every row, including the package row
  *   discount = subtotal × discountPct/100
  *   taxable  = subtotal − discount
  *   tax      = taxable × taxPct/100        (tax applies AFTER the discount)
@@ -303,6 +303,11 @@ export interface ProposalTotals {
  * rare half-cent cases `total` may therefore differ from
  * `subtotal − discount + tax` by a cent; the printed document has the same
  * property, and matching it is the point.
+ *
+ * The SUBTOTAL is the exception, and deliberately so: it sums the rounded line
+ * amounts rather than the raw products, because it is printed directly beneath
+ * the very rows a client adds up. Two three-mile lines at the IRS $0.655 rate
+ * print $1.97 each and used to subtotal $3.93.
  *
  * A state with no fields still yields the generator's default package row (its
  * preselected package at the catalog price) because that is what the generator
@@ -323,7 +328,11 @@ export function computeProposalTotals(state: GeneratorState | null | undefined):
     lineItems.push(buildItemLine(item, "service"));
   }
 
-  const subtotalRaw = lineItems.reduce((sum, row) => sum + row.qty * row.price, 0);
+  // Σ of the ROUNDED amounts, not of the raw qty × price products. The fee
+  // table prints each row's amount to cents and prints this figure under them,
+  // so summing raw products let the subtotal come out a cent short of the rows
+  // the client can see. Every figure below is derived from this one.
+  const subtotalRaw = lineItems.reduce((sum, row) => sum + row.amount, 0);
   const discountPct = clamp(fieldNumber(state, "discountPct", 0), 0, 100);
   const taxPct = clamp(fieldNumber(state, "taxPct", 0), 0);
   const depositPct = clamp(fieldNumber(state, "depositPct", 0), 0, 100);

@@ -50,10 +50,26 @@ const BAND_2 = "EEF3F8";
 const GOLD_TINT = "FBF2DD";
 const WHITE = "FFFFFF";
 
-// Matches the generated PDF / print layout: Letter page, narrow proposal
-// margins, and full-width business tables rather than Word's roomier memo
-// default. This is a named proposal-export override to the 9360-DXA baseline.
-const TABLE_WIDTH = 10680;
+/* Page geometry, in twips (1/1440 in), matching the generated PDF and the print
+ * stylesheet: US Letter, narrow proposal margins, and full-width business tables
+ * rather than Word's roomier memo default.
+ *
+ * PAGE_WIDTH / PAGE_HEIGHT are declared rather than left to the `docx` package,
+ * whose default is A4 (11906 x 16838). This file's header comment claimed Letter
+ * while the section it emitted was A4 — so the DOCX disagreed with both the PDF
+ * route and `@page { size: letter }` in proposal-document.css, and every table
+ * was sized against a text column 500 twips narrower than the one it was written
+ * for, overhanging the right margin in Word.
+ *
+ * TABLE_WIDTH is the printable width, so a full-width table meets the margins
+ * exactly instead of running past them. It must stay equal to
+ * PAGE_WIDTH - MARGIN_X * 2; docx.test.ts reads the numbers back out of a
+ * rendered file and asserts it.
+ */
+const PAGE_WIDTH = 12240;
+const PAGE_HEIGHT = 15840;
+const MARGIN_X = 863; // convertInchesToTwip(0.6), which floors to 863
+const TABLE_WIDTH = PAGE_WIDTH - MARGIN_X * 2;
 
 type Block = Paragraph | Table;
 
@@ -382,7 +398,10 @@ function termTable(terms: DocumentTerm[]): Table {
 
 function pushScope(children: Block[], entries: ProposalDocumentModel["phaseScope"], empty: string): void {
   if (entries.length === 0) {
-    children.push(para(empty, { italics: true, color: MUTED }));
+    // "" means this engagement has no such lines BY DESIGN — a services deal
+    // has no implementation phases — so print nothing rather than telling the
+    // client what their proposal lacks.
+    if (empty) children.push(para(empty, { italics: true, color: MUTED }));
     return;
   }
   for (const entry of entries) {
@@ -443,8 +462,8 @@ export async function renderProposalDocx(model: ProposalDocumentModel): Promise<
     para(model.scopeIntro, { size: 20 }),
   ];
 
-  pushScope(children, model.phaseScope, "No implementation phases selected.");
-  pushScope(children, model.serviceScope, "No added service lines selected.");
+  pushScope(children, model.phaseScope, model.phaseEmptyNote);
+  pushScope(children, model.serviceScope, model.serviceEmptyNote);
 
   children.push(heading("04", "Deliverables"));
   for (const item of model.deliverables) children.push(bullet(item));
@@ -517,11 +536,12 @@ export async function renderProposalDocx(model: ProposalDocumentModel): Promise<
       {
         properties: {
           page: {
+            size: { width: PAGE_WIDTH, height: PAGE_HEIGHT },
             margin: {
               top: convertInchesToTwip(0.6),
-              right: convertInchesToTwip(0.6),
+              right: MARGIN_X,
               bottom: convertInchesToTwip(0.65),
-              left: convertInchesToTwip(0.6),
+              left: MARGIN_X,
             },
           },
         },

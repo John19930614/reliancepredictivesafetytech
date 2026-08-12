@@ -86,6 +86,105 @@ describe("collectProposalFacts", () => {
   });
 });
 
+/* -------------------------------------------------------------------------- */
+/* A services engagement has no subscription facts                             */
+/* -------------------------------------------------------------------------- */
+
+/** A training proposal exactly as the asset saves one: its own field defaults intact. */
+function trainingState(): GeneratorState {
+  return {
+    v: 1,
+    fields: {
+      packageSelect: "none",
+      proposalType: "training",
+      // The asset's Included Users / Included Jobsites inputs carry these in
+      // their markup, and the bridge collects every field that has an element —
+      // so they sit in form_data on a proposal that sells no seats at all.
+      includedUsers: "50",
+      includedSites: "2",
+      billingTerm: "Milestone-based",
+    },
+    phases: [],
+    services: [item({ type: "service", key: "firstAid", qty: 6, price: 145 })],
+  };
+}
+
+describe("collectProposalFacts — services-only engagements", () => {
+  it("reports no seats, no jobsites and no package", () => {
+    // THE REGRESSION THIS PINS. The guard read `packageRow?.key ?? ""`, but
+    // buildPackageLine() omits the package ROW entirely for a services deal, so
+    // it asked isNoPlatformPackageKey("") — always false. The guard never once
+    // fired, and a training proposal handed the AI reviewer 50 users, 2
+    // jobsites and "Platform Services" as authoritative facts.
+    const facts = collectProposalFacts(trainingState());
+    expect(facts.servicesOnly).toBe(true);
+    expect(facts.users).toBe(0);
+    expect(facts.sites).toBe(0);
+    expect(facts.packageName).toBe("");
+    expect(facts.packagePrice).toBe(0);
+    expect(facts.proposalTypeLabel).toBe("Training Services");
+  });
+
+  it("still reads the package on a proposal that does sell one", () => {
+    const facts = collectProposalFacts({
+      v: 1,
+      fields: { packageSelect: "professional", proposalType: "platform" },
+      phases: [],
+      services: [],
+    });
+    expect(facts.servicesOnly).toBe(false);
+    expect(facts.packageName).toBe("Professional Safety Intelligence");
+    expect(facts.users).toBe(50);
+  });
+
+  it("invents no billing term for a typed proposal, and keeps the legacy one", () => {
+    const typed = trainingState();
+    delete typed.fields.billingTerm;
+    expect(collectProposalFacts(typed).billingTerm).toBe("");
+
+    // A proposal with no type stamped predates all of this and still shows what
+    // the asset's selected option showed.
+    expect(collectProposalFacts({ v: 1, fields: {}, phases: [], services: [] }).billingTerm).toBe("One-time (pilot)");
+  });
+});
+
+describe("scanProposalConsistency — services-only engagements", () => {
+  it("does not police seat and jobsite counts a services deal never quoted", () => {
+    const state = trainingState();
+    state.fields.customSummary =
+      "Sessions are delivered at three locations, with a supervisor cohort of twelve users on the platform side.";
+    const findings = scanProposalConsistency(state);
+    // Included Users / Included Jobsites are not fields this deal has, so prose
+    // cannot contradict them. Comparing against 0 made every ordinary sentence
+    // a finding.
+    expect(findings.filter((finding) => finding.topic === "sites")).toEqual([]);
+    expect(findings.filter((finding) => finding.topic === "users")).toEqual([]);
+  });
+
+  it("still catches a term duration that contradicts the dates", () => {
+    const state = trainingState();
+    Object.assign(state.fields, {
+      termStartMonth: "8",
+      termStartYear: "2026",
+      termEndMonth: "12",
+      termEndYear: "2026",
+      customSummary: "A six-month training calendar.",
+    });
+    const findings = scanProposalConsistency(state).filter((finding) => finding.topic === "term_months");
+    expect(findings).toHaveLength(1);
+    expect(findings[0].expected).toBe(5);
+  });
+
+  it("cites no base subscription when flagging a price, because there is none", () => {
+    const state = trainingState();
+    state.fields.customSummary = "The training calendar is priced at $12,000 for the year.";
+    const money = scanProposalConsistency(state).filter((finding) => finding.topic === "money");
+    expect(money).toHaveLength(1);
+    expect(money[0].message).not.toMatch(/base subscription/i);
+    expect(money[0].message).toContain("the total is $870");
+  });
+});
+
 describe("scanProposalConsistency", () => {
   it("flags the stale user count in every line description that carries it", () => {
     const findings = scanProposalConsistency(wondfoState());

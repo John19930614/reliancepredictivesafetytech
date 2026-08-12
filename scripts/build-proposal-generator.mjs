@@ -57,6 +57,11 @@ const bridge = `
         // moment anything pushed state back into the generator.
         const div = addPhase(p.key, p.qty, p.price, p.desc);
         if (p.name && p.name !== ((phaseOptions[p.key] || {}).name || '')) div.dataset.customName = p.name;
+        // Same reasoning as the name, and the same failure: collectItems() would
+        // otherwise rebuild the unit from the LIVE catalog, so a stored unit
+        // that no longer matches (a course repriced from Session to Person)
+        // came back wrong and the next autosave persisted the wrong one.
+        if (p.unit && p.unit !== ((phaseOptions[p.key] || {}).unit || '')) div.dataset.customUnit = p.unit;
       });
     }
     if (Array.isArray(state.services)) {
@@ -64,6 +69,7 @@ const bridge = `
       state.services.forEach((s)=>{
         const div = addService(s.key, s.qty, s.price, s.desc);
         if (s.name && s.name !== ((serviceOptions[s.key] || {}).name || '')) div.dataset.customName = s.name;
+        if (s.unit && s.unit !== ((serviceOptions[s.key] || {}).unit || '')) div.dataset.customUnit = s.unit;
       });
     }
     update();

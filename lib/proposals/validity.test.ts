@@ -48,9 +48,29 @@ describe("daysUntilProposalExpiry", () => {
     expect(daysUntilProposalExpiry("2027-01-01", "2026-12-31")).toBe(1);
   });
 
+  it("counts across a month end and a leap day in either direction", () => {
+    expect(daysUntilProposalExpiry("2026-02-01", "2026-01-31")).toBe(1);
+    expect(daysUntilProposalExpiry("2026-01-31", "2026-02-01")).toBe(-1);
+    // 2028-02-29 exists; 2026 has no 29th, so the same jump is a day shorter.
+    expect(daysUntilProposalExpiry("2028-03-01", "2028-02-28")).toBe(2);
+    expect(daysUntilProposalExpiry("2028-12-31", "2028-01-01")).toBe(365); // 366-day year
+    expect(daysUntilProposalExpiry("2026-12-31", "2026-01-01")).toBe(364);
+  });
+
+  it("measures a two-digit year in the millennium it was written in", () => {
+    // A date input hands back "0026-08-12" when a seller types the year as 26
+    // and tabs away. Date.UTC maps 0-99 onto 1900-1999, so this used to be
+    // measured as 1926 — 36,525 days out instead of 730,485.
+    expect(daysUntilProposalExpiry("0026-08-12", "2026-08-12")).toBe(-730485);
+    expect(daysUntilProposalExpiry("0026-08-13", "0026-08-12")).toBe(1);
+    // And it is expired either way, which the string compare already knew.
+    expect(isProposalExpired("0026-08-12", "2026-08-12")).toBe(true);
+  });
+
   it("returns null when either side is missing", () => {
     expect(daysUntilProposalExpiry(null, "2026-08-11")).toBeNull();
     expect(daysUntilProposalExpiry("2026-08-11", null)).toBeNull();
+    expect(daysUntilProposalExpiry("2026-08-11", "11/08/2026")).toBeNull();
   });
 });
 

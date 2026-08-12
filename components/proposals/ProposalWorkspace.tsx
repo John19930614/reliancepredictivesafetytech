@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
   useTransition,
+  type ReactNode,
 } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -28,6 +29,7 @@ import {
   Copy,
   Eye,
   FileClock,
+  FileText,
   GitCompare,
   MapPin,
   RotateCcw,
@@ -77,6 +79,14 @@ import {
   canEditProposalMeta,
   canTransitionProposal,
 } from "@/lib/proposals/policy";
+import { isNoPlatformPackageKey, lookupPackage } from "@/lib/proposals/catalog";
+import {
+  getTransactionTemplateLabel,
+  isTransactionTemplateKey,
+  listTransactionTemplates,
+  proposalTypeFieldId,
+  proposalTypeLabelFromState,
+} from "@/lib/proposals/transaction-templates";
 import { diffGeneratorState } from "@/lib/proposals/diff";
 import { estimatePrintPages, formatPrintPagesLabel } from "@/lib/proposals/page-estimate";
 import {
@@ -286,6 +296,200 @@ function useDocumentExtras(state: GeneratorState | null) {
   return extras;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Orientation — what this proposal IS, and where each printed section is set  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Anchor ids for the left column's jump list.
+ *
+ * Only the cards the PLATFORM renders can be anchored: cards 1-9 live inside
+ * the generator iframe, and jumping into another document would mean a new
+ * bridge message. The builder entry therefore lands on the iframe, which is
+ * where those nine cards are.
+ */
+const editorAnchors = {
+  parties: "proposal-card-parties",
+  figures: "proposal-card-figures",
+  review: "proposal-card-review",
+  builder: "proposal-card-builder",
+  team: "proposal-card-team",
+  preview: "proposal-card-preview",
+} as const;
+
+interface ProposalTypeView {
+  /** The stamped transaction type, or null on a blank/pre-stamp proposal. */
+  key: string | null;
+  label: string | null;
+  description: string | null;
+  /** How the document names the engagement, e.g. "Training Services". */
+  documentLabel: string | null;
+  /** Catalog name of the selected package, or null when the key is unknown. */
+  packageName: string | null;
+  /** packageSelect === "none": the deal sells no subscription. */
+  servicesOnly: boolean;
+}
+
+/**
+ * What the seller is building, read off the live generator state.
+ *
+ * The TYPE is the stamp `lib/proposals/transaction-templates.ts` writes at
+ * creation; the PACKAGE is what the seller currently has selected in card 4.
+ * Both are reported, and the "sells no subscription" line is derived from the
+ * package rather than the type — a services type whose seller has since picked
+ * a real package genuinely does sell one, and the document follows the package.
+ */
+function readProposalTypeView(state: GeneratorState | null): ProposalTypeView {
+  const fields = state?.fields ?? null;
+  const rawType = typeof fields?.[proposalTypeFieldId] === "string" ? String(fields[proposalTypeFieldId]).trim() : "";
+  const key = isTransactionTemplateKey(rawType) ? rawType : null;
+  const packageKey = typeof fields?.packageSelect === "string" ? String(fields.packageSelect).trim() : "";
+  return {
+    key,
+    label: key ? getTransactionTemplateLabel(key) : null,
+    description: key ? listTransactionTemplates().find((entry) => entry.key === key)?.description ?? null : null,
+    documentLabel: proposalTypeLabelFromState(fields),
+    packageName: lookupPackage(packageKey)?.name ?? null,
+    servicesOnly: isNoPlatformPackageKey(packageKey),
+  };
+}
+
+/** One jump link. Plain anchors, so the browser's own scroll and history work. */
+function JumpLink({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    <a
+      href={`#${to}`}
+      className="badge"
+      style={{ textDecoration: "none", cursor: "pointer" }}
+    >
+      {children}
+    </a>
+  );
+}
+
+/**
+ * The card that answers "what am I building, and where do I change section N?".
+ *
+ * Two reports the editor never made. The proposal TYPE was stamped invisibly at
+ * creation and never shown again, so a seller filling in a training proposal had
+ * no way to know why the document called itself Training Services — or that four
+ * of the seven types sell no subscription at all. And the left column is a long
+ * stack of numbered cards whose numbers are not the document's section numbers,
+ * which is how "Bio is also hard to find" happened: the team picker is the last
+ * card down there and prints as section 09.
+ *
+ * Read-only on purpose. Changing type mid-proposal would have to rewrite the
+ * seeded scope, exclusions, billing term and package — and would silently keep
+ * whatever the seller had already edited by hand. Starting the right type from
+ * the New proposal form is the honest move, and the card says so.
+ */
+function ProposalOrientationPanel({ typeView }: { typeView: ProposalTypeView }) {
+  return (
+    <div className="form-panel" style={{ marginBottom: 16 }}>
+      <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>
+        <FileText size={16} style={{ verticalAlign: "-2px", marginRight: 6 }} />
+        This proposal
+      </h2>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <span className="badge">{typeView.label ? `Type: ${typeView.label}` : "Type: not recorded"}</span>
+        {typeView.servicesOnly ? (
+          <span className="badge badge-yellow">Services only — no subscription</span>
+        ) : typeView.packageName ? (
+          <span className="badge badge-green">Subscription: {typeView.packageName}</span>
+        ) : null}
+      </div>
+
+      {typeView.description ? (
+        <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem", marginTop: 10 }}>{typeView.description}</p>
+      ) : (
+        <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem", marginTop: 10 }}>
+          No proposal type is recorded — this one was started blank, or before types existed. The document describes the
+          engagement from whatever package is selected in the builder below.
+        </p>
+      )}
+
+      <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem" }}>
+        {typeView.servicesOnly
+          ? "This deal sells no platform subscription, so the builder does not ask for a subscription price, included users or included jobsites — and the document prints an engagement summary instead of a platform package."
+          : typeView.packageName
+            ? `Section 02 prints the ${typeView.packageName} package with its price, included users and included jobsites. Switch it in card 4 of the builder — including to “No platform subscription” for services-only work.`
+            : "The platform package is chosen in card 4 of the builder, and decides whether the document prints a subscription at all."}
+      </p>
+
+      {typeView.documentLabel ? (
+        <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem" }}>
+          The document names the engagement <strong>{typeView.documentLabel}</strong>. The type is stamped when the
+          proposal is created and is not editable here: changing it would reseed the scope, exclusions and terms and
+          leave anything already written by hand behind it. For a different type, start a new proposal.
+        </p>
+      ) : null}
+
+      {/* --- Jump list ---------------------------------------------------- */}
+      <div className="field" style={{ marginTop: 12, marginBottom: 0 }}>
+        <label>Jump to</label>
+        <nav
+          aria-label="Jump to a control card"
+          style={{ display: "flex", gap: 6, flexWrap: "wrap" }}
+        >
+          <JumpLink to={editorAnchors.parties}>Parties</JumpLink>
+          <JumpLink to={editorAnchors.figures}>Figures check</JumpLink>
+          <JumpLink to={editorAnchors.review}>AI review</JumpLink>
+          <JumpLink to={editorAnchors.builder}>Builder (cards 1–9)</JumpLink>
+          <JumpLink to={editorAnchors.team}>Team &amp; bios</JumpLink>
+          <JumpLink to={editorAnchors.preview}>Document preview</JumpLink>
+        </nav>
+      </div>
+
+      {/* --- Section map --------------------------------------------------- */}
+      <details style={{ marginTop: 12 }}>
+        <summary style={{ cursor: "pointer", fontSize: "0.85rem", color: "var(--portal-muted)" }}>
+          Which card drives which printed section?
+        </summary>
+        <ul
+          style={{
+            margin: "8px 0 0",
+            paddingLeft: 18,
+            display: "grid",
+            gap: 4,
+            color: "var(--portal-muted)",
+            fontSize: "0.85rem",
+          }}
+        >
+          <li>
+            <strong>Header — Prepared For / Prepared By</strong> — the Parties card above, plus builder cards 1 and 2.
+          </li>
+          <li>
+            <strong>01 Executive Summary</strong> — builder card 3.
+          </li>
+          <li>
+            <strong>02 Engagement &amp; package</strong> — builder card 4 (term, package, billing term).
+          </li>
+          <li>
+            <strong>03 Scope of work</strong> and <strong>05 Pricing schedule</strong> — builder cards 5 and 6; the
+            discount, tax and payment terms in card 7.
+          </li>
+          <li>
+            <strong>04 Deliverables</strong>, <strong>06 Schedule</strong>, <strong>07 Client responsibilities</strong>{" "}
+            — written from the lines you have added; no card of their own.
+          </li>
+          <li>
+            <strong>08 Assumptions and exclusions</strong> — builder card 8.
+          </li>
+          <li>
+            <strong>09 Your Team</strong> — the Proposal team &amp; signature card, below the builder. Bios come from
+            each person&apos;s <Link href="/employee/proposals/bio">Proposal bio page</Link>.
+          </li>
+          <li>
+            <strong>Commercial and legal terms</strong>, then <strong>Acceptance</strong> — builder card 9. They print
+            after Your Team, and renumber when nobody is selected.
+          </li>
+        </ul>
+      </details>
+    </div>
+  );
+}
+
 export function ProposalWorkspace({
   proposal,
   clientCompany = null,
@@ -336,6 +540,14 @@ export function ProposalWorkspace({
   );
 
   const documentExtras = useDocumentExtras(previewState);
+
+  /**
+   * What this proposal is — the transaction type stamped at creation, and what
+   * the currently selected package actually sells. Surfaced because neither was
+   * visible anywhere in the editor: the type was written into a hidden input at
+   * creation and never shown again.
+   */
+  const typeView = useMemo(() => readProposalTypeView(previewState), [previewState]);
 
   /**
    * The document subtree, rebuilt ONLY when its own inputs change. Without
@@ -689,6 +901,11 @@ export function ProposalWorkspace({
         <div className="form-title-row" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <h2 style={{ margin: 0 }}>Editing — working copy of v{baseRevision}</h2>
           <ProposalStatusBadge status={proposal.status} />
+          {/* The proposal type, in the one place a seller always sees. It is
+              stamped at creation and was invisible from then on. */}
+          <span className="badge" title="The proposal type this document was started from. Set at creation.">
+            {typeView.label ? `Type: ${typeView.label}` : "Type: not recorded"}
+          </span>
           <span className={`badge ${dirty ? "badge-yellow" : "badge-green"}`}>{saveStateLabel}</span>
         </div>
         <p style={{ color: "var(--portal-muted)", marginTop: 8, fontSize: "0.9rem" }}>
@@ -768,43 +985,56 @@ export function ProposalWorkspace({
       */}
       <div className="proposal-editor-grid">
         <div>
+          {/* First card in the column: what this proposal IS (the type stamped
+              at creation, and whether it sells a subscription at all), and a
+              jump list for the cards below — the column is long and its card
+              numbers are not the document's section numbers. */}
+          <ProposalOrientationPanel typeView={typeView} />
+
           {/* Above the generator because the parties are the FIRST thing the
               document prints. It cannot live inside the iframe: the company
               address and its contact list are database-backed and the asset is
               a static file with no Supabase access. */}
-          <ProposalClientPanel
-            company={clientCompany}
-            companyProfile={companyProfile}
-            state={previewState}
-            disabled={!editGate.ok}
-            onChange={(fields) => postToGenerator({ type: "proposal:load", state: { v: 1, fields } })}
-          />
+          <div id={editorAnchors.parties} style={{ scrollMarginTop: 16 }}>
+            <ProposalClientPanel
+              company={clientCompany}
+              companyProfile={companyProfile}
+              state={previewState}
+              disabled={!editGate.ok}
+              onChange={(fields) => postToGenerator({ type: "proposal:load", state: { v: 1, fields } })}
+            />
+          </div>
 
           {/* Between the parties and the controls, because a figure mismatch is
               about the numbers the seller is typing just below it. Detection is
               pure and local; only the "Fix figures with AI" button leaves the
               browser, and what it returns is a draft the seller ticks in. */}
-          <ProposalConsistencyPanel
-            proposalId={proposal.id}
-            state={previewState}
-            disabled={!editGate.ok}
-            onApply={(patch) => postToGenerator({ type: "proposal:load", state: { v: 1, ...patch } })}
-          />
+          <div id={editorAnchors.figures} style={{ scrollMarginTop: 16 }}>
+            <ProposalConsistencyPanel
+              proposalId={proposal.id}
+              state={previewState}
+              disabled={!editGate.ok}
+              onApply={(patch) => postToGenerator({ type: "proposal:load", state: { v: 1, ...patch } })}
+            />
+          </div>
 
           {/* AI review of the live state. The same panel sits on the read-only
               detail page, so review is available at every workflow stage. Its
               drafted edits apply here through the SAME bridge patch the
               Figures check uses — into the editor, never past the seller. */}
-          <ProposalAiReviewPanel
-            proposalId={proposal.id}
-            status={proposal.status}
-            state={previewState}
-            validUntil={proposal.valid_until}
-            clientAssigned={Boolean(proposal.client_id)}
-            onApply={(patch) => postToGenerator({ type: "proposal:load", state: { v: 1, ...patch } })}
-          />
+          <div id={editorAnchors.review} style={{ scrollMarginTop: 16 }}>
+            <ProposalAiReviewPanel
+              proposalId={proposal.id}
+              status={proposal.status}
+              state={previewState}
+              validUntil={proposal.valid_until}
+              clientAssigned={Boolean(proposal.client_id)}
+              onApply={(patch) => postToGenerator({ type: "proposal:load", state: { v: 1, ...patch } })}
+            />
+          </div>
 
           <iframe
+            id={editorAnchors.builder}
             ref={iframeRef}
             src="/employee/proposals/generator"
             title="Proposal controls"
@@ -820,20 +1050,27 @@ export function ProposalWorkspace({
               border: "1px solid var(--portal-line, #dbe2e9)",
               borderRadius: 8,
               background: "#fff",
+              scrollMarginTop: 16,
             }}
             // No scrolling="no": if the height report ever fails, a scrollbar
             // is a degraded experience — clipped content is a broken one.
           />
 
-          <ProposalTeamPicker
-            roster={roster}
-            state={previewState}
-            disabled={!editGate.ok}
-            onChange={(fields) => postToGenerator({ type: "proposal:load", state: { v: 1, fields } })}
-          />
+          {/* Last on the left because the picker cannot be rendered inside the
+              static iframe — but it prints as section 09, and it is what the
+              "Bio is also hard to find" report was about. The jump list at the
+              top of this column links straight here. */}
+          <div id={editorAnchors.team} style={{ scrollMarginTop: 16 }}>
+            <ProposalTeamPicker
+              roster={roster}
+              state={previewState}
+              disabled={!editGate.ok}
+              onChange={(fields) => postToGenerator({ type: "proposal:load", state: { v: 1, fields } })}
+            />
+          </div>
         </div>
 
-        <div className="proposal-editor-preview">
+        <div className="proposal-editor-preview" id={editorAnchors.preview} style={{ scrollMarginTop: 16 }}>
           <div className="rp-doc-noprint" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <span className="badge">Live preview — exactly what the client sees</span>
             {pagesEstimate !== null ? (

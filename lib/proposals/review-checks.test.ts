@@ -245,3 +245,85 @@ describe("commercial terms checks", () => {
     expect(ids(collectReadinessFindings(state, meta()))).not.toContain("billing_term_says_pilot");
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* Does the document match the type stamped on it?                             */
+/*                                                                             */
+/* Every check above was written when the practice sold one thing. Four of the */
+/* seven types sell no subscription, and nothing deterministic had ever asked  */
+/* whether what is priced matches what the document calls itself.              */
+/* -------------------------------------------------------------------------- */
+
+describe("proposal type checks", () => {
+  it("errors when a subscription proposal has the subscription switched off", () => {
+    const state = healthyState();
+    state.fields.proposalType = "platform";
+    state.fields.packageSelect = "none";
+    const finding = collectReadinessFindings(state, meta()).find(
+      (entry) => entry.id === "subscription_type_without_package",
+    );
+    // The docline still reads "Platform Subscription Proposal" and the fee
+    // table carries no subscription row at all.
+    expect(finding?.severity).toBe("error");
+  });
+
+  it("says nothing about a services type selling no subscription — that is the point", () => {
+    const state = healthyState();
+    state.fields.proposalType = "training";
+    state.fields.packageSelect = "none";
+    expect(ids(collectReadinessFindings(state, meta()))).not.toContain("subscription_type_without_package");
+  });
+
+  it("says nothing when a subscription proposal actually carries its package", () => {
+    const state = healthyState();
+    state.fields.proposalType = "enterprise";
+    state.fields.packageSelect = "enterprise";
+    expect(ids(collectReadinessFindings(state, meta()))).not.toContain("subscription_type_without_package");
+  });
+
+  it("stays silent on a proposal with no type stamped", () => {
+    const state = healthyState();
+    state.fields.packageSelect = "none";
+    expect(ids(collectReadinessFindings(state, meta()))).not.toContain("subscription_type_without_package");
+  });
+
+  it("flags a per-participant course quoted below the minimum the document itself bills at", () => {
+    const state = healthyState();
+    state.fields.proposalType = "training";
+    state.fields.packageSelect = "none";
+    // firstAid is priced per Person; the Class Size terms print a six-participant
+    // minimum and bill a short roster at it, so a schedule quoting four says one
+    // thing and the terms three pages later say another.
+    state.services = [{ type: "service", key: "firstAid", name: "", qty: 4, price: 145, desc: "", unit: "" }];
+    const finding = collectReadinessFindings(state, meta()).find(
+      (entry) => entry.id === "training_below_class_minimum",
+    );
+    expect(finding?.severity).toBe("warn");
+    expect(finding?.message).toContain("First Aid");
+    expect(finding?.message).toContain("(4)");
+  });
+
+  it("accepts a roster at the minimum, and a course billed per session", () => {
+    const atMinimum = healthyState();
+    atMinimum.fields.proposalType = "training";
+    atMinimum.fields.packageSelect = "none";
+    atMinimum.services = [{ type: "service", key: "firstAid", name: "", qty: 6, price: 145, desc: "", unit: "" }];
+    expect(ids(collectReadinessFindings(atMinimum, meta()))).not.toContain("training_below_class_minimum");
+
+    // genTraining is billed per Session — one session is one session, not a
+    // roster of one.
+    const perSession = healthyState();
+    perSession.fields.proposalType = "training";
+    perSession.fields.packageSelect = "none";
+    perSession.services = [{ type: "service", key: "genTraining", name: "", qty: 1, price: 750, desc: "", unit: "" }];
+    expect(ids(collectReadinessFindings(perSession, meta()))).not.toContain("training_below_class_minimum");
+  });
+
+  it("does not apply the class minimum to a proposal that is not training", () => {
+    const state = healthyState();
+    state.fields.proposalType = "fixed_price";
+    state.fields.packageSelect = "none";
+    state.services = [{ type: "service", key: "osha10", name: "", qty: 2, price: 210, desc: "", unit: "" }];
+    expect(ids(collectReadinessFindings(state, meta()))).not.toContain("training_below_class_minimum");
+  });
+});
