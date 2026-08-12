@@ -60,7 +60,7 @@ describe("asset price book matches lib/proposals/catalog.ts", () => {
       expect([...parseAssetEntries(label).keys()].sort()).toEqual(Object.keys(catalog).sort());
     });
 
-    it(`${label}: same name, price and description for every entry`, () => {
+    it(`${label}: same name, price, unit, group and description for every entry`, () => {
       const assetEntries = parseAssetEntries(label);
       for (const [key, option] of Object.entries(catalog)) {
         const body = assetEntries.get(key);
@@ -68,6 +68,18 @@ describe("asset price book matches lib/proposals/catalog.ts", () => {
         expect(field(body!, "name"), `${label}.${key}.name`).toBe(option.name);
         expect(Number(field(body!, "price")), `${label}.${key}.price`).toBe(option.price);
         expect(field(body!, "desc"), `${label}.${key}.desc`).toBe(option.desc);
+        // `unit` is load-bearing and was NOT compared until 2026-08-12: the
+        // document prints it, the asset builds its Qty label from it, and the
+        // stored state persists it. Fourteen entries changed unit in one ship
+        // and a one-sided edit would have gone out silently.
+        const optionUnit = (option as { unit?: string }).unit;
+        if (optionUnit !== undefined) {
+          expect(field(body!, "unit"), `${label}.${key}.unit`).toBe(optionUnit);
+        }
+        const optionGroup = (option as { group?: string }).group;
+        if (optionGroup !== undefined) {
+          expect(field(body!, "group"), `${label}.${key}.group`).toBe(optionGroup);
+        }
       }
     });
   }

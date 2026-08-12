@@ -58,7 +58,12 @@ const reviewWithEdit = {
       kind: "service",
       target: "0",
       label: "Service line 1: Compliance Audit",
-      before: "Structured audit against OSHA and company program requirements.",
+      // EXACTLY the catalog sentence for `complianceAudit`. The row stores an
+      // empty desc, so this is the text the document prints and the reviewer
+      // was shown — and the apply guard compares against it, resolved the same
+      // way. A paraphrase here means the edit is (correctly) refused as stale.
+      before:
+        "Structured audit against OSHA and company program requirements, delivered as a scored findings report with prioritized corrective actions and due dates.",
       after: "A structured audit scored against OSHA requirements, delivered as a findings report.",
       note: "tightened scope",
       changed: true,
@@ -164,6 +169,28 @@ describe("ProposalAiReviewPanel", () => {
     expect(patch.fields).toBeUndefined();
     expect(saveMock).not.toHaveBeenCalled();
     expect(screen.getByText(/Save when the wording reads right/)).toBeTruthy();
+  });
+
+  it("refuses an edit whose target text changed after the review ran", async () => {
+    // The index in an edit is resolved against the state POSTed at review time.
+    // If the seller edits or reorders lines before clicking Apply, that index
+    // can point at a different row — and the diff on screen still shows the old
+    // text, so a human reading it carefully would see nothing wrong. The guard
+    // compares the text being replaced against the text that was reviewed.
+    stubFetch({
+      ...reviewWithEdit,
+      edits: [{ ...reviewWithEdit.edits[0], before: "A paragraph that is no longer in this proposal." }],
+    });
+    const onApply = vi.fn();
+    renderPanel({ status: "draft", onApply });
+    fireEvent.click(screen.getByRole("button", { name: /Run AI review/ }));
+    await waitFor(() => expect(screen.getByText("Proposed changes")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: /Apply 1 change$/ }));
+
+    expect(onApply).not.toHaveBeenCalled();
+    expect(saveMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByText(/changed after the review ran/)).toBeTruthy());
   });
 
   it("shows drafts read-only on a locked proposal — no apply, no checkboxes", async () => {

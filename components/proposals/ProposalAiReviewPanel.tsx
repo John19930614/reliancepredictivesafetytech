@@ -27,6 +27,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertOctagon, AlertTriangle, Check, CheckCircle2, Info, Sparkles, X } from "lucide-react";
 import { saveProposalDraft } from "@/app/employee/proposals/actions";
+import { lookupPhase, lookupService } from "@/lib/proposals/catalog";
 import type { GeneratorItem, GeneratorState } from "@/lib/proposals/generator-state";
 import { canEditProposalContent } from "@/lib/proposals/policy";
 import { collectReadinessFindings, type ReadinessFinding, type ReviewSeverity } from "@/lib/proposals/review-checks";
@@ -184,16 +185,27 @@ export function ProposalAiReviewPanel({
    * touched — qty, price, key and name pass straight through. Mirrors
    * ProposalConsistencyPanel.applySelected, which learned this the hard way.
    */
-  const buildPatch = (): { patch: NarrativePatch; count: number } | null => {
+  const buildPatch = (): { patch: NarrativePatch; count: number; skipped: string[] } | null => {
     if (!state) return null;
     const picked = edits.filter((edit) => selected[edit.regionId]);
     if (picked.length === 0) return null;
 
     const patch: NarrativePatch = {};
+    /** Edits whose target moved under them; reported rather than misapplied. */
+    const skipped: string[] = [];
 
     const fieldEdits = picked.filter((edit) => edit.kind === "field");
     if (fieldEdits.length > 0) {
-      patch.fields = Object.fromEntries(fieldEdits.map((edit) => [edit.target, edit.after]));
+      const applicable = fieldEdits.filter((edit) => {
+        // Same staleness check as the line items, on the field's own value.
+        const current = String(state.fields[edit.target] ?? "").trim();
+        if (current === edit.before.trim()) return true;
+        skipped.push(edit.label);
+        return false;
+      });
+      if (applicable.length > 0) {
+        patch.fields = Object.fromEntries(applicable.map((edit) => [edit.target, edit.after]));
+      }
     }
 
     const applyToItems = (items: GeneratorItem[] | undefined, kind: "phase" | "service") => {
@@ -204,6 +216,26 @@ export function ProposalAiReviewPanel({
       for (const edit of kindEdits) {
         const index = Number(edit.target);
         if (!Number.isInteger(index) || index < 0 || index >= next.length) continue;
+        // The index was resolved server-side against the state POSTed when the
+        // review ran; `state` here is the LIVE editor state. Delete a service
+        // line between running the review and clicking Apply and every later
+        // index shifts, so a bounds check alone would write line 3's rewrite
+        // onto whatever now sits at that position — while the diff on screen
+        // still showed the old row. Confirm the text we are replacing is the
+        // text the human actually read.
+        //
+        // Resolved through the catalog exactly as collectNarrativeRegions does:
+        // a row that stored only a key has an EMPTY desc but still prints (and
+        // was reviewed as) the catalog sentence. Comparing the raw field would
+        // skip every edit to a boilerplate line — which is most of them.
+        const row = next[index];
+        const rowKey = typeof row.key === "string" ? row.key.trim() : "";
+        const option = kind === "phase" ? lookupPhase(rowKey) : lookupService(rowKey);
+        const current = (row.desc ?? "").trim() || option?.desc || "";
+        if (current.trim() !== edit.before.trim()) {
+          skipped.push(edit.label);
+          continue;
+        }
         next[index] = { ...next[index], desc: edit.after };
         touched = true;
       }
@@ -215,15 +247,32 @@ export function ProposalAiReviewPanel({
     const services = applyToItems(state.services, "service");
     if (services) patch.services = services;
 
-    return { patch, count: picked.length };
+    return { patch, count: picked.length - skipped.length, skipped };
   };
+
+  /** Appended to the success notice when a target moved under an edit. */
+  const staleNote = (skipped: string[]) =>
+    skipped.length === 0
+      ? ""
+      : ` ${skipped.length} skipped because the text changed after the review ran (${skipped.join(", ")}) — rerun the review to redo those.`;
 
   const applySelected = async () => {
     const built = buildPatch();
     if (!built || !state) return;
-    const { patch, count } = built;
+    const { patch, count, skipped } = built;
 
     setError("");
+
+    // Every ticked edit was stale — nothing to apply, and saying "applied 0"
+    // would read as success.
+    if (count === 0) {
+      setEdits([]);
+      setSelected({});
+      setError(
+        `Those passages changed after the review ran, so nothing was applied (${skipped.join(", ")}). Run the review again to work from the current wording.`,
+      );
+      return;
+    }
 
     // Editor mount: hand the patch to the generator bridge. The seller still
     // reads the preview and saves — the same contract as the Figures check.
@@ -231,7 +280,10 @@ export function ProposalAiReviewPanel({
       onApply(patch);
       setEdits([]);
       setSelected({});
-      setNotice(`Applied ${count} change${count === 1 ? "" : "s"} to the editor. Save when the wording reads right.`);
+      setNotice(
+        `Applied ${count} change${count === 1 ? "" : "s"} to the editor. Save when the wording reads right.` +
+          staleNote(skipped),
+      );
       return;
     }
 
@@ -253,7 +305,7 @@ export function ProposalAiReviewPanel({
       }
       setEdits([]);
       setSelected({});
-      setNotice(`Applied and saved ${count} change${count === 1 ? "" : "s"}.`);
+      setNotice(`Applied and saved ${count} change${count === 1 ? "" : "s"}.` + staleNote(skipped));
       router.refresh();
     } finally {
       setApplying(false);

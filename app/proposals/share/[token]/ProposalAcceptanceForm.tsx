@@ -18,9 +18,17 @@ import { declineReasonOptions } from "@/app/employee/proposals/share-link-policy
 export function ProposalAcceptanceForm({
   token,
   revisionNumber,
+  expiredOn,
 }: {
   token: string;
   revisionNumber: number;
+  /**
+   * Set when the acceptance window has closed. Acceptance is hidden (the
+   * server refuses it anyway), but declining stays open: a client telling us
+   * why they are not proceeding is worth capturing whether or not the price
+   * we quoted is still on the table.
+   */
+  expiredOn?: string;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -104,11 +112,20 @@ export function ProposalAcceptanceForm({
   return (
     <div className="form-panel rp-doc-noprint" style={{ marginTop: 24 }}>
       <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <PenLine size={18} color="var(--portal-gold)" /> Accept this proposal
+        {expiredOn ? (
+          <>
+            <MessageSquare size={18} color="var(--portal-gold)" /> This proposal has expired
+          </>
+        ) : (
+          <>
+            <PenLine size={18} color="var(--portal-gold)" /> Accept this proposal
+          </>
+        )}
       </h2>
       <p style={{ color: "var(--portal-muted)", marginTop: 8, fontSize: "0.9rem" }}>
-        Accepting records your name, email address, the date and time, and the exact revision shown above (revision{" "}
-        {revisionNumber}). It does not replace a signed agreement where one is required.
+        {expiredOn
+          ? `The acceptance period ended on ${expiredOn}, so this proposal can no longer be accepted online. Please contact your representative — they can reissue it with current pricing. If you have decided not to move forward, letting us know why below still helps.`
+          : `Accepting records your name, email address, the date and time, and the exact revision shown above (revision ${revisionNumber}). It does not replace a signed agreement where one is required.`}
       </p>
 
       {error ? (
@@ -119,7 +136,7 @@ export function ProposalAcceptanceForm({
 
       <form
         className="form-grid"
-        style={{ gridTemplateColumns: "1fr", marginTop: 12 }}
+        style={{ gridTemplateColumns: "1fr", marginTop: 12, display: expiredOn ? "none" : undefined }}
         onSubmit={(event) => {
           event.preventDefault();
           if (!isPending) submit();
@@ -186,7 +203,13 @@ export function ProposalAcceptanceForm({
         </div>
       </form>
 
-      <div style={{ borderTop: "1px solid var(--portal-line, #dbe2e9)", marginTop: 20, paddingTop: 16 }}>
+      <div
+        style={{
+          borderTop: expiredOn ? undefined : "1px solid var(--portal-line, #dbe2e9)",
+          marginTop: expiredOn ? 4 : 20,
+          paddingTop: expiredOn ? 0 : 16,
+        }}
+      >
         {!decliningOpen ? (
           <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem", margin: 0 }}>
             Not moving forward?{" "}
@@ -218,9 +241,27 @@ export function ProposalAcceptanceForm({
           >
             <h3 style={{ margin: 0, fontSize: "0.95rem" }}>Decline this proposal</h3>
             <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem", margin: 0 }}>
-              This records your response so your representative knows where things stand. Enter your name above, then
-              tell us the main reason.
+              This records your response so your representative knows where things stand.
             </p>
+
+            {/* Its own field rather than borrowing the acceptance form's: that
+                input is hidden on an expired proposal, and its validation error
+                rendered above a panel the client was not looking at. */}
+            <div className="field">
+              <label htmlFor="decline-name">Your name</label>
+              <input
+                id="decline-name"
+                name="declineName"
+                autoComplete="name"
+                value={name}
+                disabled={isPending}
+                onChange={(event) => setName(event.target.value)}
+                required
+              />
+              {fieldErrors.name ? (
+                <span style={{ color: "#ef4444", fontSize: "0.85rem" }}>{fieldErrors.name}</span>
+              ) : null}
+            </div>
 
             <div className="field">
               <label htmlFor="decline-reason">Main reason</label>
