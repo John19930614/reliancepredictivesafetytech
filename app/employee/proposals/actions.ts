@@ -841,25 +841,53 @@ export async function setProposalStatus(
   // Stamp the MOMENT, not just the state. A status that flips with no timestamp
   // is why the timeline's decline branch was unreachable and why decline_reason
   // — a column that has existed since 20260804101000 — had never been written by
-  // anything. The transition gate above already guarantees these are reached
-  // only from `sent`, so neither stamp can overwrite an earlier one.
+  // anything.
   const patch: Record<string, unknown> = { status };
   if (status === "declined") {
     patch.declined_at = new Date().toISOString();
     const reason = typeof options.declineReason === "string" ? options.declineReason.trim() : "";
-    if (reason) patch.decline_reason = reason.slice(0, declineReasonMaxLength);
+    // Always written, so a decline with no reason cannot inherit the reason
+    // from a PREVIOUS decline of the same proposal.
+    patch.decline_reason = reason ? reason.slice(0, declineReasonMaxLength) : null;
   }
   if (status === "accepted") {
     patch.accepted_at = new Date().toISOString();
+  }
+
+  // Reopening clears the outcome. `sent` is reachable more than once (declined
+  // -> draft -> in_review -> sent is the documented recovery path), and the
+  // share-link writers gate on `accepted_at is null` / `declined_at is null` —
+  // so without this, round two of a proposal can never be accepted or declined
+  // by the client at all, and the stale round-one reason stays attached to a
+  // live deal. The outcome of each round lives in the audit trail and in the
+  // revision history; these columns describe the CURRENT round only.
+  if (status === "draft") {
+    patch.accepted_at = null;
+    patch.accepted_by_name = null;
+    patch.accepted_by_email = null;
+    patch.acceptance_ip = null;
+    patch.accepted_revision_id = null;
+    patch.declined_at = null;
+    patch.decline_reason = null;
   }
 
   const { data: updated, error } = await supabase
     .from("client_proposals")
     .update(patch)
     .eq("id", proposalId)
+    // Conditional on the status we READ above. Without it this action races the
+    // client's own share-link accept/decline: whichever write lands second wins
+    // silently, and a recorded client decision can be overwritten by a
+    // colleague clicking a button they queued up beforehand.
+    .eq("status", proposal.status)
     .select("id");
   if (error) return { ok: false, error: error.message };
-  if (!updated || updated.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
+  if (!updated || updated.length === 0) {
+    return {
+      ok: false,
+      error: "This proposal changed while you were looking at it — reload to see its current status before trying again.",
+    };
+  }
 
   await recordProposalAudit(
     role,
@@ -1360,6 +1388,18 @@ export async function extendProposalValidity(proposalId: string, validUntil: str
 
   const validation = validateProposalFields({ validUntil });
   if (!validation.ok) return { ok: false, error: validation.error, fieldErrors: validation.errors };
+
+  // A date already in the past expires the proposal the moment it is saved,
+  // killing every live share link. validateProposalFields checks SHAPE only, so
+  // a half-typed year ("0202-10-31") passes it — and this control is driven by
+  // a date input, which is exactly how such a value gets submitted.
+  if (validUntil && isProposalExpired(validUntil, todayInCompanyTimezone())) {
+    return {
+      ok: false,
+      error: "That date has already passed. Pick a date from today onward, or clear it to leave the proposal open.",
+      fieldErrors: { validUntil: "Choose today or a later date." },
+    };
+  }
 
   const { data: proposal } = await supabase
     .from("client_proposals")

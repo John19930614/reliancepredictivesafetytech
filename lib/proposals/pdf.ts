@@ -723,7 +723,7 @@ export async function renderProposalPdf({ model, documentTitle }: ProposalPdfOpt
   drawPills(layout, model.packagePills);
 
   /* --- 03 Scope ---------------------------------------------------------- */
-  drawSectionHeading(layout, "03", "Detailed Scope of Work");
+  drawSectionHeading(layout, "03", model.scopeHeading);
   layout.text(model.scopeIntro);
   layout.space(2);
   const scope = [...model.phaseScope, ...model.serviceScope];
@@ -745,7 +745,7 @@ export async function renderProposalPdf({ model, documentTitle }: ProposalPdfOpt
   }
 
   /* --- 05 Pricing -------------------------------------------------------- */
-  drawSectionHeading(layout, "05", "Pricing Schedule");
+  drawSectionHeading(layout, "05", model.feesHeading);
   drawFeeRow(layout, ["Item", "Description", "Qty", "Unit Price", "Amount"], {
     bold: true,
     background: NAVY,
@@ -766,7 +766,7 @@ export async function renderProposalPdf({ model, documentTitle }: ProposalPdfOpt
   }
 
   /* --- 06 Schedule ------------------------------------------------------- */
-  drawSectionHeading(layout, "06", "Schedule and Implementation Approach");
+  drawSectionHeading(layout, "06", model.termHeading);
   layout.text(model.schedule);
   layout.space(3);
   drawBullets(layout, model.scheduleSteps);

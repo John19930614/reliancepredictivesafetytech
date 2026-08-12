@@ -175,9 +175,14 @@ export const trainingProfile: ProposalTypeProfile = {
       heading: "Cancellation and Rescheduling",
       anchor: { after: "scope_changes" },
       body:
+        // The percentages need a base, and after the move to per-participant
+        // pricing most courses no longer HAVE a session fee — a training
+        // proposal mixes per-participant course lines with per-session ones, so
+        // this states the base for both rather than assuming one.
         "Client may cancel or reschedule a confirmed session at no charge with at least 10 business days' written notice before the session start. " +
-        "A cancellation or reschedule made 5 to 9 business days before the session start is billed at 50% of the session fee shown in the schedule. " +
-        "A cancellation or reschedule made fewer than 5 business days before the session start is billed at 100% of that fee, as is a session the instructor cannot deliver on arrival because the room, the site access, or the roster is not ready. " +
+        "Later notice is billed against the session charge, meaning the session fee shown in the schedule for a course priced per session, and the confirmed roster (or the minimum in the class size terms, whichever is greater) at the per-participant rate shown for a course priced per participant. " +
+        "A cancellation or reschedule made 5 to 9 business days before the session start is billed at 50% of that session charge. " +
+        "A cancellation or reschedule made fewer than 5 business days before the session start is billed at 100% of it, as is a session the instructor cannot deliver on arrival because the room, the site access, or the roster is not ready. " +
         "Travel and lodging already booked and non-refundable are billed in addition, at cost. " +
         "Seller may reschedule a session for instructor illness or travel disruption; a session postponed for that reason, for a site emergency at Client's location, or for an event described in the Force Majeure terms is rescheduled to a mutually agreed date at no cancellation charge.",
     },

@@ -439,7 +439,7 @@ export async function renderProposalDocx(model: ProposalDocumentModel): Promise<
     heading("02", model.packageHeading),
     para(model.packageIntro, { size: 20 }),
     pillsTable(model),
-    heading("03", "Detailed Scope of Work"),
+    heading("03", model.scopeHeading),
     para(model.scopeIntro, { size: 20 }),
   ];
 
@@ -450,8 +450,8 @@ export async function renderProposalDocx(model: ProposalDocumentModel): Promise<
   for (const item of model.deliverables) children.push(bullet(item));
   if (model.deliverablesCoverage) children.push(para(model.deliverablesCoverage, { size: 20 }));
 
-  children.push(heading("05", "Pricing Schedule"), feeTable(model.feeGroups, model.totalRows));
-  children.push(heading("06", "Schedule and Implementation Approach"), para(model.schedule, { size: 20 }));
+  children.push(heading("05", model.feesHeading), feeTable(model.feeGroups, model.totalRows));
+  children.push(heading("06", model.termHeading), para(model.schedule, { size: 20 }));
   for (const item of model.scheduleSteps) children.push(bullet(item));
   children.push(heading("07", "Client Responsibilities"));
   for (const item of model.clientResponsibilities) children.push(bullet(item));

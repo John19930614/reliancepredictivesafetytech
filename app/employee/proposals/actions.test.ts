@@ -254,7 +254,9 @@ describe("setProposalStatus — decline and acceptance stamps", () => {
 
     expect((await setProposalStatus(PROPOSAL_ID, "declined")).ok).toBe(true);
     const patch = findCall(supabase, "client_proposals", "update")?.payload as Record<string, unknown>;
-    expect(patch.decline_reason).toBeUndefined();
+    // Explicitly nulled, not omitted: a proposal declined, reopened and
+    // declined again must not inherit the FIRST decline's reason.
+    expect(patch.decline_reason).toBeNull();
     expect(typeof patch.declined_at).toBe("string");
   });
 
@@ -271,7 +273,12 @@ describe("setProposalStatus — decline and acceptance stamps", () => {
     expect(typeof patch.accepted_at).toBe("string");
   });
 
-  it("adds no stamps to an ordinary transition", async () => {
+  it("clears the previous outcome when a closed proposal is reopened", async () => {
+    // `sent` is reachable more than once (declined -> draft -> in_review ->
+    // sent). The share-link writers gate on `accepted_at is null` /
+    // `declined_at is null`, so leaving round one's stamps in place makes the
+    // client's second decision impossible to record — and leaves round one's
+    // reason attached to a live deal.
     const supabase = createSupabaseMock({
       "client_proposals:select": { data: proposal({ status: "declined" }) },
       "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
@@ -280,7 +287,56 @@ describe("setProposalStatus — decline and acceptance stamps", () => {
 
     await setProposalStatus(PROPOSAL_ID, "draft");
 
-    expect(findCall(supabase, "client_proposals", "update")?.payload).toEqual({ status: "draft" });
+    expect(findCall(supabase, "client_proposals", "update")?.payload).toEqual({
+      status: "draft",
+      accepted_at: null,
+      accepted_by_name: null,
+      accepted_by_email: null,
+      acceptance_ip: null,
+      accepted_revision_id: null,
+      declined_at: null,
+      decline_reason: null,
+    });
+  });
+
+  it("refuses when the status moved underneath the caller", async () => {
+    // The client declined via their share link between the read and the write.
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "sent" }) },
+      "client_proposals:update": { data: [] },
+    });
+    signIn("employee", supabase);
+
+    const result = await setProposalStatus(PROPOSAL_ID, "accepted");
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("changed while you were looking at it");
+  });
+
+  it("scopes the write to the status it read", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "sent" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("employee", supabase);
+
+    await setProposalStatus(PROPOSAL_ID, "accepted");
+
+    const call = findCall(supabase, "client_proposals", "update");
+    expect(call?.filters).toEqual(expect.arrayContaining([["status", "sent"]]));
+  });
+});
+
+describe("extendProposalValidity — past dates", () => {
+  it("refuses a date that has already passed rather than expiring the proposal", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("employee", supabase);
+
+    // The shape a half-typed year submits from a date input.
+    const result = await extendProposalValidity(PROPOSAL_ID, "0202-10-31");
+
+    expect(result.ok).toBe(false);
+    expect(findCall(supabase, "client_proposals", "update")).toBeUndefined();
   });
 });
 

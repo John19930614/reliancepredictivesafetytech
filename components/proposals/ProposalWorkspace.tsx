@@ -1535,17 +1535,20 @@ export function ProposalControlPanel({
           </p>
           <div className="field" style={{ marginTop: 8 }}>
             <label htmlFor="proposal-extend-validity">Extend to</label>
+            {/* onBlur, not onChange. A date input fires `change` on every
+                COMPLETE date, so retyping a year 2026 -> 2027 fires four times
+                (0002, 0020, 0202, 2027) — four unordered server actions whose
+                last writer wins, and three of those dates are in the past. */}
             <input
               id="proposal-extend-validity"
               type="date"
               defaultValue={proposal.valid_until ?? ""}
               disabled={busy}
-              onChange={(event) =>
-                run(
-                  () => extendProposalValidity(proposal.id, event.target.value || null),
-                  "Acceptance window updated.",
-                )
-              }
+              onBlur={(event) => {
+                const next = event.target.value || null;
+                if ((proposal.valid_until ?? null) === next) return;
+                run(() => extendProposalValidity(proposal.id, next), "Acceptance window updated.");
+              }}
             />
           </div>
           <p style={{ color: "var(--portal-muted)", fontSize: "0.8rem", marginTop: 6 }}>
