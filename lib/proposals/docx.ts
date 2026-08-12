@@ -308,7 +308,19 @@ function pillsTable(model: ProposalDocumentModel): Table {
 }
 
 function feeTable(groups: DocumentFeeGroup[], totals: ProposalDocumentModel["totalRows"]): Table {
-  const widths = [2400, 4300, 760, 1540, 1680];
+  // DERIVED from TABLE_WIDTH, not hand-tuned. The previous literals summed to
+  // 10680 against a 10514-twip text column, so the fee table — the widest thing
+  // in the document — overhung the right margin in Word on every proposal.
+  //
+  // The ratios are the ones proposal-document.css gives the same five columns
+  // (24/40/12/12/12), so the DOCX, the screen and the PDF agree on how much
+  // room the words get. Item at 760 twips was the DOCX's version of the same
+  // squeeze that broke "First Aid / CPR / AED Training" over four lines
+  // on screen.
+  const ratios = [0.24, 0.4, 0.12, 0.12, 0.12];
+  const widths = ratios.map((ratio) => Math.floor(TABLE_WIDTH * ratio));
+  // Give the rounding remainder to the last column so the row sums exactly.
+  widths[widths.length - 1] += TABLE_WIDTH - widths.reduce((sum, width) => sum + width, 0);
   const rows: TableRow[] = [
     new TableRow({
       tableHeader: true,
