@@ -176,7 +176,7 @@ export function ProposalDocument({
         ))}
       </ul>
 
-      <SectionHeading number="03">Detailed Scope of Work</SectionHeading>
+      <SectionHeading number="03">{model.scopeHeading}</SectionHeading>
       <p>{model.scopeIntro}</p>
       {model.phaseScope.length > 0 ? (
         model.phaseScope.map((entry) => (
@@ -207,7 +207,7 @@ export function ProposalDocument({
       </ul>
       {model.deliverablesCoverage ? <p>{model.deliverablesCoverage}</p> : null}
 
-      <SectionHeading number="05">Pricing Schedule</SectionHeading>
+      <SectionHeading number="05">{model.feesHeading}</SectionHeading>
       <div className="rp-doc-scroll">
         <table className="rp-doc-fee">
           <thead>
@@ -267,7 +267,7 @@ export function ProposalDocument({
         </table>
       </div>
 
-      <SectionHeading number="06">Schedule and Implementation Approach</SectionHeading>
+      <SectionHeading number="06">{model.termHeading}</SectionHeading>
       <p>{model.schedule}</p>
       <ul className="rp-doc-list">
         {model.scheduleSteps.map((step) => (
