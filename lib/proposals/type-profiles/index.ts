@@ -7,7 +7,12 @@
 
 import type { DocumentTerm, DocumentTermInputs } from "@/components/proposals/proposal-document-model";
 import { isTransactionTemplateKey, type TransactionTemplateKey } from "../transaction-templates";
-import { composeDocumentTerms, type ProposalLexicon, type ProposalTypeProfile } from "./contract";
+import {
+  composeDocumentTerms,
+  type ProposalLexicon,
+  type ProposalTypeCopy,
+  type ProposalTypeProfile,
+} from "./contract";
 import { buildSharedClauses } from "./shared-clauses";
 import { enterpriseProfile } from "./enterprise";
 import { fixedPriceProfile } from "./fixed-price";
@@ -59,6 +64,20 @@ export function buildTermsForProfile(
   return composeDocumentTerms(shared, profile).terms;
 }
 
+/**
+ * The prose blocks for a type.
+ *
+ * `fallback` is the platform-era copy, used for a proposal with no type
+ * stamped so a document written before types existed keeps the wording it was
+ * sent with.
+ */
+export function resolveTypeCopy(
+  profile: ProposalTypeProfile | null,
+  fallback: ProposalTypeCopy,
+): ProposalTypeCopy {
+  return profile?.copy ?? fallback;
+}
+
 /** Section headings for a type, falling back to the platform-era wording. */
 export function resolveLexicon(profile: ProposalTypeProfile | null): Pick<
   ProposalLexicon,
@@ -72,5 +91,5 @@ export function resolveLexicon(profile: ProposalTypeProfile | null): Pick<
 }
 
 export { composeDocumentTerms } from "./contract";
-export type { ProposalLexicon, ProposalTypeProfile } from "./contract";
+export type { ProposalLexicon, ProposalTypeCopy, ProposalTypeProfile } from "./contract";
 export { buildSharedClauses } from "./shared-clauses";

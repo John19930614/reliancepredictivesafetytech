@@ -43,6 +43,60 @@ export const pilotProfile: ProposalTypeProfile = {
     unitNoun: "pilot phase",
   },
 
+  // The prose blocks in sections 01, 03, 04, 06 and 07. Platform vocabulary is
+  // correct on this type - a pilot IS a platform engagement - so what the shared
+  // copy got wrong here is not the nouns but the frame. Section 01 established
+  // terms "for platform billing and related safety technology support". Section
+  // 03 hedged that the proposal "can be scaled for a small pilot, a single
+  // jobsite, a multi-site deployment, or a full enterprise platform rollout" on
+  // a document that IS the pilot. Section 04 led with "Configured platform
+  // subscription and client account setup", which is the one thing this type
+  // spends its entire clause set denying. What replaces them says evaluation:
+  // criteria agreed at kickoff, results measured against them, and a decision at
+  // the end.
+  //
+  // Same rule as the clauses: no counts, no durations, no fees, no dates. Every
+  // one of those is a field the seller sets per deal, and copy that restates one
+  // is copy that contradicts the schedule printed beside it - lib/proposals/
+  // consistency.ts flags exactly that. Where a number belongs to the deal, this
+  // points at the schedule. And nothing here promises the pilot continues: a
+  // rollout appears only as a recommendation that is quoted and signed on its
+  // own, which is what No Automatic Conversion or Renewal and Pilot Pricing Is
+  // Not a Production Quote require of everything else on the page.
+  copy: {
+    subtitle: "Fixed-Price Platform Pilot, Configuration, Testing, and Evaluation Services",
+    purposeCallout:
+      "This document establishes the proposed scope, pilot fee, phases, deliverables, assumptions, and commercial terms for a fixed-price, time-boxed evaluation of the platform that ends with the pilot term shown in the schedule and continues only under a separately signed agreement.",
+    scopeIntro:
+      "The pilot is organized into work phases and service lines, each carrying the setup, configuration, testing, or training work it covers, so the evaluation runs in a defined sequence with a defined end. " +
+      "The phases cover the included users and jobsites shown in the schedule; work outside that boundary is quoted separately rather than absorbed into the pilot.",
+    // What an evaluation hands back, not what a subscription turns on. The last
+    // bullet is deliberately a recommendation and not a transition: a pilot that
+    // listed "production rollout" as a deliverable would contradict the two
+    // clauses this type exists for.
+    deliverables: [
+      "Configured pilot environment for the included users and jobsites shown in the schedule",
+      "Configured modules, templates, dashboards, and workflows for the processes the pilot exercises",
+      "Test results from hands-on use, measured against the success criteria agreed at kickoff",
+      "Joint findings review at the close of the pilot term, documented as the shared record of the results",
+      "Scoped recommendation for any broader rollout, quoted and decided separately",
+    ],
+    scheduleSteps: [
+      "Acceptance, kickoff, and written agreement on the pilot success criteria",
+      "Platform access, client data intake, and configuration of the jobsites and user accounts in scope",
+      "Module, template, dashboard, and workflow configuration for the processes the pilot exercises",
+      "Hands-on testing, user training, and the shared reporting cadence through the pilot term",
+      "Findings review against the agreed criteria and the client's decision on any broader rollout",
+    ],
+    clientResponsibilities: [
+      "Name an executive sponsor and the participants who will use the platform during the pilot, and identify the reviewers authorized to approve scope, security, and commercial terms.",
+      "Make the jobsite information, safety documents, templates, forms, and personnel records needed for configuration available when the schedule calls for them.",
+      "Use the configured workflows in day-to-day work throughout the pilot term, since a pilot that records little use produces no results to evaluate.",
+      "Attend the kickoff, the agreed reporting cadence, and the findings review at the close of the pilot term, and consolidate feedback where possible.",
+      "Maintain responsibility for operational decisions, supervision, employee discipline, regulatory filings, and site execution, which the pilot supports but does not assume.",
+    ],
+  },
+
   omitClauses: [
     // California's ARL governs automatic renewal offers and continuous service
     // offers. This pilot is neither: one fee, one fixed term, expiring on its

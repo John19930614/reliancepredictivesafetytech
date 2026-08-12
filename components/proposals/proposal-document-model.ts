@@ -28,7 +28,9 @@ import {
   buildTermsForProfile,
   resolveLexicon,
   resolveProposalTypeProfile,
+  resolveTypeCopy,
 } from "@/lib/proposals/type-profiles";
+import type { ProposalTypeCopy } from "@/lib/proposals/type-profiles";
 import {
   formatClientContactLine,
   parseClientContacts,
@@ -207,6 +209,23 @@ export const documentCopy = Object.freeze({
     "User and jobsite structure based on the selected package",
     "Management-ready scope, assumptions, and acceptance documentation",
   ]),
+});
+
+/**
+ * The prose a proposal with NO type stamped still prints.
+ *
+ * Assembled from documentCopy above rather than rewritten, because that is the
+ * exact wording every proposal sent before per-type copy existed carries. A
+ * document already in a client's hands must not acquire new prose because a
+ * feature shipped after it went out — the same rule the clause set follows.
+ */
+export const legacyDocumentCopy: ProposalTypeCopy = Object.freeze({
+  subtitle: documentCopy.subtitle,
+  purposeCallout: documentCopy.purposeCallout,
+  scopeIntro: documentCopy.scopeIntro,
+  deliverables: documentCopy.baseDeliverables,
+  scheduleSteps: documentCopy.scheduleSteps,
+  clientResponsibilities: documentCopy.clientResponsibilities,
 });
 
 /* -------------------------------------------------------------------------- */
@@ -695,8 +714,13 @@ export function buildProposalDocumentModel({
   const includedSites = includesPlatformPackage ? fieldCount(state, "includedSites", packageOption.sites) : 0;
   const proposalTypeLabel = proposalTypeLabelFromState(state?.fields);
   // Null for a proposal written before types existed, or started blank — those
-  // keep the shared clause set they were sent under.
+  // keep the shared clause set and the platform-era prose they were sent under.
   const typeProfile = resolveProposalTypeProfile(state?.fields);
+  // Sections 01, 03, 04, 06 and 07. Every one of these was a single hardcoded
+  // string on all seven types, written for a subscription sale — which is how a
+  // training proposal came to promise "Configured platform subscription and
+  // client account setup" for a CPR class.
+  const typeCopy = resolveTypeCopy(typeProfile, legacyDocumentCopy);
 
   /* --- Scope ------------------------------------------------------------ */
 
@@ -758,7 +782,7 @@ export function buildProposalDocumentModel({
 
   return {
     headline: clientCompany ? `Proposal for ${clientCompany}` : proposal.title,
-    subtitle: documentCopy.subtitle,
+    subtitle: typeCopy.subtitle,
     docline: buildDocline(
       packageOption.name,
       isPilotPackage,
@@ -814,7 +838,7 @@ export function buildProposalDocumentModel({
         ],
     phaseScope,
     serviceScope,
-    deliverables: [...documentCopy.baseDeliverables],
+    deliverables: [...typeCopy.deliverables],
     deliverablesCoverage,
     feeGroups: groupFeeRows(totals.lineItems),
     totalRows,
@@ -848,10 +872,10 @@ export function buildProposalDocumentModel({
       `LEGAL NOTICE: This proposal is produced by ${sellerName}. It is not legal advice. Terms referencing CCPA, ` +
       "Wisconsin trade secret law, OSHA, E-SIGN, and other statutes are for commercial purposes. All proposals must " +
       "be reviewed by qualified legal counsel in the governing jurisdiction before execution.",
-    purposeCallout: documentCopy.purposeCallout,
-    scopeIntro: documentCopy.scopeIntro,
-    scheduleSteps: documentCopy.scheduleSteps,
-    clientResponsibilities: documentCopy.clientResponsibilities,
+    purposeCallout: typeCopy.purposeCallout,
+    scopeIntro: typeCopy.scopeIntro,
+    scheduleSteps: typeCopy.scheduleSteps,
+    clientResponsibilities: typeCopy.clientResponsibilities,
     acceptance: documentCopy.acceptance,
     revisionLabel: hasRevision ? `Revision ${revisionNumber}` : null,
     isHistoricalRevision: hasRevision && revisionNumber !== currentRevision,

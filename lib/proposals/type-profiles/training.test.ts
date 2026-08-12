@@ -154,6 +154,10 @@ describe("trainingProfile — no platform language survives (the regression)", (
     const unprofiled = composeDocumentTerms(buildSharedClauses(termInputs), {
       key: "training",
       lexicon: trainingProfile.lexicon,
+      // composeDocumentTerms reads only the clause fields; copy is required by
+      // the contract and never consulted here, so the real one stands in rather
+      // than a second set of strings that could drift from it.
+      copy: trainingProfile.copy,
     });
     const tripped = forbidden.filter((forbiddenText) =>
       unprofiled.terms.some((term) => term.body.toLowerCase().includes(forbiddenText)),

@@ -411,7 +411,9 @@ function editorProposal(formData: GeneratorState | null): WorkspaceProposal {
   return { ...proposalFixture("draft"), form_data: formData };
 }
 
-const roster = [{ userId: TEAM_MEMBER_ID, name: "Dana Reyes", title: "Head of Safety", hasSignature: true }];
+const roster = [
+  { userId: TEAM_MEMBER_ID, name: "Dana Reyes", title: "Head of Safety", hasBio: true, hasSignature: true },
+];
 
 describe("ProposalWorkspace — live preview matches the team picker", () => {
   it("renders the selected teammate's bio and signature in the preview document", async () => {

@@ -1271,6 +1271,17 @@ function ProposalTeamPicker({
         who should appear there, usually just the main point of contact. Up to {maxTeamMembers}. Selecting nobody omits
         the section entirely and the later sections renumber.
       </p>
+      {/* Where the words come from. Ticking a name here prints THAT PERSON'S
+          own bio, written on their Bio page — nothing about the text is edited
+          on the proposal, which is the first thing a seller asks when the
+          section prints differently than they expected. */}
+      <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem" }}>
+        The wording is each person&apos;s own: it comes from their{" "}
+        <Link href="/employee/proposals/bio" style={{ color: "var(--portal-gold)" }}>
+          Proposal bio page
+        </Link>
+        , not from this proposal. Editing a bio there changes it on every future proposal that includes them.
+      </p>
       {/* The document is held to eight pages, and six full-length bios alone
           used to take it to nine. The budget is shared, so say so here — the
           preview on the right shows the trimmed text, and a seller who does not
@@ -1301,6 +1312,12 @@ function ProposalTeamPicker({
               <span>
                 <strong>{person.name}</strong>
                 {person.title ? <span style={{ color: "var(--portal-muted)" }}> — {person.title}</span> : null}
+                {/* A published profile with no bio text prints a name and a
+                    title under a heading and nothing else. Flagged at the point
+                    of choosing rather than discovered in the preview. */}
+                {!person.hasBio ? (
+                  <span style={{ color: "#b7791f", fontSize: "0.8rem" }}> · no bio written yet</span>
+                ) : null}
                 {!person.hasSignature ? (
                   <span style={{ color: "var(--portal-muted)", fontSize: "0.8rem" }}> · no signature saved</span>
                 ) : null}

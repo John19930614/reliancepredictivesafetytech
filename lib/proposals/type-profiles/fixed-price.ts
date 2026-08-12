@@ -63,6 +63,58 @@ export const fixedPriceProfile: ProposalTypeProfile = {
     unitNoun: "deliverable",
   },
 
+  // The prose blocks in sections 01, 03, 04, 06 and 07. The shared copy they
+  // replace was written for a subscription sale and printed unchanged on this
+  // type: section 04 promised "Configured platform subscription and client
+  // account setup", section 03 said the scope could scale to "a full enterprise
+  // platform rollout", and section 06 listed "Platform setup, modules,
+  // templates, workflows, and user roles" as a step - on a document that sells
+  // three written programs and two audits for one price, under a packageKey of
+  // "none" with no subscription anywhere in the deal.
+  //
+  // Same rule as the clauses: no counts, no durations, no rates, no dates. Each
+  // of those is a schedule line or a field the seller sets per deal, and copy
+  // that restates one is copy that contradicts the schedule printed beside it.
+  // The review window and the included revision count are stated once each, in
+  // the acceptance and revision clauses; this copy points at them.
+  //
+  // The two ideas the clauses turn on carry into the prose: the named
+  // deliverables ARE the scope, and acceptance is a defined mechanism with a
+  // window and a default, not a courtesy.
+  copy: {
+    subtitle: "Fixed-Price Safety Programs, Audits, and Compliance Documentation Services",
+    purposeCallout:
+      "This document establishes the named deliverables, the fixed fee for them, the acceptance process, the assumptions, and the commercial terms for the safety programs, assessments, and compliance documentation described below.",
+    scopeIntro:
+      "Each line below is a named deliverable, stated with what it covers and the criteria it is measured against at acceptance. " +
+      "The deliverables listed here are the complete scope of this engagement; work of a kind not listed, and additional quantities of a listed deliverable, proceed by written change order, and lines can be added or removed before signature.",
+    // What the client receives from a finite list of work products, not from an
+    // account. The revision cycle is named but not counted: the count lives in
+    // the Included Revisions clause, and stating it twice is how a document
+    // comes to disagree with itself.
+    deliverables: [
+      "Each deliverable named in the schedule, prepared to the acceptance criteria stated for it",
+      "Written submission of each deliverable to the client contact named for this engagement",
+      "The included revision cycle on a deliverable returned with a valid written rejection",
+      "Final versions of each accepted deliverable in the file format agreed at kickoff",
+      "A written record of acceptance or deemed acceptance for each deliverable, supporting milestone invoicing",
+    ],
+    scheduleSteps: [
+      "Acceptance, kickoff, and confirmation of any detail a deliverable line leaves open",
+      "Intake of client documents, records, and site access",
+      "Preparation and written submission of each deliverable",
+      "Client review within the period stated in the terms, and revision of the items raised",
+      "Acceptance or deemed acceptance, final versions, and milestone invoicing",
+    ],
+    clientResponsibilities: [
+      "Name a single point of contact with authority to give direction, answer questions, consolidate the organization's feedback, and accept or reject deliverables on the client's behalf.",
+      "Provide the existing programs, policies, training records, incident records, and site information each deliverable depends on, together with access to the sites and personnel a deliverable examines.",
+      "Return consolidated written review comments within the review period stated in the terms, identifying the criterion a deliverable does not meet rather than raising a general preference.",
+      "Treat that review period as a deadline, since a deliverable left unreviewed when it ends is deemed accepted and a correction requested afterward proceeds by change order.",
+      "Retain responsibility for adopting, implementing, and enforcing each deliverable, for supervising its own personnel, and for the client's own regulatory compliance.",
+    ],
+  },
+
   omitClauses: [
     // Nothing renews: the fixed price buys a finite list of deliverables and the
     // engagement ends when the last one is accepted. There is no recurring term

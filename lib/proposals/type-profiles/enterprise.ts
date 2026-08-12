@@ -50,6 +50,59 @@ export const enterpriseProfile: ProposalTypeProfile = {
     unitNoun: "subscription year",
   },
 
+  // The prose blocks in sections 01, 03, 04, 06 and 07. The shared copy they
+  // replace was written for a pilot sold to a single operator and printed
+  // unchanged here: section 01 announced "platform billing and related safety
+  // technology support" on a document a legal team reads as an order form,
+  // section 03 offered to scale "for a small pilot, a single jobsite, a
+  // multi-site deployment, or a full enterprise platform rollout" on the type
+  // that IS the enterprise rollout, and sections 04, 06 and 07 described an
+  // account setup with no affiliates, no security review, and no sponsor.
+  //
+  // Same rule as the clauses: no counts, no durations, no rates, no dates, no
+  // percentages. Included users and jobsites, the tier, the fee and the term are
+  // fields the seller sets, and copy that restates one contradicts the schedule
+  // printed beside it, so this points at the schedule instead. The availability
+  // and credit percentages stay where they belong, in the Service Level
+  // Commitment.
+  //
+  // The honesty constraint above governs this copy too. Section 04 promises
+  // administrator enablement and reporting, not an attestation: nothing here
+  // names a certification, because the security clause is careful not to claim
+  // one and a deliverables bullet that did would undo it.
+  copy: {
+    subtitle: "Enterprise Safety Intelligence, Multi-Site Deployment, and Predictive Risk Platform Services",
+    purposeCallout:
+      "This document establishes the proposed subscription tier, fees, platform scope, implementation approach, deliverables, assumptions, and commercial terms for the enterprise platform subscription described below, and is intended to be executed as an Order Form under any Master Services Agreement in effect between the parties.",
+    scopeIntro:
+      "The scope is organized into the platform capabilities of the proposed tier and the implementation phases that put them in service across the legal entities, jobsites, and workforces the subscription covers. " +
+      "Implementation sequencing, integration requirements, and the order in which affiliates and sites are brought onto the platform are confirmed with the client's project team after acceptance, and the tier and phases can be adjusted before signature.",
+    // What an enterprise buyer receives from the subscription, pointed at the
+    // schedule for every quantity: the affiliates and jobsites in scope, the
+    // tier, and the included users are fields, not prose.
+    deliverables: [
+      "Configured platform subscription covering the affiliates and jobsites listed in the schedule",
+      "User, jobsite, and permission structure built for the subscription tier shown in the schedule",
+      "Implementation and integration plan covering data intake, configuration, and the systems in scope",
+      "Administrator enablement for the client's designated platform administrators and support contacts",
+      "Executive reporting configuration and the business review cadence stated in the terms",
+    ],
+    scheduleSteps: [
+      "Acceptance, Order Form execution, and designation of the executive sponsor, administrators, and support contacts",
+      "Discovery across the covered entities and jobsites, including data intake and integration requirements",
+      "Platform configuration of modules, templates, workflows, user roles, and site hierarchy",
+      "Administrator enablement and validation review with client leadership",
+      "Phased go-live by site, launch support, and entry into the recurring business review cadence",
+    ],
+    clientResponsibilities: [
+      "Designate an executive sponsor, authorized support contacts, and the platform administrators responsible for account administration at each covered entity.",
+      "Complete the client's security, privacy, and legal review, including any vendor onboarding packet or security questionnaire, on a timeline that supports the implementation schedule in this proposal.",
+      "Provide accurate entity, jobsite, user, and billing information for every affiliate and site covered by the subscription, together with the existing safety documents, templates, forms, and training records needed for configuration.",
+      "Coordinate integration access with the client's IT organization, including credentials, network access, and identity and single sign-on configuration for the systems in scope.",
+      "Retain responsibility for operational decisions, employee discipline, regulatory filings, and site execution at every jobsite, affiliate, and legal entity covered by this subscription.",
+    ],
+  },
+
   // Nothing is dropped. Every shared clause survives an enterprise legal review
   // on its own merits, and the ones that read as written for a smaller buyer
   // are reworded below rather than removed. A clause an enterprise reviewer

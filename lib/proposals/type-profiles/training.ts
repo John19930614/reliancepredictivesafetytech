@@ -52,6 +52,54 @@ export const trainingProfile: ProposalTypeProfile = {
     unitNoun: "session",
   },
 
+  // The prose blocks in sections 01, 03, 04, 06 and 07. The shared copy they
+  // replace was written for a subscription sale and printed unchanged on this
+  // type: section 04 promised "Configured platform subscription and client
+  // account setup", section 03 said the scope could scale to "a full enterprise
+  // platform rollout", and section 06 listed "Platform setup, modules,
+  // templates, workflows, and user roles" as a step - on a document that sells
+  // a CPR class in a jobsite trailer.
+  //
+  // Same rule as the clauses: no counts, no durations, no rates, no dates. Every
+  // one of those is a schedule line or a term the seller sets per deal, and copy
+  // that restates one is copy that contradicts the schedule printed beside it.
+  // Where a number belongs to the deal, this points at the schedule or the
+  // terms. The class minimum is stated once, in the Class Size clause, and is
+  // not repeated here.
+  copy: {
+    subtitle: "Instructor-Led Safety Training, Certification, and Compliance Support Services",
+    purposeCallout:
+      "This document establishes the proposed courses, fees, delivery approach, deliverables, assumptions, and commercial terms for the instructor-led safety training and certification services described below.",
+    scopeIntro:
+      "The selected courses are listed as individual lines, each with the content it covers, its billing unit, and whether it leads to certification. " +
+      "Session dates, locations, and delivery arrangements are coordinated with the client's scheduling contact after acceptance, and courses can be added or removed before signature.",
+    // What the client receives from a class, not from an account. Cards are
+    // attributed to the issuing body on purpose: Department of Labor Outreach
+    // cards come from the OSHA Training Institute Education Center, and the
+    // Certification and Cards clause says so.
+    deliverables: [
+      "Instructor-led delivery of each course listed in the schedule",
+      "Participant workbooks, handouts, and course reference materials",
+      "Certificates of completion for attendees who meet the course requirements",
+      "Certification cards from the issuing body, where a course carries one",
+      "Signed attendance records and completion records for the client's training file",
+    ],
+    scheduleSteps: [
+      "Acceptance and scheduling contact confirmation",
+      "Session dates, locations, and instructor assignment",
+      "Roster collection and attendee prerequisite confirmation",
+      "Course delivery, hands-on evaluation, and attendance sign-in",
+      "Completion records, certification processing, and invoicing for delivered sessions",
+    ],
+    clientResponsibilities: [
+      "Provide each session's attendance roster by the deadline stated in the terms, listing every attendee's full legal name as it should appear on certification.",
+      "Confirm that each attendee meets the course prerequisites, including any age or qualification requirement, and brings the personal protective equipment the course and the site require.",
+      "Provide a suitable training room, a clear practical area, site access, power, and a projection surface for sessions delivered at client facilities.",
+      "Release attendees for the full contact hours each course requires, since partial attendance cannot be credited toward certification.",
+      "Maintain the client's own training records and retain responsibility for supervision, authorization to perform work, and regulatory compliance.",
+    ],
+  },
+
   omitClauses: [
     // Nothing in a training engagement renews. Sessions are scheduled, delivered
     // and invoiced; there is no continuous service for Cal. Bus. & Prof. Code
