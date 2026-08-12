@@ -39,6 +39,7 @@ import {
 import {
   deleteProposal,
   duplicateProposal,
+  extendProposalValidity,
   loadProposalDocumentExtras,
   restoreProposalRevision,
   saveProposalDraft,
@@ -46,6 +47,7 @@ import {
   setProposalStatus,
   updateProposalMeta,
 } from "@/app/employee/proposals/actions";
+import { declineReasonLabel, declineReasonOptions } from "@/app/employee/proposals/share-link-policy";
 import {
   buildPrefillState,
   deriveSummaryFromState,
@@ -1365,6 +1367,11 @@ export function ProposalControlPanel({
     [proposal.status],
   );
 
+  // Reason capture for "Mark declined" — see the transition list below.
+  const [decliningOpen, setDecliningOpen] = useState(false);
+  const [declineReason, setDeclineReason] = useState("");
+  const [declineDetail, setDeclineDetail] = useState("");
+
   async function handleDuplicate() {
     setError("");
     setNotice("");
@@ -1408,22 +1415,144 @@ export function ProposalControlPanel({
                 : `No status changes are available from ${proposalStatusLabels[proposal.status]}.`}
             </p>
           ) : (
-            transitions.map((to) => (
-              <button
-                key={to}
-                className="button button-light"
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  run(() => setProposalStatus(proposal.id, to), `Moved to ${proposalStatusLabels[to]}.`)
-                }
-              >
-                {transitionLabel(proposal.status, to)}
-              </button>
-            ))
+            transitions.map((to) =>
+              // Declining asks WHY before it moves. The reason is the only
+              // durable record of a lost deal, and a status button that just
+              // flips the row is how decline_reason stayed empty for every
+              // proposal ever lost.
+              to === "declined" ? (
+                <div key={to}>
+                  {!decliningOpen ? (
+                    <button
+                      className="button button-light"
+                      type="button"
+                      disabled={busy}
+                      style={{ width: "100%" }}
+                      onClick={() => setDecliningOpen(true)}
+                    >
+                      {transitionLabel(proposal.status, to)}
+                    </button>
+                  ) : (
+                    <div
+                      style={{
+                        border: "1px solid var(--portal-line, #dbe2e9)",
+                        borderRadius: 8,
+                        padding: 12,
+                      }}
+                    >
+                      <div className="field">
+                        <label htmlFor="decline-reason-internal">Why was it declined?</label>
+                        <select
+                          id="decline-reason-internal"
+                          value={declineReason}
+                          disabled={busy}
+                          onChange={(event) => setDeclineReason(event.target.value)}
+                        >
+                          <option value="">Select a reason…</option>
+                          {declineReasonOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="field" style={{ marginTop: 8 }}>
+                        <label htmlFor="decline-detail-internal">Detail (optional)</label>
+                        <textarea
+                          id="decline-detail-internal"
+                          rows={2}
+                          value={declineDetail}
+                          disabled={busy}
+                          onChange={(event) => setDeclineDetail(event.target.value)}
+                          placeholder="What did they actually say?"
+                        />
+                      </div>
+                      <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                        <button
+                          className="button button-light"
+                          type="button"
+                          disabled={busy || declineReason === ""}
+                          onClick={() => {
+                            const label = declineReasonLabel(declineReason) ?? declineReason;
+                            const detail = declineDetail.trim();
+                            run(
+                              () =>
+                                setProposalStatus(proposal.id, "declined", {
+                                  declineReason: detail ? `${label} — ${detail}` : label,
+                                }),
+                              "Marked declined, with the reason recorded.",
+                            );
+                            setDecliningOpen(false);
+                            setDeclineReason("");
+                            setDeclineDetail("");
+                          }}
+                        >
+                          Record decline
+                        </button>
+                        <button
+                          className="button button-light"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => setDecliningOpen(false)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <button
+                  key={to}
+                  className="button button-light"
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    run(() => setProposalStatus(proposal.id, to), `Moved to ${proposalStatusLabels[to]}.`)
+                  }
+                >
+                  {transitionLabel(proposal.status, to)}
+                </button>
+              ),
+            )
           )}
         </div>
       </div>
+
+      {/* --- Acceptance window ---------------------------------------------
+          Its own control because canEditProposalMeta freezes valid_until
+          outside draft, and the alternative — reopening a sent proposal to
+          change one date — voids the standing approval and forces John to
+          approve the same document twice. Shown only once the date actually
+          governs something (the proposal is out, or about to be). */}
+      {!metaGate.ok && (proposal.status === "sent" || proposal.status === "in_review") ? (
+        <div className="form-panel" style={{ marginTop: 20 }}>
+          <h2>Acceptance window</h2>
+          <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem", marginTop: 8 }}>
+            {proposal.valid_until
+              ? `The client can accept online through ${proposal.valid_until}. After that the share page refuses acceptance.`
+              : "No expiry is set, so this proposal stays open for acceptance indefinitely."}
+          </p>
+          <div className="field" style={{ marginTop: 8 }}>
+            <label htmlFor="proposal-extend-validity">Extend to</label>
+            <input
+              id="proposal-extend-validity"
+              type="date"
+              defaultValue={proposal.valid_until ?? ""}
+              disabled={busy}
+              onChange={(event) =>
+                run(
+                  () => extendProposalValidity(proposal.id, event.target.value || null),
+                  "Acceptance window updated.",
+                )
+              }
+            />
+          </div>
+          <p style={{ color: "var(--portal-muted)", fontSize: "0.8rem", marginTop: 6 }}>
+            Changes the date only — the document and its approval are untouched, so nothing needs re-approving.
+          </p>
+        </div>
+      ) : null}
 
       <div className="form-panel" style={{ marginTop: 20 }}>
         <h2>Assignment</h2>

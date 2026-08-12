@@ -23,6 +23,7 @@ import {
   decideProposal,
   deleteProposal,
   duplicateProposal,
+  extendProposalValidity,
   restoreProposalRevision,
   saveProposalDraft,
   saveProposalRevision,
@@ -131,6 +132,11 @@ function signIn(role: string | null, supabase: unknown, overrides: Record<string
   } as any);
 }
 
+/** First recorded query against `<table>` with operation `<op>`, if any. */
+function findCall(supabase: SupabaseMock, table: string, op: "select" | "insert" | "update" | "delete") {
+  return supabase.calls.find((call) => call.table === table && call.op === op);
+}
+
 function proposal(overrides: Record<string, unknown> = {}) {
   return {
     id: PROPOSAL_ID,
@@ -209,8 +215,127 @@ describe("proposal action RBAC", () => {
     expect((await duplicateProposal(PROPOSAL_ID)).ok).toBe(false);
     expect((await setProposalStatus(PROPOSAL_ID, "sent")).ok).toBe(false);
     expect((await deleteProposal(PROPOSAL_ID)).ok).toBe(false);
+    expect((await extendProposalValidity(PROPOSAL_ID, "2026-12-31")).ok).toBe(false);
     expect(supabase.calls).toHaveLength(0);
     expect(auditMock).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Declining, and stamping the moment
+// ---------------------------------------------------------------------------
+describe("setProposalStatus — decline and acceptance stamps", () => {
+  it("records declined_at and the reason, not just the status", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "sent" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("employee", supabase);
+
+    const result = await setProposalStatus(PROPOSAL_ID, "declined", {
+      declineReason: "Price / budget — went over their cap",
+    });
+
+    expect(result.ok).toBe(true);
+    const patch = findCall(supabase, "client_proposals", "update")?.payload as Record<string, unknown>;
+    expect(patch.status).toBe("declined");
+    expect(patch.decline_reason).toBe("Price / budget — went over their cap");
+    expect(typeof patch.declined_at).toBe("string");
+    // The reason belongs in the audit trail too — it is the loss record.
+    expect(String(auditMock.mock.calls[0][0].summary)).toContain("Price / budget");
+  });
+
+  it("still records a decline with no reason rather than refusing the transition", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "sent" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("employee", supabase);
+
+    expect((await setProposalStatus(PROPOSAL_ID, "declined")).ok).toBe(true);
+    const patch = findCall(supabase, "client_proposals", "update")?.payload as Record<string, unknown>;
+    expect(patch.decline_reason).toBeUndefined();
+    expect(typeof patch.declined_at).toBe("string");
+  });
+
+  it("stamps accepted_at when a proposal is marked accepted", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "sent" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("employee", supabase);
+
+    await setProposalStatus(PROPOSAL_ID, "accepted");
+
+    const patch = findCall(supabase, "client_proposals", "update")?.payload as Record<string, unknown>;
+    expect(typeof patch.accepted_at).toBe("string");
+  });
+
+  it("adds no stamps to an ordinary transition", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "declined" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("employee", supabase);
+
+    await setProposalStatus(PROPOSAL_ID, "draft");
+
+    expect(findCall(supabase, "client_proposals", "update")?.payload).toEqual({ status: "draft" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Extending the acceptance window
+// ---------------------------------------------------------------------------
+describe("extendProposalValidity", () => {
+  it("changes the date on a sent proposal without touching the document", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "sent", valid_until: "2026-08-01" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("employee", supabase);
+
+    const result = await extendProposalValidity(PROPOSAL_ID, "2026-10-31");
+
+    expect(result.ok).toBe(true);
+    // Only the date. No form_data, no revision — so the standing approval and
+    // the document the client was shown are both left alone.
+    expect(findCall(supabase, "client_proposals", "update")?.payload).toEqual({ valid_until: "2026-10-31" });
+    expect(findCall(supabase, "client_proposal_revisions", "insert")).toBeUndefined();
+    expect(auditMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears the date when given nothing", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "sent", valid_until: "2026-08-01" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("employee", supabase);
+
+    expect((await extendProposalValidity(PROPOSAL_ID, null)).ok).toBe(true);
+    expect(findCall(supabase, "client_proposals", "update")?.payload).toEqual({ valid_until: null });
+  });
+
+  it("refuses on a closed proposal", async () => {
+    for (const status of ["accepted", "declined", "archived"] as const) {
+      const supabase = createSupabaseMock({
+        "client_proposals:select": { data: proposal({ status }) },
+      });
+      signIn("employee", supabase);
+
+      const result = await extendProposalValidity(PROPOSAL_ID, "2026-12-31");
+
+      expect(result.ok, status).toBe(false);
+      expect(findCall(supabase, "client_proposals", "update"), status).toBeUndefined();
+    }
+  });
+
+  it("rejects a malformed date before it reaches the column", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("employee", supabase);
+
+    expect((await extendProposalValidity(PROPOSAL_ID, "31/12/2026")).ok).toBe(false);
+    expect(findCall(supabase, "client_proposals", "update")).toBeUndefined();
   });
 });
 

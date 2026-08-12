@@ -120,5 +120,128 @@ describe("collectReadinessFindings", () => {
   it("accepts a future validity date silently", () => {
     const findings = collectReadinessFindings(healthyState(), meta({ validUntil: "2026-12-31", status: "sent" }));
     expect(ids(findings)).not.toContain("valid_until_past");
+    expect(ids(findings)).not.toContain("valid_until_soon");
+  });
+
+  it("warns when a sent proposal is within a week of expiring", () => {
+    const findings = collectReadinessFindings(healthyState(), meta({ validUntil: "2026-08-15", status: "sent" }));
+    const finding = findings.find((entry) => entry.id === "valid_until_soon");
+    expect(finding?.severity).toBe("warn");
+    expect(finding?.message).toContain("4 days");
+  });
+
+  it("says so on the last acceptable day", () => {
+    const findings = collectReadinessFindings(healthyState(), meta({ validUntil: TODAY, status: "sent" }));
+    expect(findings.find((entry) => entry.id === "valid_until_soon")?.message).toContain("last day");
+  });
+
+  it("does not nag about an approaching expiry on a draft", () => {
+    const findings = collectReadinessFindings(healthyState(), meta({ validUntil: "2026-08-15", status: "draft" }));
+    expect(ids(findings)).not.toContain("valid_until_soon");
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Commercial terms                                                            */
+/* -------------------------------------------------------------------------- */
+
+describe("commercial terms checks", () => {
+  it("flags a deposit due at acceptance that the payment terms never mention", () => {
+    const state = healthyState();
+    state.fields.depositPct = "25";
+    state.fields.paymentTerms = "Net 30 from invoice date";
+    const finding = collectReadinessFindings(state, meta()).find((entry) => entry.id === "deposit_vs_payment_terms");
+    expect(finding?.severity).toBe("warn");
+    expect(finding?.message).toContain("due at acceptance");
+  });
+
+  it("stays quiet when the payment terms do cover the deposit", () => {
+    const state = healthyState();
+    state.fields.depositPct = "25";
+    state.fields.paymentTerms = "25% deposit due at acceptance, balance Net 30";
+    expect(ids(collectReadinessFindings(state, meta()))).not.toContain("deposit_vs_payment_terms");
+  });
+
+  it("stays quiet when there is no deposit at all", () => {
+    const state = healthyState();
+    state.fields.paymentTerms = "Net 30 from invoice date";
+    expect(ids(collectReadinessFindings(state, meta()))).not.toContain("deposit_vs_payment_terms");
+  });
+
+  it("catches a validity date that contradicts the days printed beside it", () => {
+    const state = healthyState();
+    state.fields.validDays = "60";
+    state.fields.proposalDate = "2026-08-01";
+    // 2026-08-16 is 15 days out, not 60.
+    const finding = collectReadinessFindings(state, meta({ validUntil: "2026-08-16" })).find(
+      (entry) => entry.id === "valid_days_vs_valid_until",
+    );
+    expect(finding?.severity).toBe("warn");
+    expect(finding?.message).toContain("60 days");
+    expect(finding?.message).toContain("15 days");
+  });
+
+  it("tolerates rounding between the two", () => {
+    const state = healthyState();
+    state.fields.validDays = "60";
+    state.fields.proposalDate = "2026-08-01";
+    // 61 days — a seller rounding to "60 days" is not a defect.
+    expect(ids(collectReadinessFindings(state, meta({ validUntil: "2026-10-01" })))).not.toContain(
+      "valid_days_vs_valid_until",
+    );
+  });
+
+  it("errors on an engagement term that ends before it starts", () => {
+    const state = healthyState();
+    Object.assign(state.fields, {
+      termStartMonth: "9",
+      termStartYear: "2026",
+      termEndMonth: "3",
+      termEndYear: "2026",
+    });
+    const finding = collectReadinessFindings(state, meta()).find((entry) => entry.id === "term_reversed");
+    expect(finding?.severity).toBe("error");
+  });
+
+  it("warns when the engagement starts after the proposal stops being acceptable", () => {
+    const state = healthyState();
+    Object.assign(state.fields, {
+      termStartMonth: "11",
+      termStartYear: "2026",
+      termEndMonth: "12",
+      termEndYear: "2026",
+    });
+    const finding = collectReadinessFindings(state, meta({ validUntil: "2026-09-30" })).find(
+      (entry) => entry.id === "term_starts_after_validity",
+    );
+    expect(finding?.severity).toBe("warn");
+    expect(finding?.message).toContain("November 2026");
+  });
+
+  it("accepts a term that starts within the acceptance window", () => {
+    const state = healthyState();
+    Object.assign(state.fields, {
+      termStartMonth: "9",
+      termStartYear: "2026",
+      termEndMonth: "12",
+      termEndYear: "2026",
+    });
+    expect(ids(collectReadinessFindings(state, meta({ validUntil: "2026-09-30" })))).not.toContain(
+      "term_starts_after_validity",
+    );
+  });
+
+  it("flags pilot billing on a proposal that is not a pilot", () => {
+    const state = healthyState();
+    state.fields.billingTerm = "One-time (pilot)";
+    state.fields.packageSelect = "enterprise";
+    expect(ids(collectReadinessFindings(state, meta()))).toContain("billing_term_says_pilot");
+  });
+
+  it("allows pilot billing on an actual pilot", () => {
+    const state = healthyState();
+    state.fields.billingTerm = "One-time (pilot)";
+    state.fields.packageSelect = "custom";
+    expect(ids(collectReadinessFindings(state, meta()))).not.toContain("billing_term_says_pilot");
   });
 });
