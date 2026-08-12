@@ -352,11 +352,16 @@ function buildPackageLine(state: GeneratorState | null | undefined): ProposalLin
   const term = parseProposalTerm(state?.fields);
   const termPrefix = term.durationLabel ? `${term.durationLabel} ` : "";
 
+  // Zero counts mean "not set yet" on a blank proposal, so the includes clause
+  // is omitted rather than printing "includes 0 users and 0 sites" in the fee
+  // table's description column.
+  const includesClause = users > 0 || sites > 0 ? ` — includes ${users} users and ${sites} sites` : "";
+
   return {
     source: "package",
     key: resolvedKey,
     name: base.name,
-    desc: `Platform access for the ${termPrefix}term — includes ${users} users and ${sites} sites.`,
+    desc: `Platform access for the ${termPrefix}term${includesClause}.`,
     qty,
     price,
     amount: roundCents(qty * price),

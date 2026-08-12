@@ -169,7 +169,7 @@ export const serviceOptions = freezeCatalog({
   heat: { name: "Heat Illness Prevention Training", price: 425, unit: "Session", group: "Training Catalog", desc: "Heat illness warning signs and emergency response, acclimatization schedules, water, rest, and shade practices, and supervisor monitoring on high heat index days." },
   ergo: { name: "Ergonomics Training", price: 450, unit: "Session", group: "Training Catalog", desc: "Manual material handling, awkward posture and repetition risk factors, early symptom reporting, and practical task redesign for both field and office work." },
   bbp: { name: "Bloodborne Pathogens Training", price: 400, unit: "Session", group: "Training Catalog", desc: "Exposure control plan, universal precautions, sharps handling and spill cleanup, and post-exposure evaluation under 29 C.F.R. sec.1910.1030." },
-  firstAid: { name: "First Aid / CPR / AED Coordination", price: 1200, unit: "Session", group: "Training Catalog", desc: "Certification coordinated through an approved provider, covering adult CPR, AED use, bleeding control, and workplace first aid response." },
+  firstAid: { name: "First Aid / CPR / AED Training", price: 1200, unit: "Session", group: "Training Catalog", desc: "Instructor-led certification course covering adult CPR, AED operation, choking response, bleeding control, and workplace first aid. Certification cards are issued to each attendee." },
   incident: { name: "Incident Investigation Training", price: 750, unit: "Session", group: "Training Catalog", desc: "Scene control, evidence and statement gathering, root cause analysis methods, corrective action development, and writing a defensible investigation report." },
   jsaT: { name: "JHA / JSA Training", price: 650, unit: "Session", group: "Training Catalog", desc: "Breaking a task into steps, identifying the hazard in each step, selecting controls by the hierarchy, and running the completed JSA as a crew briefing." },
   driving: { name: "Defensive Driving Training", price: 700, unit: "Session", group: "Training Catalog", desc: "Space and speed management, distraction and fatigue, adverse conditions, backing and spotter use, and company vehicle incident reporting." },
@@ -210,12 +210,37 @@ export const packageData = freezeCatalog({
   enterprise: { name: "Enterprise Predictive Safety", price: 99500, users: 100, sites: 10, desc: "Full multi-site safety intelligence package with stronger predictive risk capability, AI-supported review, and executive visibility." },
   blacklabel: { name: "Black Label Strategic Program", price: 155000, users: 250, sites: 25, desc: "Strategic enterprise program for organizations requiring advanced safety intelligence, multi-site governance, and premium implementation support." },
   custom: { name: "Pilot Program — Platform Access", price: 5000, users: 50, sites: 2, desc: "A fixed-price pilot providing platform access for the included users and jobsites shown below, with no additional setup or licensing cost during the pilot term." },
+  blank: { name: "Platform Services", price: 0, users: 0, sites: 0, desc: "Platform access and services as scoped in this proposal." },
 } as const satisfies Record<string, PackageOption>);
 
 export type PackageKey = keyof typeof packageData;
 
-/** The package the asset preselects (`<option value="custom" selected>`). */
-export const defaultPackageKey: PackageKey = "custom";
+/**
+ * The package the asset preselects (`<option value="blank" selected>`).
+ *
+ * `custom` held this slot, and `custom` is the PILOT. It was also the only
+ * manual-price option, so a seller who wanted to set their own price got the
+ * pilot's language whether they wanted it or not: the document headline became
+ * "6-Month Pilot & Platform Access Proposal" and the price pill read "Pilot
+ * Price". There was no way to quote ordinary platform work at a custom price.
+ *
+ * `blank` is that missing option — manual price, no pilot framing, and zero
+ * counts so nothing is asserted about users or jobsites until the seller says
+ * so. A pilot is now something you choose, not something you have to escape.
+ */
+export const defaultPackageKey: PackageKey = "blank";
+
+/**
+ * True when this package makes the document talk about a pilot.
+ *
+ * Isolated here so the pilot is a property of ONE catalog entry rather than a
+ * `key === "custom"` comparison repeated across the renderer, the view-model
+ * and the asset — which is how "manual price" and "pilot" became the same
+ * thing in the first place.
+ */
+export function isPilotPackageKey(key: string): boolean {
+  return key === "custom";
+}
 
 /** Narrowing helpers — a persisted state may carry a key that no longer exists. */
 export function isPhaseKey(key: string): key is PhaseKey {

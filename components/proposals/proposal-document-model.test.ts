@@ -333,10 +333,11 @@ describe("buildProposalDocumentModel — empty and malformed state", () => {
   it("still shows the base subscription row the generator itself would render", () => {
     expect(model.feeGroups).toHaveLength(1);
     expect(model.feeGroups[0].label).toBe("Base Subscription");
-    expect(model.feeGroups[0].rows[0].name).toBe(packageData.custom.name);
+    // `blank` is what the generator preselects — the pilot is now an explicit choice.
+    expect(model.feeGroups[0].rows[0].name).toBe(packageData.blank.name);
     expect(model.totalRows[3]).toEqual({
       label: "Total",
-      value: "$5,000",
+      value: "No cost",
       emphasis: "total",
     });
   });
@@ -513,5 +514,79 @@ describe("buildProposalDocumentModel — page budget", () => {
     expect(model.exclusions).toBe(exclusions.trim());
     expect(model.serviceScope[0].body).toBe(scope.trim());
     expect(model.feeGroups.flatMap((group) => group.rows)).toHaveLength(2);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The blank package                                                           */
+/*                                                                             */
+/* `custom` was both "manual price" AND "the pilot", so a seller who wanted to  */
+/* set their own price got pilot language on a client document whether the      */
+/* engagement was a pilot or not. `blank` is the missing option.                */
+/* -------------------------------------------------------------------------- */
+
+describe("blank package", () => {
+  function model(fields: Record<string, string>) {
+    return buildProposalDocumentModel({
+      state: { v: 1, fields, phases: [], services: [] },
+      proposal: subject(),
+    });
+  }
+
+  it("says nothing about a pilot anywhere on the document", () => {
+    const built = model({ packageSelect: "blank", annualPrice: "18000" });
+
+    expect(built.docline).toBe("Platform Services Proposal");
+    expect(built.docline).not.toMatch(/pilot/i);
+    expect(built.packageIntro).not.toMatch(/pilot/i);
+    expect(built.packagePills.find((pill) => pill.label.endsWith("Price"))?.label).toBe("Subscription Price");
+  });
+
+  it("is what an empty state falls back to, so a new proposal is not a pilot", () => {
+    const built = model({});
+    expect(built.docline).not.toMatch(/pilot/i);
+    expect(built.packageIntro).toContain("Platform Services");
+  });
+
+  it("keeps the pilot available as an explicit choice", () => {
+    const built = model({ packageSelect: "custom", annualPrice: "5000" });
+    expect(built.docline).toMatch(/Pilot & Platform Access Proposal/);
+    expect(built.packagePills.find((pill) => pill.label.endsWith("Price"))?.label).toBe("Pilot Price");
+  });
+
+  it("prints no count it has not been given", () => {
+    // "Included limits are 0 users across 0 jobsites" reads as a quoted limit of
+    // zero rather than a figure nobody has set yet.
+    const built = model({ packageSelect: "blank" });
+
+    expect(built.packageIntro).not.toMatch(/\b0 users?\b/);
+    expect(built.packageIntro).not.toMatch(/\b0 jobsites?\b/);
+    expect(built.packageIntro).not.toMatch(/Included limits/);
+    expect(built.packagePills.map((pill) => pill.label)).not.toContain("Included Users");
+    expect(built.packagePills.map((pill) => pill.label)).not.toContain("Included Jobsites");
+    expect(built.feeGroups[0].rows[0].desc).toBe("Platform access for the term.");
+  });
+
+  it("states the limits as soon as the seller sets either one", () => {
+    const built = model({ packageSelect: "blank", includedUsers: "40" });
+
+    expect(built.packageIntro).toContain("Included limits are 40 users");
+    expect(built.packagePills.map((pill) => pill.label)).toContain("Included Users");
+    // Jobsites is still zero, so its pill stays off.
+    expect(built.packagePills.map((pill) => pill.label)).not.toContain("Included Jobsites");
+  });
+
+  it("still carries the term when there are no counts", () => {
+    const built = model({
+      packageSelect: "blank",
+      termStartMonth: "3",
+      termStartYear: "2026",
+      termEndMonth: "8",
+      termEndYear: "2026",
+    });
+
+    expect(built.packageIntro).toContain("March 2026 – August 2026");
+    expect(built.packageIntro).toContain("6-month");
+    expect(built.packageIntro).not.toMatch(/0 users/);
   });
 });

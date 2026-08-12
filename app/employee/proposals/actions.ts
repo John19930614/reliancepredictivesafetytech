@@ -110,23 +110,38 @@ async function recordProposalAudit(
  * arrays would open a brand-new proposal with no line items at all. The asset
  * seeds no default SERVICE rows, so `services` stays empty.
  */
-const defaultPilotPhases: ReadonlyArray<{ key: PhaseKey; desc: string }> = [
+/**
+ * Phases a brand-new proposal opens with.
+ *
+ * These used to be pilot copy — "configuration of the two pilot jobsites",
+ * "across the 6-month pilot", every line ending "— included in the pilot." Two
+ * problems with that. Every proposal started life announcing a pilot whether it
+ * was one or not, and the sentences hardcoded a jobsite count and a term length
+ * that no field controlled, so they stayed wrong however the seller edited the
+ * proposal beside them. They were exactly the drift lib/proposals/consistency.ts
+ * now flags, shipped as the default.
+ *
+ * Neutral now, and free of counts and durations — the same COPY RULE the
+ * package catalog follows. A seller quoting a pilot picks the Basic Pilot
+ * package and writes the pilot's terms themselves.
+ */
+const defaultPhases: ReadonlyArray<{ key: PhaseKey; desc: string }> = [
   {
     key: "discovery",
-    desc: "Kickoff, platform access setup, and configuration of the two pilot jobsites and user accounts — included in the pilot.",
+    desc: "Kickoff, platform access setup, and configuration of the jobsites and user accounts in scope.",
   },
   {
     key: "build",
-    desc: "Configure modules, templates, dashboards, and workflows for pilot use — included in the pilot.",
+    desc: "Configure modules, templates, dashboards, and workflows for day-to-day use.",
   },
   {
     key: "launch",
-    desc: "User training, launch support, and check-ins across the 6-month pilot — included in the pilot.",
+    desc: "User training, launch support, and check-ins across the engagement term.",
   },
 ];
 
 function buildDefaultPhaseItems(): GeneratorItem[] {
-  return defaultPilotPhases.map(({ key, desc }) => ({
+  return defaultPhases.map(({ key, desc }) => ({
     type: "phase",
     key,
     name: lookupPhase(key)?.name ?? "",

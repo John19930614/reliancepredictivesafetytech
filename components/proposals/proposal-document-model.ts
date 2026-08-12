@@ -15,6 +15,7 @@
 // pricing, and nothing trusts a persisted numeric value directly.
 
 import {
+  isPilotPackageKey,
   lookupPackage,
   lookupService,
   packageData,
@@ -532,9 +533,18 @@ export function buildPackageDescription(input: {
 }): string {
   const termClause = input.term.rangeLabel ? ` for the term ${input.term.rangeLabel}` : "";
   const durationClause = input.term.durationLabel ? ` for the full ${input.term.durationLabel} term` : "";
+  const opening = `${input.packageName} is the proposed base subscription${termClause}. ${input.packageDesc}`;
+
+  // A blank proposal starts with no counts, and "Included limits are 0 users
+  // across 0 jobsites" is worse than saying nothing — it reads as a quoted
+  // limit of zero rather than a figure the seller has not set yet. The clause
+  // appears as soon as either number does.
+  if (input.users <= 0 && input.sites <= 0) {
+    return durationClause ? `${opening} The engagement runs${durationClause}.` : opening;
+  }
+
   return (
-    `${input.packageName} is the proposed base subscription${termClause}. ${input.packageDesc} ` +
-    `Included limits are ${plural(input.users, "user")} across ` +
+    `${opening} Included limits are ${plural(input.users, "user")} across ` +
     `${plural(input.sites, "jobsite")}${durationClause}.`
   );
 }
@@ -669,7 +679,7 @@ export function buildProposalDocumentModel({
   // The pilot package is the only one whose document copy talks about a "pilot";
   // an Enterprise or Black Label proposal headlined "Pilot Program Proposal" was
   // simply wrong.
-  const isPilotPackage = (packageRow?.key ?? defaultPackageKey) === "custom";
+  const isPilotPackage = isPilotPackageKey(packageRow?.key ?? defaultPackageKey);
 
   const scheduleTermClause = term.rangeLabel
     ? ` The engagement term runs ${term.rangeLabel}.`
@@ -701,11 +711,13 @@ export function buildProposalDocumentModel({
       sites: includedSites,
       term,
     }),
+    // A count of zero is "not set yet", not a quoted limit — the pill is
+    // dropped rather than printing "Included Users: 0" on a blank proposal.
     packagePills: [
       { label: isPilotPackage ? "Pilot Price" : "Subscription Price", value: formatLineAmount(packageRow?.price ?? 0) },
       { label: "Term", value: term.rangeLabel ?? missingValue },
-      { label: "Included Users", value: String(includedUsers) },
-      { label: "Included Jobsites", value: String(includedSites) },
+      ...(includedUsers > 0 ? [{ label: "Included Users", value: String(includedUsers) }] : []),
+      ...(includedSites > 0 ? [{ label: "Included Jobsites", value: String(includedSites) }] : []),
       { label: "Billing", value: billingTerm },
     ],
     phaseScope,

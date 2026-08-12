@@ -244,11 +244,11 @@ describe("ProposalDocument — degenerate state", () => {
     expect(sectionNumbers).toEqual(["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"]);
 
     // With nothing selected, the fee table falls back to the generator's own
-    // preselected pilot package rather than rendering an empty table.
-    expect(feeRowByName(container, "Pilot Program — Platform Access").cells[4].textContent).toBe(
-      "$5,000",
-    );
-    expect(totalsRow(container, "Total").cells[1].textContent).toBe("$5,000");
+    // preselected package rather than rendering an empty table. That is now
+    // `blank` — manual price, no pilot wording — so the row prices at nothing
+    // until the seller sets a figure.
+    expect(feeRowByName(container, "Platform Services").cells[4].textContent).toBe("No cost");
+    expect(totalsRow(container, "Total").cells[1].textContent).toBe("No cost");
     // A 0% deposit is a real commercial position ("nothing due at signing"), so
     // it says so in words rather than printing "$0".
     expect(totalsRow(container, "Deposit Due at Acceptance").cells[1].textContent).toBe("No cost");
