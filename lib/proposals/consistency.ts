@@ -30,6 +30,7 @@ import {
 import type { GeneratorItem, GeneratorState } from "./generator-state";
 import { computeProposalTotals, formatMoney } from "./pricing";
 import { parseProposalTerm } from "./term";
+import { proposalTypeLabelFromState } from "./transaction-templates";
 
 /* -------------------------------------------------------------------------- */
 /* Field access — a persisted state is untrusted input                         */
@@ -72,12 +73,25 @@ function readItems(value: unknown): GeneratorItem[] {
  * the instruction the model gets can never disagree.
  */
 export interface ProposalFacts {
+  /**
+   * True when this proposal sells NO platform subscription — a training
+   * calendar, three written programs, a block of consulting hours, a monthly
+   * advisory retainer. Everything a subscription implies is then absent rather
+   * than zero: `users`, `sites`, `packageName` and `packagePrice` are not
+   * quantities the seller left blank, they are quantities this deal does not
+   * have. Consumers must branch on this rather than printing "0 users" or a
+   * "$0 base subscription", which is what the AI reviewer was being told.
+   */
+  servicesOnly: boolean;
+  /** "Training Services", "Fixed-Price Services"… or null if no type is stamped. */
+  proposalTypeLabel: string | null;
   users: number;
   sites: number;
   /** Inclusive month count, or null when the term is unset/reversed. */
   termMonths: number | null;
   /** "August 2026 – December 2026", or null. */
   termRangeLabel: string | null;
+  /** "" on a services-only engagement: there is no package. */
   packageName: string;
   packagePrice: number;
   subtotal: number;
@@ -107,7 +121,6 @@ export function collectProposalFacts(state: GeneratorState | null | undefined): 
   const term = parseProposalTerm(state?.fields);
 
   const packageRow = totals.lineItems.find((row) => row.source === "package") ?? null;
-  const packageOption = lookupPackage(packageRow?.key ?? "") ?? packageData[defaultPackageKey];
 
   const moneyFigures = new Set<number>([
     packageRow?.price ?? 0,
@@ -130,21 +143,42 @@ export function collectProposalFacts(state: GeneratorState | null | undefined): 
   // "Included users: 50 · Included jobsites: 2" as AUTHORITATIVE FACTS — under
   // a prompt rule telling it never to introduce a number that is not in that
   // block. The reviewer was being invited to write seats into a class roster.
-  const servicesOnly = isNoPlatformPackageKey(packageRow?.key ?? "");
+  //
+  // READ FROM THE STATE, NOT FROM THE ROW. buildPackageLine() returns null for a
+  // services engagement — the row is omitted rather than priced at zero — so
+  // `packageRow?.key ?? ""` asked isNoPlatformPackageKey("") and got false, and
+  // this guard never once fired on the proposals it was written for.
+  const selectedPackageKey = fieldText(state, "packageSelect", defaultPackageKey);
+  const servicesOnly = isNoPlatformPackageKey(packageRow?.key ?? selectedPackageKey);
+  // Null rather than a package on a services deal: lookupPackage("") used to
+  // fall through to the default package and report "Platform Services" as the
+  // base subscription of a training proposal.
+  const packageOption = servicesOnly
+    ? null
+    : lookupPackage(packageRow?.key ?? selectedPackageKey) ?? packageData[defaultPackageKey];
+
+  const proposalTypeLabel = proposalTypeLabelFromState(state?.fields);
 
   return {
-    users: servicesOnly ? 0 : fieldCount(state, "includedUsers", packageOption.users),
-    sites: servicesOnly ? 0 : fieldCount(state, "includedSites", packageOption.sites),
+    servicesOnly,
+    proposalTypeLabel,
+    users: packageOption ? fieldCount(state, "includedUsers", packageOption.users) : 0,
+    sites: packageOption ? fieldCount(state, "includedSites", packageOption.sites) : 0,
     termMonths: term.months,
     termRangeLabel: term.rangeLabel,
-    packageName: packageOption.name,
+    packageName: packageOption?.name ?? "",
     packagePrice: packageRow?.price ?? 0,
     subtotal: totals.subtotal,
     discount: totals.discount,
     tax: totals.tax,
     total: totals.total,
     deposit: totals.deposit,
-    billingTerm: fieldText(state, "billingTerm", "One-time (pilot)"),
+    // "One-time (pilot)" is the asset's selected <option>, so it is what an
+    // untyped proposal showed and must keep showing. On a typed proposal it is
+    // a different deal's billing cadence, and handing it to the AI as an
+    // AUTHORITATIVE FACT invited the reviewer to write "pilot" into a training
+    // document. Same rule as documentTermDefaults.billingTerm.
+    billingTerm: fieldText(state, "billingTerm", proposalTypeLabel ? "" : "One-time (pilot)"),
     paymentTerms: fieldText(state, "paymentTerms", "Net 30 from invoice date"),
     validDays: fieldText(state, "validDays", "60"),
     moneyFigures: [...moneyFigures],
@@ -361,10 +395,20 @@ function buildRules(): TopicRule[] {
   ];
 }
 
-/** The count the rule is checking against, or null when it is not knowable. */
+/**
+ * The count the rule is checking against, or null when it is not knowable.
+ *
+ * Seats and jobsites are not knowable on a services-only engagement: there is
+ * no Included Users field in play, so the answer is "this deal has none", not
+ * "this deal has zero". Comparing prose against 0 there turns every ordinary
+ * sentence into a finding — a training proposal saying sessions run "at three
+ * locations" was flagged as contradicting an Included Jobsites count that the
+ * document does not print and the seller never set. The term rule still
+ * applies: a services engagement can absolutely have dates.
+ */
 function expectedFor(topic: TopicRule["topic"], facts: ProposalFacts): number | null {
-  if (topic === "users") return facts.users;
-  if (topic === "sites") return facts.sites;
+  if (topic === "users") return facts.servicesOnly ? null : facts.users;
+  if (topic === "sites") return facts.servicesOnly ? null : facts.sites;
   return facts.termMonths;
 }
 
@@ -443,9 +487,13 @@ export function scanProposalConsistency(state: GeneratorState | null | undefined
         quote: money[0].trim(),
         claimed,
         expected: facts.total,
-        message:
-          `Quotes ${money[0].trim()}, which is not on the pricing schedule — ` +
-          `the total is ${formatMoney(facts.total)} and the base subscription is ${formatMoney(facts.packagePrice)}.`,
+        // There is no base subscription to cite on a services engagement, and
+        // naming one at $0.00 in the warning made the seller hunt for a line
+        // the document does not contain.
+        message: facts.servicesOnly
+          ? `Quotes ${money[0].trim()}, which is not on the pricing schedule — the total is ${formatMoney(facts.total)}.`
+          : `Quotes ${money[0].trim()}, which is not on the pricing schedule — ` +
+            `the total is ${formatMoney(facts.total)} and the base subscription is ${formatMoney(facts.packagePrice)}.`,
       });
     }
   }

@@ -726,15 +726,29 @@ export async function renderProposalPdf({ model, documentTitle }: ProposalPdfOpt
   drawSectionHeading(layout, "03", model.scopeHeading);
   layout.text(model.scopeIntro);
   layout.space(2);
-  const scope = [...model.phaseScope, ...model.serviceScope];
-  if (scope.length === 0) {
-    layout.text("No implementation phases or service lines selected.", { color: MUTED });
-  }
-  for (const entry of scope) {
-    layout.space(3);
-    layout.text(entry.heading, { font: fonts.bold, size: 8.8, color: NAVY });
-    if (entry.body) layout.text(entry.body);
-  }
+  // The two lists are drawn SEPARATELY, each with its own empty-state note —
+  // the same shape as ProposalDocument.tsx:181-204 and pushScope() in docx.ts.
+  // Gating both notes on the COMBINED list (as this did) meant a subscription
+  // proposal carrying implementation phases and no add-ons printed "No added
+  // service lines selected." on screen and in Word, and nothing at all in the
+  // PDF — which is the file DocuSign sends.
+  //
+  // A note that is "" is a deliberate blank: a services engagement has no
+  // implementation phases BY DESIGN, and telling a training client its proposal
+  // is missing something it never had is the defect the model already fixed.
+  const drawScope = (entries: typeof model.phaseScope, emptyNote: string) => {
+    if (entries.length === 0) {
+      if (emptyNote) layout.text(emptyNote, { color: MUTED });
+      return;
+    }
+    for (const entry of entries) {
+      layout.space(3);
+      layout.text(entry.heading, { font: fonts.bold, size: 8.8, color: NAVY });
+      if (entry.body) layout.text(entry.body);
+    }
+  };
+  drawScope(model.phaseScope, model.phaseEmptyNote);
+  drawScope(model.serviceScope, model.serviceEmptyNote);
 
   /* --- 04 Deliverables --------------------------------------------------- */
   drawSectionHeading(layout, "04", "Deliverables");

@@ -320,7 +320,18 @@ const definitions: Readonly<Record<TransactionTemplateKey, TransactionTemplateDe
       "This proposal establishes an ongoing safety advisory retainer. The recurring scope in the schedule covers standing support: advisory access for safety questions as they arise, review of your safety reporting, and management-ready summaries on a regular cadence. The retainer is billed on the recurring term shown in the schedule and continues until adjusted or ended under the terms below — support is in place before issues become incidents, not after.",
     customExclusions:
       "The retainer covers the recurring services listed in the schedule. Project work — new safety programs, audits beyond the recurring cadence, incident response support, or training engagements — is scoped and quoted separately as it arises. Either party may adjust or end the retainer under the termination terms in this proposal.",
-    phases: [{ key: "ongoing" }],
+    // The catalog's own "Ongoing Support" sentence reads "Monthly account
+    // support, billing review, platform adjustments, and management reporting"
+    // — platform work, quoted on a document whose section 02 states that no
+    // platform subscription is included. Overridden here rather than in the
+    // catalog, because on a platform retainer that catalog wording is right;
+    // it is only wrong for THIS type, which is what a seed override is for.
+    phases: [
+      {
+        key: "ongoing",
+        desc: "Standing advisory access for safety questions as they arise, review of your incident and inspection reporting, and a written summary of activity, recommendations, and open items each period.",
+      },
+    ],
     services: [],
   },
 

@@ -58,6 +58,34 @@ describe("isGeneratorState", () => {
     expect(isGeneratorState(withPhase(item({ qty: 0.5, price: -250 })))).toBe(true);
   });
 
+  /* ------------------------------------------------------------------------ */
+  /* Legacy shapes. A false rejection here is not a caught attack — it is a    */
+  /* real proposal that stops rendering, so every one of these must pass.      */
+  /* ------------------------------------------------------------------------ */
+
+  it("accepts a row saved before the per-participant repricing, unit and all", () => {
+    // First Aid was a $1,200 session in July and is $145 per participant now.
+    // The guard validates SHAPE, never agreement with today's price book — a
+    // stored row that disagrees with the catalog is exactly what it should be.
+    expect(
+      isGeneratorState(
+        withService(item({ type: "service", key: "firstAid", name: "", desc: "", qty: 1, price: 1200, unit: "Session" })),
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts a headcount quantity, and a proposal with no proposalType stamp", () => {
+    expect(isGeneratorState(withService(item({ type: "service", key: "osha10", qty: 250, price: 210, unit: "Person" })))).toBe(true);
+    const untyped = { v: 1, fields: { packageSelect: "none" }, phases: [], services: [] };
+    expect(isGeneratorState(untyped)).toBe(true);
+    expect("proposalType" in untyped.fields).toBe(false);
+  });
+
+  it("accepts a row that carries a key the price book no longer has", () => {
+    // Retiring a catalog entry must not strand the proposals that quoted it.
+    expect(isGeneratorState(withService(item({ type: "service", key: "retiredCourse", qty: 3, price: 400 })))).toBe(true);
+  });
+
   it("rejects malformed payloads", () => {
     expect(isGeneratorState(null)).toBe(false);
     expect(isGeneratorState("{}")).toBe(false);

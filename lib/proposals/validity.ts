@@ -46,7 +46,13 @@ export function daysUntilProposalExpiry(validUntil: unknown, today: unknown): nu
   if (!isCalendarDate(validUntil) || !isCalendarDate(today)) return null;
   const toUtc = (value: string) => {
     const [year, month, day] = value.trim().split("-").map(Number);
-    return Date.UTC(year, month - 1, day);
+    // Date.UTC maps years 0-99 onto 1900-1999, so "0026-08-12" — what a date
+    // input produces when a seller types a two-digit year and tabs away — was
+    // measured as 1926 and reported as 36,525 days out instead of 730,485.
+    // setUTCFullYear takes the year literally.
+    const stamp = new Date(Date.UTC(year, month - 1, day));
+    stamp.setUTCFullYear(year);
+    return stamp.getTime();
   };
   return Math.round((toUtc(validUntil) - toUtc(today)) / 86_400_000);
 }

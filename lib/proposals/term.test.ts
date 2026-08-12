@@ -75,6 +75,69 @@ describe("parseProposalTerm", () => {
     }
   });
 
+  it("spans several years for a multi-year agreement", () => {
+    const term = parseProposalTerm(
+      fields({
+        [termFieldIds.startMonth]: "1",
+        [termFieldIds.startYear]: "2026",
+        [termFieldIds.endMonth]: "12",
+        [termFieldIds.endYear]: "2028",
+      }),
+    );
+    expect(term.months).toBe(36);
+    expect(term.durationLabel).toBe("36-month");
+  });
+
+  it("crosses December into January without losing a month", () => {
+    const term = parseProposalTerm(
+      fields({
+        [termFieldIds.startMonth]: "12",
+        [termFieldIds.startYear]: "2026",
+        [termFieldIds.endMonth]: "1",
+        [termFieldIds.endYear]: "2027",
+      }),
+    );
+    expect(term.months).toBe(2);
+    expect(term.rangeLabel).toBe("December 2026 – January 2027");
+  });
+
+  it("treats a same-month reversal as reversed only when the end year is earlier", () => {
+    // March 2026 – March 2025 is a year backwards, not a one-month term.
+    const term = parseProposalTerm(
+      fields({ [termFieldIds.endMonth]: "3", [termFieldIds.endYear]: "2025" }),
+    );
+    expect(term.months).toBeNull();
+    expect(term.reversed).toBe(true);
+  });
+
+  it("accepts a term that started before the proposal was written", () => {
+    // A renewal quoted mid-term: the start is in the past, which is a fact
+    // about the deal, not a malformed range. parseProposalTerm holds no clock
+    // and must not second-guess it.
+    const term = parseProposalTerm(
+      fields({ [termFieldIds.startMonth]: "1", [termFieldIds.startYear]: "2020", [termFieldIds.endYear]: "2020" }),
+    );
+    expect(term.months).toBe(8);
+    expect(term.reversed).toBe(false);
+    expect(term.rangeLabel).toBe("January 2020 – August 2020");
+  });
+
+  it("holds the four-digit year boundaries it advertises", () => {
+    const low = parseProposalTerm(fields({ [termFieldIds.startYear]: "1000" }));
+    expect(low.start?.label).toBe("March 1000");
+    expect(parseProposalTerm(fields({ [termFieldIds.startYear]: "999" })).start).toBeNull();
+    expect(parseProposalTerm(fields({ [termFieldIds.startYear]: "10000" })).start).toBeNull();
+  });
+
+  it("truncates a fractional month rather than rounding it into the next one", () => {
+    expect(parseProposalTerm(fields({ [termFieldIds.startMonth]: "3.9" })).start?.label).toBe("March 2026");
+  });
+
+  it("reads no endpoint from a boolean or blank field value", () => {
+    expect(parseProposalTerm(fields({ [termFieldIds.startMonth]: true })).start).toBeNull();
+    expect(parseProposalTerm(fields({ [termFieldIds.startYear]: "   " })).start).toBeNull();
+  });
+
   it("rejects out-of-range months and implausible years", () => {
     expect(parseProposalTerm(fields({ [termFieldIds.startMonth]: "0" })).start).toBeNull();
     expect(parseProposalTerm(fields({ [termFieldIds.startMonth]: "13" })).start).toBeNull();

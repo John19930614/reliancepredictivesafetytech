@@ -152,6 +152,20 @@ export function formatDocumentDate(value: string | null | undefined): string {
 export const documentTermDefaults = Object.freeze({
   sellerName: "Reliance Predictive Safety Technologies",
   validDays: "60",
+  /**
+   * The asset's `selected` Billing Term option — and the ONLY member of this
+   * object that names a specific deal.
+   *
+   * It is kept because it is what a proposal written before proposal types
+   * existed printed when its state carried no billingTerm, and those documents
+   * must keep rendering what they were sent as. It is NOT a safe default for a
+   * typed proposal: "Billing: One-time (pilot)" on a training or retainer
+   * document announces a pilot nobody is buying. buildProposalDocumentModel
+   * therefore applies it only when no type is stamped; a typed proposal with no
+   * billing term chosen prints no billing term at all rather than a borrowed
+   * one. Same rule in collectProposalFacts (lib/proposals/consistency.ts),
+   * which feeds the AI reviewer.
+   */
   billingTerm: "One-time (pilot)",
   paymentTerms: "Net 30 from invoice date",
   lateFee: "1.5% per month on past-due undisputed balances",
@@ -167,7 +181,14 @@ export const documentTermDefaults = Object.freeze({
 /** Static document copy transcribed verbatim from the asset's markup. */
 export const documentCopy = Object.freeze({
   subtitle: "Safety Intelligence, Compliance Support, and Predictive Risk Platform Services",
-  /** Used only when the term dates are missing; otherwise the docline is derived. */
+  /**
+   * The PILOT's docline when no term dates were entered.
+   *
+   * Reachable only from buildDocline's `isPilot` branch — i.e. only when the
+   * seller actually selected the pilot package. It is not a general fallback
+   * and must never become one: a training proposal with no dates headlined
+   * "Pilot & Platform Access Proposal" is the first line the client reads.
+   */
   doclineFallback: "Pilot & Platform Access Proposal",
   purposeCallout:
     "This document establishes the proposed scope, pricing, payment structure, deliverables, assumptions, and commercial terms for platform billing and related safety technology support.",
@@ -175,6 +196,21 @@ export const documentCopy = Object.freeze({
     "The selected services are organized into practical work phases and service lines so the proposal can be scaled for a small pilot, a single jobsite, a multi-site deployment, or a full enterprise platform rollout.",
   acceptance:
     "By signing below, the client authorizes the seller to proceed with the services described in this proposal, subject to the scope, fees, assumptions, and terms stated herein or as otherwise modified by a mutually executed agreement.",
+  /**
+   * Section 03's empty-state notes — for a SUBSCRIPTION document only.
+   *
+   * Both sentences describe something missing. On a platform proposal that is
+   * true: a rollout with no implementation phases and no add-ons is an
+   * unfinished scope. On a services engagement it is false. A training proposal
+   * has no implementation phases BY DESIGN, and its courses are not "added
+   * service lines" bolted onto a subscription — they are the entire deal. The
+   * document was printing two italic notes telling a training client what its
+   * proposal lacked, when it lacked nothing.
+   *
+   * Reach for `model.phaseEmptyNote` / `model.serviceEmptyNote` rather than
+   * these constants: the model blanks them for a services-only engagement, and
+   * a renderer that reads documentCopy directly cannot see that.
+   */
   noPhases: "No implementation phases selected.",
   noServices: "No added service lines selected.",
   noSummary: "No executive summary was recorded for this proposal.",
@@ -447,6 +483,21 @@ export interface ProposalDocumentModel {
   proposalTypeLabel: string | null;
   phaseScope: DocumentScopeEntry[];
   serviceScope: DocumentScopeEntry[];
+  /**
+   * What section 03 prints when `phaseScope` / `serviceScope` is empty. "" means
+   * print nothing.
+   *
+   * Carried on the model because whether an absence is worth mentioning depends
+   * on the deal: a platform rollout with no implementation phases is missing
+   * something, a training proposal is not. All three renderers used to state the
+   * absence unconditionally — ProposalDocument.tsx from documentCopy, pdf.ts and
+   * docx.ts from their own hardcoded copies of the same sentences — so a
+   * training document told the client it had "No implementation phases
+   * selected." and "No added service lines selected." when the courses were
+   * sitting in the fee table two sections down.
+   */
+  phaseEmptyNote: string;
+  serviceEmptyNote: string;
   deliverables: string[];
   /** One sentence naming the phase/service lines section 04 also covers; "" when none. */
   deliverablesCoverage: string;
@@ -498,10 +549,29 @@ export interface ProposalDocumentModelInput {
 /* Builder                                                                     */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The headings above each block of fee rows.
+ *
+ * Two of the three were written for a subscription sale. "Implementation
+ * Phases" is what a platform rollout has; a retainer's recurring advisory line
+ * is not an implementation. "Service Lines & Add-Ons" says the rows are add-ons
+ * to something — and on a training, fixed-price, T&M or retainer proposal there
+ * is nothing to add them to: those rows ARE the deal. A training client read
+ * their whole course schedule filed under "Add-Ons".
+ *
+ * "Base Subscription" needs no variant: buildPackageLine() omits the package row
+ * entirely on a services engagement, so that group never renders there.
+ */
 const feeGroupLabels: Record<ProposalLineItem["source"], string> = {
   package: "Base Subscription",
   phase: "Implementation Phases",
   service: "Service Lines & Add-Ons",
+};
+
+const servicesFeeGroupLabels: Record<ProposalLineItem["source"], string> = {
+  package: "Base Subscription",
+  phase: "Engagement Phases",
+  service: "Service Lines",
 };
 
 /**
@@ -533,11 +603,12 @@ function toFeeRow(row: ProposalLineItem): DocumentFeeRow {
   };
 }
 
-function groupFeeRows(lineItems: ProposalLineItem[]): DocumentFeeGroup[] {
+function groupFeeRows(lineItems: ProposalLineItem[], includesPlatformPackage: boolean): DocumentFeeGroup[] {
+  const labels = includesPlatformPackage ? feeGroupLabels : servicesFeeGroupLabels;
   const order: ProposalLineItem["source"][] = ["package", "phase", "service"];
   return order
     .map((source) => ({
-      label: feeGroupLabels[source],
+      label: labels[source],
       rows: lineItems.filter((row) => row.source === source).map(toFeeRow),
     }))
     .filter((group) => group.rows.length > 0);
@@ -664,6 +735,25 @@ export function buildProposalDocumentModel({
   const totals = providedTotals ?? computeProposalTotals(state);
   const term = parseProposalTerm(state?.fields);
 
+  /* --- Which deal is this? ---------------------------------------------- */
+  //
+  // Resolved before anything else is derived, because several defaults below
+  // are only correct for one kind of sale. Null for a proposal written before
+  // types existed, or started blank — those keep the shared clause set and the
+  // platform-era prose they were sent under.
+  const typeProfile = resolveProposalTypeProfile(state?.fields);
+  const proposalTypeLabel = proposalTypeLabelFromState(state?.fields);
+  // Sections 01, 03, 04, 06 and 07. Every one of these was a single hardcoded
+  // string on all seven types, written for a subscription sale — which is how a
+  // training proposal came to promise "Configured platform subscription and
+  // client account setup" for a CPR class.
+  const typeCopy = resolveTypeCopy(typeProfile, legacyDocumentCopy);
+  // A services-only engagement produces NO package row at all (see
+  // buildPackageLine), so the selected key is read from the state rather than
+  // inferred from a row that was deliberately omitted.
+  const selectedPackageKey = fieldText(state, "packageSelect", defaultPackageKey);
+  const includesPlatformPackage = !isNoPlatformPackageKey(selectedPackageKey);
+
   const sellerName = fieldText(state, "sellerName", documentTermDefaults.sellerName);
   const preparedBy = fieldText(state, "preparedBy");
   const clientCompany = fieldText(state, "clientCompany");
@@ -672,7 +762,13 @@ export function buildProposalDocumentModel({
   const clientContacts = parseClientContacts(state?.fields);
 
   const validDays = fieldText(state, "validDays", documentTermDefaults.validDays);
-  const billingTerm = fieldText(state, "billingTerm", documentTermDefaults.billingTerm);
+  // The one commercial default that names a deal. A typed proposal that carries
+  // no billing term prints none — "(pilot)" on a training or advisory document
+  // is a sale nobody made. Only an untyped (pre-types) proposal still inherits
+  // the asset's selected option, because that is what those documents printed.
+  const billingTerm = typeProfile
+    ? fieldText(state, "billingTerm")
+    : fieldText(state, "billingTerm", documentTermDefaults.billingTerm);
   const paymentTerms = fieldText(state, "paymentTerms", documentTermDefaults.paymentTerms);
   const lateFee = fieldText(state, "lateFee", documentTermDefaults.lateFee);
   const governingLaw = fieldText(state, "governingLaw", documentTermDefaults.governingLaw);
@@ -699,11 +795,6 @@ export function buildProposalDocumentModel({
   // The package row's qty/price are already authoritative (computeProposalTotals
   // clamps them); name/desc come from the catalog so the intro paragraph reads
   // the same as the generator's.
-  // A services-only engagement produces NO package row at all (see
-  // buildPackageLine), so the selected key is read from the state rather than
-  // inferred from a row that was deliberately omitted.
-  const selectedPackageKey = fieldText(state, "packageSelect", defaultPackageKey);
-  const includesPlatformPackage = !isNoPlatformPackageKey(selectedPackageKey);
   const packageRow = totals.lineItems.find((row) => row.source === "package") ?? null;
   const packageOption =
     lookupPackage(packageRow?.key ?? selectedPackageKey) ?? packageData[defaultPackageKey];
@@ -712,15 +803,6 @@ export function buildProposalDocumentModel({
   // quote the client a cap on something they are not buying.
   const includedUsers = includesPlatformPackage ? fieldCount(state, "includedUsers", packageOption.users) : 0;
   const includedSites = includesPlatformPackage ? fieldCount(state, "includedSites", packageOption.sites) : 0;
-  const proposalTypeLabel = proposalTypeLabelFromState(state?.fields);
-  // Null for a proposal written before types existed, or started blank — those
-  // keep the shared clause set and the platform-era prose they were sent under.
-  const typeProfile = resolveProposalTypeProfile(state?.fields);
-  // Sections 01, 03, 04, 06 and 07. Every one of these was a single hardcoded
-  // string on all seven types, written for a subscription sale — which is how a
-  // training proposal came to promise "Configured platform subscription and
-  // client account setup" for a CPR class.
-  const typeCopy = resolveTypeCopy(typeProfile, legacyDocumentCopy);
 
   /* --- Scope ------------------------------------------------------------ */
 
@@ -743,11 +825,20 @@ export function buildProposalDocumentModel({
     ...phaseRows.map((row, index) => displayName(row, index)),
     ...serviceRows.map((row, index) => displayName(row, index)),
   ];
+  // "A deliverable package is produced for each selected line" is a promise a
+  // platform rollout makes. It is not one a training or time-and-materials
+  // engagement makes: a course produces attendance and certification, and a
+  // block of consulting hours produces the hours — the whole point of the T&M
+  // terms is that no fixed deliverable is being bought. Stating it anyway put a
+  // commitment on the page that the fee lines do not support, which is the first
+  // thing the AI reviewer is asked to look for.
   const deliverablesCoverage =
-    selectedLineNames.length > 0
-      ? `A deliverable package is produced for each selected line: ${selectedLineNames.join(", ")}. ` +
-        "Section 03 states the scope of each."
-      : "";
+    selectedLineNames.length === 0
+      ? ""
+      : includesPlatformPackage
+        ? `A deliverable package is produced for each selected line: ${selectedLineNames.join(", ")}. ` +
+          "Section 03 states the scope of each."
+        : `Section 03 states the scope of each line in the schedule: ${selectedLineNames.join(", ")}.`;
 
   /* --- Pricing schedule -------------------------------------------------- */
 
@@ -779,6 +870,27 @@ export function buildProposalDocumentModel({
   const scheduleTermClause = term.rangeLabel
     ? ` The engagement term runs ${term.rangeLabel}.`
     : "";
+
+  /* --- Section 06's paragraph ------------------------------------------- */
+  //
+  // One hardcoded sentence used to open section 06 on all seven types, and it
+  // described a platform rollout: "implementation follows the order shown in the
+  // scope". A training engagement has no implementation — sessions are
+  // scheduled. A time-and-materials engagement performs tasks as they are
+  // requested, in no fixed order. A retainer just recurs. The ordered steps
+  // printed underneath this paragraph are already per-type (typeCopy.scheduleSteps),
+  // so a typed document points at those instead, in its own lexicon's words.
+  const scheduleLead = typeProfile
+    ? "The schedule is coordinated after acceptance. Unless otherwise agreed, " +
+      `${typeProfile.lexicon.engagementNoun} follows the sequence shown below.`
+    : "The schedule is coordinated after acceptance. Unless otherwise agreed, implementation follows the order " +
+      "shown in the scope.";
+  // With no billing term chosen there is nothing to name, and the sentence used
+  // to fill the gap with the pilot's. Payment terms always resolve, so the
+  // clause states those alone rather than inventing a billing cadence.
+  const scheduleBilling = billingTerm
+    ? `Billing follows the selected term (${billingTerm}), with ${paymentTerms}.`
+    : `Payment terms are ${paymentTerms}.`;
 
   return {
     headline: clientCompany ? `Proposal for ${clientCompany}` : proposal.title,
@@ -822,30 +934,33 @@ export function buildProposalDocumentModel({
     // A services engagement gets a DIFFERENT set: no subscription price (there
     // is no subscription) and no seat/site limits (nothing is capped). What
     // matters there is what kind of engagement it is and what it costs.
+    // The Billing pill is dropped when no billing term was chosen, for the same
+    // reason the seat pills are dropped at zero: an unset field is not a quoted
+    // value, and the pill used to fill in with the pilot's cadence.
     packagePills: includesPlatformPackage
       ? [
           { label: isPilotPackage ? "Pilot Price" : "Subscription Price", value: formatLineAmount(packageRow?.price ?? 0) },
           { label: "Term", value: term.rangeLabel ?? missingValue },
           ...(includedUsers > 0 ? [{ label: "Included Users", value: String(includedUsers) }] : []),
           ...(includedSites > 0 ? [{ label: "Included Jobsites", value: String(includedSites) }] : []),
-          { label: "Billing", value: billingTerm },
+          ...(billingTerm ? [{ label: "Billing", value: billingTerm }] : []),
         ]
       : [
           { label: "Engagement", value: proposalTypeLabel ?? "Professional Services" },
           { label: "Total", value: formatLineAmount(totals.total) },
           ...(term.rangeLabel ? [{ label: "Term", value: term.rangeLabel }] : []),
-          { label: "Billing", value: billingTerm },
+          ...(billingTerm ? [{ label: "Billing", value: billingTerm }] : []),
         ],
     phaseScope,
     serviceScope,
+    phaseEmptyNote: includesPlatformPackage ? documentCopy.noPhases : "",
+    serviceEmptyNote: includesPlatformPackage ? documentCopy.noServices : "",
     deliverables: [...typeCopy.deliverables],
     deliverablesCoverage,
-    feeGroups: groupFeeRows(totals.lineItems),
+    feeGroups: groupFeeRows(totals.lineItems, includesPlatformPackage),
     totalRows,
     totals,
-    schedule:
-      "The schedule is coordinated after acceptance. Unless otherwise agreed, implementation follows the order shown " +
-      `in the scope.${scheduleTermClause} Billing follows the selected term (${billingTerm}), with ${paymentTerms}.`,
+    schedule: `${scheduleLead}${scheduleTermClause} ${scheduleBilling}`,
     exclusions: fieldText(state, "customExclusions", documentCopy.noExclusions),
     // Section 03/05/06 headings, named for the deal being proposed. A training
     // client reads "Courses & Delivery" and "Training Fees"; a T&M client reads

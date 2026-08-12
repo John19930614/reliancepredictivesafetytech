@@ -109,6 +109,26 @@ export const trainingProfile: ProposalTypeProfile = {
   ],
 
   overrideClauses: {
+    // THE SHARED CLAUSE LICENSES "purchased deliverables solely during the
+    // active paid term". A training engagement has no term and no subscription:
+    // the client buys sessions, and the certificates, cards and training
+    // records they receive are theirs to keep and to show a regulator years
+    // later. Restated so nothing suggests those lapse.
+    intellectual_property: {
+      body:
+        "Seller retains all rights in its course materials, curricula, instructional methods, assessments, templates, and pre-existing intellectual property. " +
+        "Participant materials are licensed to Client and its attendees for their own internal reference, without time limit; they may not be reproduced for training delivered by anyone other than Seller, nor sold or distributed as a product. " +
+        "Certificates, completion records, and attendance rosters produced for Client belong to Client and remain Client's to retain and to produce to a regulator, an insurer, or a customer at any time. " +
+        "All rights not expressly granted are reserved by Seller.",
+    },
+    // "deliver, configure, and support the client account" describes a software
+    // account. Training processes attendee names and records, not an account.
+    data_ai_use: {
+      body:
+        "Attendee names, roster details, and completion records are processed only to deliver the courses, issue certification, and maintain the training records this proposal describes. " +
+        "They are not used for cross-client model training, sold, or shared with third parties without written authorization, except where a certifying or issuing body requires attendee details to issue a credential. " +
+        "Seller complies with applicable state data laws, including CCPA/CPRA (Cal. Civ. Code sec.1798.100) and Wis. Stat. sec.134.98.",
+    },
     // Platform scope changes are users, sites and modules. Training scope
     // changes are courses, session counts and rosters — and the template's own
     // summary promises dates get coordinated after acceptance, so this clause

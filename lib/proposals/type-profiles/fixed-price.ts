@@ -123,6 +123,27 @@ export const fixedPriceProfile: ProposalTypeProfile = {
   ],
 
   overrideClauses: {
+    // THE SHARED CLAUSE licensed "purchased deliverables solely during the
+    // active paid term" — and this type's own Ownership clause grants a
+    // PERPETUAL license on payment in full. Two clauses on one page said
+    // opposite things about the same documents, and the ownership clause used
+    // to defer, so the term-limited version won: a client who paid in full for
+    // three written safety programs held no lasting right to use them. There is
+    // no term on a fixed-price engagement to hang a licence off in the first
+    // place. Restated here, and the Ownership clause now prevails for the
+    // deliverables rather than deferring.
+    intellectual_property: {
+      body:
+        "Seller retains all rights in its methods, templates, checklists, assessment tools, source materials, and pre-existing intellectual property, and may reuse the general knowledge, skills, and know-how gained performing this engagement. " +
+        "Client's rights in the deliverables it has paid for are stated in the Ownership of Delivered Work Products terms below, are not limited to any term, and survive completion of this engagement. " +
+        "All rights not expressly granted are reserved by Seller.",
+    },
+    data_ai_use: {
+      body:
+        "Programs, records, and site information Client provides are processed only to prepare the deliverables this proposal describes. " +
+        "They are not used for cross-client model training, sold, or shared with third parties without written authorization, except as required by law. " +
+        "Seller complies with applicable state data laws, including CCPA/CPRA (Cal. Civ. Code sec.1798.100) and Wis. Stat. sec.134.98.",
+    },
     // Reworded for deliverables instead of "sites, users, modules", and given
     // the rule this type lives or dies by: unsigned work does not start.
     scope_changes: {
@@ -276,7 +297,15 @@ export const fixedPriceProfile: ProposalTypeProfile = {
         "Until the fixed price is paid in full, deliverables are furnished for review only and no license to rely on them in Client operations is granted. " +
         "Drafts, working papers, field notes, and the templates, checklists, and methods used to produce the deliverables remain Seller's property, and Seller may reuse the general knowledge, skills, and know-how gained in performing this engagement. " +
         "Client shall not sell, license, or distribute the deliverables to third parties as a product or service. " +
-        "This clause adds to the Intellectual Property terms stated above and does not limit them; if the two conflict, the Intellectual Property terms govern.",
+        // PRECEDENCE REVERSED DELIBERATELY. This clause used to defer to the
+        // Intellectual Property terms above, which license deliverables "solely
+        // during the active paid term" — a subscription rule. On a fixed-price
+        // engagement there is no term: the client buys the written program
+        // outright. Deferring meant the perpetual license granted in this very
+        // clause was cancelled by the clause it deferred to, so a client who
+        // paid in full for three safety programs held no license to keep using
+        // them. For the DELIVERABLES, this clause governs.
+        "As to the deliverables identified in the schedule, this clause governs and prevails over any conflicting statement in the Intellectual Property terms above; those terms continue to govern Seller's own methods, templates, and pre-existing intellectual property.",
     },
 
     /* ---------------------------------------------------------------------- */

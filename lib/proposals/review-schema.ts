@@ -135,16 +135,36 @@ export const reviewResponseSchema = {
   },
 } as const;
 
-/** The facts block, as the model sees it — the single source of truth. */
+/**
+ * The facts block, as the model sees it — the single source of truth.
+ *
+ * Four of the seven proposal types sell no subscription, and this block used to
+ * open by telling the reviewer how many users and jobsites they included and
+ * what their base subscription cost. On a training proposal that read "Included
+ * users: 50 · Included jobsites: 2 · Base subscription / package: Platform
+ * Services at $0.00" — the asset's own field defaults plus a package the
+ * document deliberately omits. Under rule 2 ("never introduce a number that is
+ * not in the AUTHORITATIVE FACTS") those were not noise, they were sanctioned
+ * figures for a document about a CPR class.
+ */
 function renderFacts(facts: ProposalFacts): string {
+  const engagement = facts.proposalTypeLabel ?? (facts.servicesOnly ? "Professional services" : null);
   return [
-    `Included users: ${facts.users}`,
-    `Included jobsites: ${facts.sites}`,
+    ...(engagement ? [`Engagement type: ${engagement}`] : []),
+    ...(facts.servicesOnly
+      ? [
+          "Services only: this proposal sells NO platform subscription. There are no included users, no included",
+          "  jobsites, and no base subscription fee — never state one.",
+        ]
+      : [
+          `Included users: ${facts.users}`,
+          `Included jobsites: ${facts.sites}`,
+        ]),
     facts.termMonths === null ? "Engagement term: not set" : `Engagement term: ${facts.termMonths} months (${facts.termRangeLabel ?? "dates unset"})`,
-    `Base subscription / package: ${facts.packageName} at ${formatMoney(facts.packagePrice)}`,
+    ...(facts.servicesOnly ? [] : [`Base subscription / package: ${facts.packageName} at ${formatMoney(facts.packagePrice)}`]),
     `Subtotal ${formatMoney(facts.subtotal)} · discount ${formatMoney(facts.discount)} · tax ${formatMoney(facts.tax)}`,
     `Total: ${formatMoney(facts.total)} · deposit due at acceptance: ${formatMoney(facts.deposit)}`,
-    `Billing: ${facts.billingTerm} · payment terms: ${facts.paymentTerms} · open for acceptance ${facts.validDays} calendar days`,
+    `${facts.billingTerm === "" ? "Billing term: not chosen" : `Billing: ${facts.billingTerm}`} · payment terms: ${facts.paymentTerms} · open for acceptance ${facts.validDays} calendar days`,
   ]
     .map((line) => `  ${line}`)
     .join("\n");
@@ -223,9 +243,23 @@ export function buildReviewPrompt(input: {
       ? "  (none — the automated checks all passed)"
       : input.deterministic.map((finding) => `  - [${finding.severity}] ${finding.area}: ${finding.message}`).join("\n");
 
+  // The practice sells a platform subscription AND standalone safety services.
+  // Without this line the reviewer read every document as a platform sale and
+  // wrote findings about missing seat counts and rollout phases on a proposal
+  // for three written programs.
+  const dealLine = facts.servicesOnly
+    ? `THIS DEAL: ${facts.proposalTypeLabel ?? "Professional services"} — standalone services. No platform ` +
+      "subscription is being sold, so seats, jobsite licences, rollout phases and renewal are not part of this " +
+      "document and their absence is not a gap."
+    : `THIS DEAL: ${facts.proposalTypeLabel ?? "Platform"} — includes a platform subscription.`;
+
   return [
-    "You are reviewing a commercial proposal for a safety technology and consulting practice. The document will be",
-    "signed by a client, so it is reviewed like a contract, not like marketing copy.",
+    "You are reviewing a commercial proposal for a safety technology and consulting practice. The practice sells both",
+    "a predictive-safety platform subscription and standalone safety services (training, audits, written programs,",
+    "staffing, advisory retainers). The document will be signed by a client, so it is reviewed like a contract, not",
+    "like marketing copy.",
+    "",
+    dealLine,
     "",
     `WORKFLOW STAGE: ${proposalStatusLabels[input.status] ?? input.status}. ${stageGuidance[input.status] ?? ""}`,
     "",

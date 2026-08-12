@@ -189,7 +189,10 @@ body.embedded .panel{position:static;max-height:none;overflow:visible}
 <aside class="panel noprint-only">
   <div class="brandbar"><div class="logo" role="img" aria-label="Reliance Predictive Safety Technologies seal"></div><div><div class="brand-title">Proposal Generator</div><div class="brand-sub">Reliance · Platform Billing · v15</div></div></div>
   <div class="control-title">Proposal Controls</div>
-  <div class="hint">Configure the package, phases, add-ons, and terms. The document on the right updates live — Print / Save PDF or download when ready.</div>
+  <!-- Package-neutral on purpose: four of the seven proposal types sell no
+       package at all, and this line opened the panel by naming the one thing a
+       training or retainer proposal does not have. -->
+  <div class="hint">Configure the engagement term, scope lines, pricing, and terms. The document on the right updates live — Print / Save PDF or download when ready.</div>
   <div class="btnrow toolbar">
     <button type="button" class="btn btn-primary" data-action="print">Print / Save PDF</button>
     <button type="button" class="btn btn-secondary" data-action="refresh">Refresh</button>
@@ -276,8 +279,10 @@ body.embedded .panel{position:static;max-height:none;overflow:visible}
   <textarea id="customSummary" placeholder="Summarize the engagement in two or three sentences: what the client is trying to achieve, what this proposal puts in place, and what happens at the end of the term. The package, term dates, included users and pricing are already stated elsewhere in the document — do not repeat figures here, or they will fall out of date when the numbers change."></textarea>
   </div>
   <div class="section-card">
-    <h3>4. Engagement Term &amp; Package<span class="opt">section 02</span></h3>
-    <label>Package Dropdown</label>
+    <!-- The card title is a SPAN so syncFormToPackage() can drop "& Package"
+         when the deal sells no subscription. Keep the .opt badge outside it. -->
+    <h3><span id="termPackageTitle">4. Engagement Term &amp; Package</span><span class="opt">section 02</span></h3>
+    <label>Platform Package</label>
     <select id="packageSelect">
       <option value="starter">Starter Compliance Platform — $35,000/year</option>
       <option value="professional">Professional Safety Intelligence — $65,000/year</option>
@@ -288,14 +293,31 @@ body.embedded .panel{position:static;max-height:none;overflow:visible}
       <option value="none">No platform subscription (services only)</option>
     </select>
     <p class="cardhint">Blank is the default: manual price, no pilot wording. Pick Basic Pilot only for an actual pilot &mdash; it is what puts &ldquo;Pilot&rdquo; in the document headline and the price pill. Pick <b>No platform subscription</b> for work that is not platform work &mdash; training, written programs, audits, consulting hours, a retainer &mdash; and the document drops the subscription row, the subscription pills and the included user/jobsite counts entirely. The term drives every duration printed on the document; leave it unset to omit them.</p>
+    <!-- What the CURRENT selection does, written by syncFormToPackage(). The
+         hint above lists all the choices; this one says which one is live, so a
+         seller does not have to re-read seven options to find out whether this
+         proposal is still asking for seats. -->
+    <p class="cardhint" id="packageModeNote"></p>
     <div class="grid2"><div><label>Term Starts — Month</label><select id="termStartMonth"><option value="">—</option><option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option><option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option><option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option></select></div><div><label>Year</label><select id="termStartYear"><option value="">—</option><option value="2025">2025</option><option value="2026">2026</option><option value="2027">2027</option><option value="2028">2028</option><option value="2029">2029</option><option value="2030">2030</option><option value="2031">2031</option><option value="2032">2032</option></select></div></div>
     <div class="grid2"><div><label>Term Ends — Month</label><select id="termEndMonth"><option value="">—</option><option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option><option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option><option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option></select></div><div><label>Year</label><select id="termEndYear"><option value="">—</option><option value="2025">2025</option><option value="2026">2026</option><option value="2027">2027</option><option value="2028">2028</option><option value="2029">2029</option><option value="2030">2030</option><option value="2031">2031</option><option value="2032">2032</option></select></div></div>
     <div class="cardhint" id="termSummary"></div>
-    <div class="grid2" id="platformPriceRow"><div><label>Pilot / License Price</label><input id="annualPrice" type="number" value="5000"></div><div><label>Included Users</label><input id="includedUsers" type="number" value="50"></div></div>
-    <div class="grid2"><div id="includedSitesCell"><label>Included Jobsites</label><input id="includedSites" type="number" value="2"></div><div><label>Billing Term</label><select id="billingTerm"><option selected>One-time (pilot)</option><option>Annual upfront</option><option>Quarterly</option><option>Monthly</option><option>Milestone-based</option></select></div></div>
+    <!-- THE THREE SUBSCRIPTION INPUTS, IN ONE ROW SO THEY HIDE AS ONE.
+         Included Jobsites used to share a grid with Billing Term, so hiding it
+         for a services-only deal left Billing Term stranded in a half-width
+         column. Billing Term is deliberately NOT in this row: a training or
+         retainer engagement still has a billing term. The price label is
+         written by syncFormToPackage() and mirrors the document's own pill
+         ("Pilot Price" on a pilot, "Subscription Price" otherwise) — it read
+         "Pilot / License Price" on every proposal, including the ones that
+         were not pilots. -->
+    <div class="grid3" id="platformPriceRow"><div><label id="annualPriceLabel">Subscription Price</label><input id="annualPrice" type="number" value="5000"></div><div><label>Included Users</label><input id="includedUsers" type="number" value="50"></div><div id="includedSitesCell"><label>Included Jobsites</label><input id="includedSites" type="number" value="2"></div></div>
+    <label>Billing Term</label><select id="billingTerm"><option selected>One-time (pilot)</option><option>Annual upfront</option><option>Quarterly</option><option>Monthly</option><option>Milestone-based</option></select>
   </div>
   <div class="section-card">
-    <h3>5. Implementation Phases<span class="opt">sections 03 &amp; 05</span></h3>
+    <!-- "Implementation" is platform language. A training calendar or a set of
+         written programs has work phases, not an implementation, so the title
+         follows the deal — see syncFormToPackage(). -->
+    <h3><span id="phasesCardTitle">5. Implementation Phases</span><span class="opt">sections 03 &amp; 05</span></h3>
     <div id="phases"></div>
     <button type="button" class="btn btn-secondary small" data-action="addPhase">+ Add Phase</button>
   </div>
@@ -472,7 +494,16 @@ const serviceOptions = {
   culture:{name:"Safety Culture Workshop",price:1250,unit:"Session",group:"Training Catalog",desc:"Facilitated leadership workshop on psychological safety, near-miss reporting, recognition, accountability, and converting safety metrics into field behavior."},
   genTraining:{name:"Training Session (general)",price:750,unit:"Session",group:"Training Catalog",desc:"Instructor-led session on a topic you specify. Scope, duration, and participant materials are confirmed before scheduling."},
 };
-[['osha10','OSHA 10 Training',175,'Person'],['osha30','OSHA 30 Training',425,'Person'],['newHire','New Hire Safety Orientation',450,'Session'],['supLeader','Supervisor Safety Leadership Training',850,'Session'],['toolbox','Toolbox Talk Program Development',300,'Session'],['fall','Fall Protection Training',650,'Session'],['ladder','Ladder Safety Training',350,'Session'],['scaffold','Scaffold User Training',550,'Session'],['mewp','MEWP / Aerial Lift Training',850,'Session'],['forklift','Forklift / PIT Training',950,'Session'],['rigging','Rigging & Signal Person Training',950,'Session'],['craneAware','Crane Awareness Training',750,'Session'],['confined','Confined Space Awareness Training',800,'Session'],['excavation','Excavation / Trenching Safety Training',800,'Session'],['loto','Lockout / Tagout Training',700,'Session'],['hazcomT','Hazard Communication Training',500,'Session'],['ppeT','PPE Training',350,'Session'],['elecAware','Electrical Safety Awareness',850,'Session'],['nfpa70e','NFPA 70E Awareness Training',1100,'Session'],['hotwork','Hot Work / Fire Watch Training',500,'Session'],['fireExt','Fire Extinguisher Training',450,'Session'],['silica','Silica Awareness Training',650,'Session'],['respiratory','Respiratory Protection Training',700,'Session'],['hearing','Hearing Conservation Training',450,'Session'],['heat','Heat Illness Prevention Training',425,'Session'],['ergo','Ergonomics Training',450,'Session'],['bbp','Bloodborne Pathogens Training',400,'Session'],['firstAid','First Aid / CPR / AED Training',1200,'Session'],['incident','Incident Investigation Training',750,'Session'],['jsaT','JHA / JSA Training',650,'Session'],['driving','Defensive Driving Training',700,'Session'],['spotter','Spotter / Flagger Training',650,'Session'],['contractorT','Contractor Management Training',850,'Session'],['culture','Safety Culture Workshop',1250,'Session'],['genTraining','Training Session (general)',750,'Session']].forEach(t=>{serviceOptions[t[0]]={name:t[1],price:t[2],unit:t[3],group:'Training Catalog',desc:t[3]==='Person'?'Per-person training; Qty = number of people.':'Instructor-led training session; Qty = number of sessions.'};});
+/* THE TRAINING CATALOG IS THE LITERAL ABOVE, AND ONLY THE LITERAL.
+   A legacy loop used to sit here and overwrite all 35 Training Catalog entries
+   at load with session pricing and two shared boilerplate descriptions. When
+   the catalog moved to per-participant pricing (catalog.ts, 2026-08-11) the
+   literal above was rewritten and this loop was not, so the runtime price book
+   silently disagreed with the platform: First Aid / CPR / AED, for example,
+   quoted $1,200 per SESSION in the editor while lib/proposals/catalog.ts, the
+   document and the parity test all said $145 per PERSON. The parity test only
+   reads the literal, so it could not see this. The loop is gone; the literal is
+   the single source. Do not reintroduce a mutation pass over serviceOptions. */
 function serviceSelectHTML(selKey){return SERVICE_GROUPS.map(g=>{const items=Object.keys(serviceOptions).filter(k=>serviceOptions[k].group===g);if(!items.length)return '';return '<optgroup label="'+g+'">'+items.map(k=>`<option value="${k}" ${k===selKey?'selected':''}>${esc(serviceOptions[k].name)}</option>`).join('')+'</optgroup>';}).join('');}
 const phaseOptions = {
   discovery:{name:"Discovery & Intake",price:3500,desc:"Confirm client objectives, gather current documents, map users, identify jobsite needs, and finalize configuration priorities."},
@@ -522,7 +553,14 @@ function addService(key='document',qty=1,price=null,desc=null){
  div.innerHTML=`<div><label>Service / Add-On</label><select class="svcKey">${serviceSelectHTML(key)}</select></div><div><label class="qtyLabel">Qty \u00b7 ${esc(o.unit||'Unit')}</label><input class="svcQty" type="number" step="any" value="${num(qty,1)}"></div><div><label>Unit Price</label><input class="svcPrice" type="number" step="any" value="${num(price===null?o.price:price,0)}"></div><div><label>Description</label><input class="svcDesc" value="${esc(desc===null?o.desc:desc)}"></div><div><button type="button" class="btn btn-danger small" data-action="removeItem">X</button></div>`;
  wrap.appendChild(div); update(); return div;
 }
-function collectItems(cls, type){const opts=type==='phase'?phaseOptions:serviceOptions; const prefix=type==='phase'?'phase':'svc'; return Array.from(document.querySelectorAll('.'+cls)).map(el=>{const key=el.querySelector('.'+prefix+'Key').value; const o=opts[key]||{}; return {type,key,name:el.dataset.customName||o.name||'',qty:Number(el.querySelector('.'+prefix+'Qty').value||0),price:Number(el.querySelector('.'+prefix+'Price').value||0),desc:el.querySelector('.'+prefix+'Desc').value||o.desc||'',unit:o.unit||''};});}
+/* THE UNIT MUST TRAVEL WITH THE PRICE. `unit` used to be read straight off the
+   live catalog, while the row's PRICE is whatever was stored. Repricing the
+   training courses from per-session to per-participant therefore relabelled
+   every proposal already sent the moment it was opened: a stored $1,200 session
+   came back as "1 Person", and the next autosave wrote "Person" into form_data
+   over the stored "Session", making the corruption permanent. dataset.customUnit
+   carries the stored unit exactly as dataset.customName carries a stored name. */
+function collectItems(cls, type){const opts=type==='phase'?phaseOptions:serviceOptions; const prefix=type==='phase'?'phase':'svc'; return Array.from(document.querySelectorAll('.'+cls)).map(el=>{const key=el.querySelector('.'+prefix+'Key').value; const o=opts[key]||{}; return {type,key,name:el.dataset.customName||o.name||'',qty:Number(el.querySelector('.'+prefix+'Qty').value||0),price:Number(el.querySelector('.'+prefix+'Price').value||0),desc:el.querySelector('.'+prefix+'Desc').value||o.desc||'',unit:el.dataset.customUnit||o.unit||''};});}
 function computeDoc(){
  const pages=Math.max(0,Number(($('docPages')||{}).value||0));
  const complexity=($('docComplexity')||{}).value||'Medium', review=($('docReview')||{}).value||'Standard', custom=($('docCustom')||{}).value||'None', rush=($('docRush')||{}).checked;
@@ -538,17 +576,56 @@ function computeDoc(){
  return {price,name,desc};
 }
 function addDoc(){const r=computeDoc(); const div=addService('safetyDocCustom',1,r.price,r.desc); div.dataset.customName=r.name; const ql=div.querySelector('.qtyLabel'); if(ql) ql.textContent='Qty \u00b7 Document'; update(); setStatus('Document added to proposal.');}
-function update(){
- const pkgKey=$('packageSelect').value; const base=packageData[pkgKey]; const p={...base}; p.price=Number($('annualPrice').value||base.price); p.users=Number($('includedUsers').value||base.users); p.sites=Number($('includedSites').value||base.sites);
-  const term=readTerm();
- // A services-only engagement sells no seats and no jobsites, so the inputs for
- // them are hidden rather than sitting there asking a training or T&M seller to
- // fill in counts the document will (correctly) never print. The card hint has
- // always promised the document drops them; the FORM kept demanding them.
- // Billing Term stays visible — a services engagement still has one.
- const servicesOnly=pkgKey==='none';
+/* ---------------------------------------------------------------------------
+   THE FORM FOLLOWS THE DEAL.
+
+   Seven proposal types seed this generator; four of them (training, time &
+   materials, fixed price, retainer) sell no subscription at all and open with
+   packageSelect = "none". The document has known that since the "none" package
+   landed — it prints an Engagement Summary, no subscription fee row and no
+   seat/jobsite pills — but the FORM went on asking for a "Pilot / License
+   Price", "Included Users" and "Included Jobsites" on a training class, under a
+   heading that promised a Package and a card that promised Implementation.
+
+   Everything type-dependent in the control panel is set here, from the one
+   thing that decides it: the selected package. Called from update(), so it
+   re-runs on every edit and on every state the platform pushes in.
+
+   The card itself does NOT collapse for a services-only deal. It still holds
+   the engagement term, the billing term, and the package dropdown itself —
+   collapse it and a seller whose services deal does include platform access
+   would have no way back. Only the three subscription inputs go.
+   --------------------------------------------------------------------------- */
+/* The platform wording is whatever the textarea itself carries, read once at
+   load so this file cannot hold two copies of it that drift apart. */
+const SUMMARY_HINT_PLATFORM=($('customSummary')||{}).placeholder||'';
+const SUMMARY_HINT_SERVICES="Summarize the engagement in two or three sentences: what the client is trying to achieve, what this proposal puts in place, and what happens when the work is done. The services, quantities, rates and dates are already stated in the schedule of fees — do not repeat figures here, or they will fall out of date when the numbers change.";
+function syncFormToPackage(pkgKey){
+ const servicesOnly=pkgKey==='none', isPilot=pkgKey==='custom';
+ const base=packageData[pkgKey];
+ // The subscription block, hidden as a unit. Included Jobsites sits inside it,
+ // so there is nothing left behind to ask a training seller for seats.
  if($('platformPriceRow'))$('platformPriceRow').style.display=servicesOnly?'none':'';
- if($('includedSitesCell'))$('includedSitesCell').style.display=servicesOnly?'none':'';
+ // Same words the document's pill uses, so the number a seller types is
+ // labelled on the form exactly as the client will read it.
+ if($('annualPriceLabel'))$('annualPriceLabel').textContent=isPilot?'Pilot Price':'Subscription Price';
+ if($('termPackageTitle'))$('termPackageTitle').textContent=servicesOnly?'4. Engagement Term':'4. Engagement Term & Package';
+ if($('phasesCardTitle'))$('phasesCardTitle').textContent=servicesOnly?'5. Work Phases':'5. Implementation Phases';
+ if($('customSummary'))$('customSummary').placeholder=servicesOnly?SUMMARY_HINT_SERVICES:SUMMARY_HINT_PLATFORM;
+ const note=$('packageModeNote'); if(!note) return;
+ if(servicesOnly) note.textContent='Now: services only. No seats, no jobsites, no subscription price — those inputs are hidden because the document will not print them. Section 02 becomes an Engagement Summary, and the schedule of fees below is the whole offer.';
+ else if(isPilot) note.textContent='Now: a pilot. The document headline and the price pill both say Pilot. Set the pilot fee and the users and jobsites it covers below.';
+ else if(pkgKey==='blank') note.textContent='Now: platform services at a manual price, with no pilot wording. Set the subscription price and the included counts below.';
+ else if(base) note.textContent='Now: the '+base.name+' tier. Its list price and included counts have been filled in below — change any of them for this deal.';
+ else note.textContent='';
+}
+function update(){
+ // `|| packageData.blank`: a saved state can carry a package key this build no
+ // longer has, and the select then reports "". Reading .price off undefined
+ // threw here, which killed the whole panel rather than one field.
+ const pkgKey=$('packageSelect').value; const base=packageData[pkgKey]||packageData.blank; const p={...base}; p.price=Number($('annualPrice').value||base.price); p.users=Number($('includedUsers').value||base.users); p.sites=Number($('includedSites').value||base.sites);
+  const term=readTerm();
+ syncFormToPackage(pkgKey);
  const isPilot=pkgKey==='custom';
  const monthPrefix=term.months===null?'':term.months+'-Month ';
  if($('pDocline'))$('pDocline').textContent=isPilot?(monthPrefix+'Pilot & Platform Access Proposal'):(monthPrefix?(p.name+' \u2014 '+monthPrefix+'Term'):(p.name+' Proposal'));
@@ -594,7 +671,13 @@ function update(){
  const _stripOrd=n=>{const s=String(n||'').replace(/^\s*phase\s*\d+\s*(?:[\u2014\u2013-]|:)\s*/i,''); return s.trim()===''?n:s;};
  $('pPhaseScope').innerHTML=phases.map((x,i)=>`<h3>${i+1}. ${esc(_stripOrd(x.name))}</h3><p>${esc(x.desc)}</p>`).join('') || '<p>No implementation phases selected.</p>';
  $('pServiceScope').innerHTML=svcs.map((x,i)=>`<h3>Service Line ${i+1}: ${esc(x.name)}</h3><p>${esc(x.desc)}</p>`).join('') || '<p>No added service lines selected.</p>';
- const deliverables=['Configured platform subscription and client account setup','Billing package selection and proposal pricing schedule','User and jobsite structure based on the selected package','Management-ready scope, assumptions, and acceptance documentation'];
+ // Standalone-copy preview only: the embedded editor hides this whole document
+ // (body.embedded .proposal) and the platform renders <ProposalDocument>. Still
+ // type-aware, because a training or fixed-price proposal printed from the
+ // standalone file listed "Configured platform subscription" as its deliverable.
+ const deliverables=noPlatform
+  ?['Each service line in the schedule, delivered as described in the scope of work','The written records, documents, and certificates each listed service produces','Management-ready scope, assumptions, and acceptance documentation']
+  :['Configured platform subscription and client account setup','Billing package selection and proposal pricing schedule','User and jobsite structure based on the selected package','Management-ready scope, assumptions, and acceptance documentation'];
  $('pDeliverables').innerHTML=deliverables.map(d=>'<li>'+esc(d)+'</li>').join('');
  const _covered=phases.map(x=>_stripOrd(x.name)).concat(svcs.map(x=>x.name));
  if($('pDeliverablesNote'))$('pDeliverablesNote').textContent=_covered.length?('A deliverable package is produced for each selected line: '+_covered.join(', ')+'. Section 03 states the scope of each.'):'';
@@ -636,7 +719,19 @@ function update(){
  $('pTerms').innerHTML=terms.map(t=>`<div class="term"><h4>${esc(t[0])}</h4><p>${esc(t[1])}</p></div>`).join('');
  $('sellerSig').textContent=$('preparedBy').value+' / Authorized Representative';
 }
-function packageChange(){const key=$('packageSelect').value;if(key!=='custom'){const p=packageData[key];$('annualPrice').value=p.price;$('includedUsers').value=p.users;$('includedSites').value=p.sites;}update();}
+function packageChange(){
+ const key=$('packageSelect').value;
+ if(key!=='custom'){const p=packageData[key];$('annualPrice').value=p.price;$('includedUsers').value=p.users;$('includedSites').value=p.sites;}
+ // "custom" (Basic Pilot) reads its price and counts off these three inputs, so
+ // it deliberately does not overwrite them — except on the way back from "No
+ // platform subscription", which zeroes all three. Without this, picking
+ // services-only and then changing your mind produced a pilot quoted at no
+ // charge for nobody, and nothing on screen said so.
+ else if(Number($('annualPrice').value||0)===0&&Number($('includedUsers').value||0)===0&&Number($('includedSites').value||0)===0){
+  const d=packageData.custom;$('annualPrice').value=d.price;$('includedUsers').value=d.users;$('includedSites').value=d.sites;
+ }
+ update();
+}
 function optionChange(e){const sel=e.target; if(sel.classList.contains('phaseKey')){const o=phaseOptions[sel.value]; const row=sel.closest('.phase'); row.querySelector('.phasePrice').value=o.price; row.querySelector('.phaseDesc').value=o.desc;} if(sel.classList.contains('svcKey')){const o=serviceOptions[sel.value]; const row=sel.closest('.service'); row.querySelector('.svcPrice').value=o.price; row.querySelector('.svcDesc').value=o.desc; if(row.dataset.customName) delete row.dataset.customName; const ql=row.querySelector('.qtyLabel'); if(ql) ql.textContent='Qty \u00b7 '+(o.unit||'Unit');} update();}
 function save(){if(isEmbedded()){setStatus('Drafts are saved on the platform, not in this browser.');return;} const data={}; document.querySelectorAll('input,select,textarea').forEach((el,i)=>{if(!el.className.includes('phase')&&!el.className.includes('svc')) data[el.id||('field'+i)]=el.value;}); localStorage.setItem('proposalGeneratorV4',JSON.stringify(data)); setStatus('Saved in this browser.');}
 function load(){if(isEmbedded()){setStatus('This proposal is loaded from the platform.');return;} const data=JSON.parse(localStorage.getItem('proposalGeneratorV4')||'{}'); Object.entries(data).forEach(([k,v])=>{if($(k)) $(k).value=v}); update(); setStatus('Loaded saved data.');}

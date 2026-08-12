@@ -20,7 +20,12 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { LayoutTemplate } from "lucide-react";
 import { listProposalTemplates, type ProposalTemplateSummary } from "@/app/employee/proposals/templates/actions";
-import { listTransactionTemplates } from "@/lib/proposals/transaction-templates";
+import {
+  buildTransactionTemplateState,
+  listTransactionTemplates,
+  type TransactionTemplateSummary,
+} from "@/lib/proposals/transaction-templates";
+import { isNoPlatformPackageKey } from "@/lib/proposals/catalog";
 
 /** Option-value prefix that marks a built-in transaction type. */
 export const transactionTypeOptionPrefix = "type:";
@@ -38,6 +43,35 @@ export function ProposalTemplatePicker({ value, onChange, disabled }: ProposalTe
   const [error, setError] = useState("");
 
   const builtIns = useMemo(() => listTransactionTemplates(), []);
+
+  /**
+   * The seven built-in types, split by what they SELL.
+   *
+   * Three seed a platform subscription and four seed none (`packageKey: "none"`)
+   * — which decides whether the document prints a subscription fee row and
+   * seat/jobsite counts, and whether the editor asks for them at all. That was
+   * the single most consequential thing about the choice and the picker did not
+   * say it. Derived from the registry's own seeded state rather than a second
+   * list here, so a type that changes what it sells cannot be mislabelled.
+   */
+  const builtInGroups = useMemo(() => {
+    const subscription: TransactionTemplateSummary[] = [];
+    const services: TransactionTemplateSummary[] = [];
+    for (const entry of builtIns) {
+      const packageKey = String(buildTransactionTemplateState(entry.key).fields.packageSelect ?? "");
+      (isNoPlatformPackageKey(packageKey) ? services : subscription).push(entry);
+    }
+    return { subscription, services };
+  }, [builtIns]);
+
+  /** true / false for a built-in type, null when the choice is not one. */
+  const selectedSellsSubscription = useMemo(() => {
+    if (!value.startsWith(transactionTypeOptionPrefix)) return null;
+    const key = value.slice(transactionTypeOptionPrefix.length);
+    if (builtInGroups.services.some((entry) => entry.key === key)) return false;
+    if (builtInGroups.subscription.some((entry) => entry.key === key)) return true;
+    return null;
+  }, [builtInGroups, value]);
 
   useEffect(() => {
     let active = true;
@@ -85,8 +119,15 @@ export function ProposalTemplatePicker({ value, onChange, disabled }: ProposalTe
             phases whose copy ended "— included in the pilot". Both are neutral
             now, so blank means blank — and a pilot is the Pilot type below. */}
         <option value="">Blank proposal — no pilot wording</option>
-        <optgroup label="Proposal types">
-          {builtIns.map((builtIn) => (
+        <optgroup label="Proposal types — platform subscription">
+          {builtInGroups.subscription.map((builtIn) => (
+            <option key={builtIn.key} value={`${transactionTypeOptionPrefix}${builtIn.key}`}>
+              {builtIn.label}
+            </option>
+          ))}
+        </optgroup>
+        <optgroup label="Proposal types — services only, no subscription">
+          {builtInGroups.services.map((builtIn) => (
             <option key={builtIn.key} value={`${transactionTypeOptionPrefix}${builtIn.key}`}>
               {builtIn.label}
             </option>
@@ -106,7 +147,22 @@ export function ProposalTemplatePicker({ value, onChange, disabled }: ProposalTe
       {error ? (
         <p style={{ color: "var(--portal-muted)", fontSize: "0.8rem", marginTop: 4 }}>{error}</p>
       ) : selectedBuiltIn ? (
-        <p style={{ color: "var(--portal-muted)", fontSize: "0.8rem", marginTop: 4 }}>{selectedBuiltIn.description}</p>
+        <p style={{ color: "var(--portal-muted)", fontSize: "0.8rem", marginTop: 4 }}>
+          {selectedBuiltIn.description}
+          {selectedSellsSubscription === false ? (
+            <>
+              {" "}
+              The editor will not ask for a subscription price, included users or included jobsites, and the document
+              prints none — add a platform package later if this deal includes one.
+            </>
+          ) : selectedSellsSubscription === true ? (
+            <>
+              {" "}
+              Sells a platform subscription: the document prints the package, its price and the included user and
+              jobsite counts.
+            </>
+          ) : null}
+        </p>
       ) : selectedSaved?.description ? (
         <p style={{ color: "var(--portal-muted)", fontSize: "0.8rem", marginTop: 4 }}>{selectedSaved.description}</p>
       ) : value === "" ? (

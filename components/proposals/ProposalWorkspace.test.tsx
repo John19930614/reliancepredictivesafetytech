@@ -14,7 +14,9 @@
 // `owner` is deliberately outside the meta gate (internal routing, not part of
 // the offer) and must stay editable on every status.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -56,6 +58,7 @@ import {
   updateProposalMeta,
 } from "@/app/employee/proposals/actions";
 import { canEditProposalContent, canEditProposalMeta } from "@/lib/proposals/policy";
+import { serviceOptions } from "@/lib/proposals/catalog";
 import type { GeneratorState } from "@/lib/proposals/generator-state";
 import type { ProposalRevisionRow, ProposalStatus } from "@/lib/proposals/types";
 import {
@@ -459,5 +462,215 @@ describe("ProposalWorkspace — live preview matches the team picker", () => {
   it("tells the seller where the picker lands in the document", () => {
     render(<ProposalWorkspace proposal={editorProposal(stateWithTeam("", ""))} roster={roster} />);
     expect(screen.getByText(/section 09, Your Team/)).toBeInTheDocument();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The editor says what kind of proposal this is                               */
+/*                                                                             */
+/* `proposalType` is stamped into a hidden generator input at creation and was  */
+/* never shown again, so a seller had no way to see that they were filling in   */
+/* a Training proposal — or that a training deal sells no subscription and the  */
+/* seat/jobsite inputs are therefore absent by design rather than broken.       */
+/* -------------------------------------------------------------------------- */
+
+function typedState(proposalType: string, packageSelect: string): GeneratorState {
+  return {
+    v: 1,
+    fields: { clientCompany: "Northwind Construction", proposalType, packageSelect },
+    phases: [],
+    services: [],
+  };
+}
+
+describe("ProposalWorkspace — proposal type is visible", () => {
+  it("names the type in the header and explains a services-only deal", () => {
+    render(<ProposalWorkspace proposal={editorProposal(typedState("training", "none"))} />);
+
+    // Twice on purpose: beside the status badge, where it is always in view,
+    // and on the orientation card, where it is explained.
+    expect(screen.getAllByText("Type: Training")).toHaveLength(2);
+    expect(screen.getByText(/Services only/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/does not ask for a subscription price, included users or included jobsites/),
+    ).toBeInTheDocument();
+    // The document's own name for the engagement, so the header on the right is
+    // not a surprise.
+    expect(screen.getByText("Training Services")).toBeInTheDocument();
+  });
+
+  it("names the package a subscription deal actually sells", () => {
+    render(<ProposalWorkspace proposal={editorProposal(typedState("platform", "professional"))} />);
+
+    expect(screen.getAllByText("Type: Platform Subscription").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Subscription: Professional Safety Intelligence/)).toBeInTheDocument();
+    expect(screen.queryByText(/Services only/)).toBeNull();
+  });
+
+  // A proposal created before the stamp existed, or started blank, must not be
+  // labelled with a type nobody chose.
+  it("says the type is not recorded rather than guessing one", () => {
+    render(<ProposalWorkspace proposal={editorProposal(typedState("", "blank"))} />);
+
+    expect(screen.getAllByText("Type: not recorded").length).toBeGreaterThan(0);
+    expect(screen.getByText(/No proposal type is recorded/)).toBeInTheDocument();
+  });
+
+  it("offers a jump list that reaches the card behind every printed section", () => {
+    render(<ProposalWorkspace proposal={editorProposal(typedState("pilot", "custom"))} roster={roster} />);
+
+    const nav = screen.getByRole("navigation", { name: /Jump to a control card/ });
+    // "Bio is also hard to find": the team card is the last one in a long
+    // column, so the link to it is the point of the whole list.
+    const teamLink = within(nav).getByRole("link", { name: /Team & bios/ });
+    const target = teamLink.getAttribute("href")?.slice(1) ?? "";
+    expect(target).not.toBe("");
+    expect(document.getElementById(target)).toContainElement(
+      screen.getByRole("heading", { name: /Proposal team/ }),
+    );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The generator asset's own type-awareness                                    */
+/*                                                                             */
+/* assets/proposal-generator-v15.html is the left-hand control panel, mounted   */
+/* in the iframe. It is a static file with inline JS, so the only way to prove  */
+/* that a services-only proposal stops asking for seats is to run it: the       */
+/* markup is mounted into this jsdom document and its script evaluated, exactly */
+/* as the browser would. Everything below drives it through the same `change`   */
+/* event a seller's click produces.                                            */
+/* -------------------------------------------------------------------------- */
+
+const assetHtml = readFileSync(join(process.cwd(), "assets", "proposal-generator-v15.html"), "utf8");
+
+/**
+ * Runs the asset in a document of its OWN, not this test file's.
+ *
+ * The generator registers document-level `input` / `change` / `click` handlers
+ * that call update(), which assumes the generator's markup is present. Attaching
+ * those to the shared jsdom document would make any later React test that types
+ * into an input throw from inside a listener nobody can see. A separate document
+ * keeps the harness sealed; `document` and `window` are passed in as parameters,
+ * which shadow the globals the asset's IIFE closes over.
+ */
+function mountGenerator(): Document {
+  const body = /<body>([\s\S]*)<\/body>/.exec(assetHtml)?.[1];
+  if (!body) throw new Error("The generator asset has no <body>.");
+  const script = /<script>([\s\S]*?)<\/script>/.exec(body)?.[1];
+  if (!script) throw new Error("The generator asset has no inline script.");
+
+  const doc = document.implementation.createHTMLDocument("generator");
+  doc.body.innerHTML = body.replace(/<script>[\s\S]*?<\/script>/, "");
+  const assetWindow = { addEventListener() {}, removeEventListener() {}, print() {} };
+  // The asset's DOMContentLoaded seeding never fires here, which is why each
+  // test drives update() through the same `change` event a seller's click makes.
+  new Function("document", "window", script)(doc, assetWindow);
+  return doc;
+}
+
+let generator: Document;
+
+function selectPackage(key: string) {
+  const select = generator.getElementById("packageSelect") as HTMLSelectElement;
+  select.value = key;
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function field(id: string): HTMLInputElement {
+  return generator.getElementById(id) as HTMLInputElement;
+}
+
+function textOf(id: string): string {
+  return generator.getElementById(id)?.textContent?.trim() ?? "";
+}
+
+describe("generator asset — the form follows the deal", () => {
+  beforeAll(() => {
+    generator = mountGenerator();
+  });
+
+  it("stops asking a services-only proposal for a price, seats or jobsites", () => {
+    selectPackage("none");
+
+    const row = generator.getElementById("platformPriceRow") as HTMLElement;
+    expect(row.style.display).toBe("none");
+    // Included Jobsites is INSIDE that row now. It used to share a grid with
+    // Billing Term and was hidden by a second rule, which left Billing Term
+    // stranded in half a row.
+    // Plain DOM assertions in this block: jest-dom's matchers reject nodes from
+    // a document with no defaultView, which is what the sealed harness creates.
+    expect(row.contains(generator.getElementById("includedSites"))).toBe(true);
+    // The inputs still exist — the bridge collects every field — they are just
+    // not asked for, and they are zeroed so nothing stale is saved.
+    expect(field("includedUsers").value).toBe("0");
+    expect(field("includedSites").value).toBe("0");
+    expect(field("annualPrice").value).toBe("0");
+
+    // Billing Term is deliberately not in the block: a training or retainer
+    // engagement still has one.
+    const billing = generator.getElementById("billingTerm") as HTMLSelectElement;
+    expect(billing.closest("#platformPriceRow")).toBeNull();
+    expect(billing.style.display).not.toBe("none");
+  });
+
+  it("drops the subscription language from the headings and hints too", () => {
+    selectPackage("none");
+
+    expect(textOf("termPackageTitle")).toBe("4. Engagement Term");
+    expect(textOf("phasesCardTitle")).toBe("5. Work Phases");
+    expect(textOf("packageModeNote")).toMatch(/services only/i);
+    expect(textOf("packageModeNote")).toMatch(/No seats, no jobsites, no subscription price/);
+    expect((generator.getElementById("customSummary") as HTMLTextAreaElement).placeholder).not.toMatch(
+      /included users/i,
+    );
+  });
+
+  it("brings the subscription inputs back when a package is selected again", () => {
+    selectPackage("none");
+    selectPackage("professional");
+
+    expect((generator.getElementById("platformPriceRow") as HTMLElement).style.display).not.toBe("none");
+    expect(textOf("termPackageTitle")).toBe("4. Engagement Term & Package");
+    expect(textOf("phasesCardTitle")).toBe("5. Implementation Phases");
+    // The tier's own counts, not the pilot-sized defaults left over.
+    expect(field("includedUsers").value).toBe("50");
+    expect(field("includedSites").value).toBe("5");
+  });
+
+  it("labels the price for the deal being sold, not always as a pilot", () => {
+    selectPackage("professional");
+    expect(textOf("annualPriceLabel")).toBe("Subscription Price");
+
+    selectPackage("custom");
+    expect(textOf("annualPriceLabel")).toBe("Pilot Price");
+  });
+
+  it("does not leave a pilot priced at nothing for nobody after a detour through services-only", () => {
+    selectPackage("custom");
+    selectPackage("none");
+    selectPackage("custom");
+
+    expect(Number(field("annualPrice").value)).toBeGreaterThan(0);
+    expect(Number(field("includedUsers").value)).toBeGreaterThan(0);
+    expect(Number(field("includedSites").value)).toBeGreaterThan(0);
+  });
+
+  // The runtime price book must be the literal the parity test compares against
+  // catalog.ts. A legacy loop under the literal used to overwrite all 35
+  // Training Catalog entries at load, so the editor quoted training by the
+  // session while the platform quoted it by the person.
+  it("quotes training from the same price book the platform reads", () => {
+    const services = generator.getElementById("services") as HTMLElement;
+    (generator.querySelector('[data-action="addService"]') as HTMLElement).click();
+    const row = services.querySelector(".service") as HTMLElement;
+    const key = row.querySelector(".svcKey") as HTMLSelectElement;
+
+    key.value = "firstAid";
+    key.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect((row.querySelector(".svcPrice") as HTMLInputElement).value).toBe(String(serviceOptions.firstAid.price));
+    expect((row.querySelector(".svcDesc") as HTMLInputElement).value).toBe(serviceOptions.firstAid.desc);
+    expect((row.querySelector(".qtyLabel") as HTMLElement).textContent).toContain(serviceOptions.firstAid.unit);
   });
 });

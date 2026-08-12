@@ -266,15 +266,28 @@ describe("lexicon", () => {
   });
 });
 
-describe("coordination with the seller-controlled IP clause", () => {
-  it("subordinates the work-product license instead of contradicting it", () => {
+describe("coordination with the IP clause", () => {
+  it("gives the client a perpetual license that the IP clause cannot cancel", () => {
+    // THE DEFECT THIS PINS. The shared Intellectual Property clause licenses
+    // deliverables "solely during the active paid term" — a subscription rule.
+    // This type grants a PERPETUAL license on payment in full, and used to end
+    // by deferring: "if the two conflict, the Intellectual Property terms
+    // govern." So the term-limited version won, and a client who paid in full
+    // for three written safety programs held no lasting right to use them.
+    // There is no term on a fixed-price engagement for a license to hang off.
     const license = bodyOf(extraById("fixed.work_product_license").heading);
     expect(license).toMatch(/On payment in full of the fixed price/);
     expect(license).toMatch(/perpetual, non-exclusive, non-transferable license/);
-    expect(license).toMatch(
-      /adds to the Intellectual Property terms stated above and does not limit them; if the two conflict, the Intellectual Property terms govern/,
-    );
-    // It prints immediately after the clause it defers to.
+    // It must PREVAIL for the deliverables, not defer.
+    expect(license).toMatch(/this clause governs and prevails/i);
+    expect(license).not.toMatch(/the Intellectual Property terms govern/);
+
+    // And the clause it prevails over must no longer time-limit the license.
+    const ip = bodyOf(headingFor("intellectual_property"));
+    expect(ip).not.toMatch(/active paid term/);
+    expect(ip).toMatch(/are not limited to any term/);
+
+    // It still prints immediately after the clause it coordinates with.
     expect(headings.indexOf(extraById("fixed.work_product_license").heading)).toBe(
       headings.indexOf(headingFor("intellectual_property")) + 1,
     );

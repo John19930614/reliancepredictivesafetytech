@@ -185,9 +185,13 @@ export function ProposalDocument({
             {entry.body ? <p>{entry.body}</p> : null}
           </div>
         ))
-      ) : (
-        <p className="rp-doc-empty">{documentCopy.noPhases}</p>
-      )}
+      ) : model.phaseEmptyNote ? (
+        // From the model, not documentCopy: a services engagement has no
+        // implementation phases BY DESIGN, so the model blanks this and the
+        // note disappears rather than telling a training client its proposal
+        // is missing something it never had.
+        <p className="rp-doc-empty">{model.phaseEmptyNote}</p>
+      ) : null}
       {model.serviceScope.length > 0 ? (
         model.serviceScope.map((entry) => (
           <div key={entry.heading}>
@@ -195,9 +199,9 @@ export function ProposalDocument({
             {entry.body ? <p>{entry.body}</p> : null}
           </div>
         ))
-      ) : (
-        <p className="rp-doc-empty">{documentCopy.noServices}</p>
-      )}
+      ) : model.serviceEmptyNote ? (
+        <p className="rp-doc-empty">{model.serviceEmptyNote}</p>
+      ) : null}
 
       <SectionHeading number="04">Deliverables</SectionHeading>
       <ul className="rp-doc-list">

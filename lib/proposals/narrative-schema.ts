@@ -69,24 +69,44 @@ export const narrativeResponseSchema = {
   },
 } as const;
 
-/** The facts block, as the model sees it. */
+/**
+ * The facts block, as the model sees it.
+ *
+ * A services-only engagement gets a DIFFERENT block, not the same one with
+ * zeroes in it. Rule 2 below forbids the model from writing any number that is
+ * not here, so "Included users: 0 · Included jobsites: 0 · Base subscription:
+ * Platform Services at $0.00" was not a harmless blank — it was a licence to
+ * write seats, jobsites and a subscription into a training document, and an
+ * instruction that the price of the thing being sold was zero.
+ */
 function renderFacts(facts: ProposalFacts): string {
+  const engagement = facts.proposalTypeLabel ?? "Professional services";
+  const subscriptionLines = facts.servicesOnly
+    ? [
+        `Engagement: ${engagement} — services only. This proposal sells NO platform subscription.`,
+        "Included users / included jobsites: not applicable — never state a seat, user, or jobsite count",
+      ]
+    : [
+        `Included users: ${facts.users}`,
+        `Included jobsites: ${facts.sites}`,
+      ];
   const lines = [
-    `Included users: ${facts.users}`,
-    `Included jobsites: ${facts.sites}`,
+    ...subscriptionLines,
     facts.termMonths === null
       ? "Engagement term: not set — do not state a duration"
       : `Engagement term: ${facts.termMonths} months`,
     facts.termRangeLabel === null
       ? "Term dates: not set — do not state start or end dates"
       : `Term dates: ${facts.termRangeLabel}`,
-    `Base subscription / package: ${facts.packageName} at ${formatMoney(facts.packagePrice)}`,
+    ...(facts.servicesOnly ? [] : [`Base subscription / package: ${facts.packageName} at ${formatMoney(facts.packagePrice)}`]),
     `Subtotal: ${formatMoney(facts.subtotal)}`,
     `Discount: ${formatMoney(facts.discount)}`,
     `Tax: ${formatMoney(facts.tax)}`,
     `Total: ${formatMoney(facts.total)}`,
     `Deposit due at acceptance: ${formatMoney(facts.deposit)}`,
-    `Billing: ${facts.billingTerm}`,
+    facts.billingTerm === ""
+      ? "Billing term: not chosen — do not state a billing cadence"
+      : `Billing: ${facts.billingTerm}`,
     `Payment terms: ${facts.paymentTerms}`,
     `Open for acceptance: ${facts.validDays} calendar days`,
   ];
@@ -130,8 +150,18 @@ export function buildNarrativePrompt(input: {
     })
     .join("\n\n");
 
+  // "safety-platform proposal" is only true of three of the seven types. On a
+  // training, fixed-price, time-and-materials or retainer document it told the
+  // model the deal was a subscription before it read a single fact, which is
+  // exactly how platform vocabulary gets rewritten INTO a services proposal by
+  // the tool that is supposed to be removing contradictions.
+  const subject = input.facts.servicesOnly
+    ? `commercial ${(input.facts.proposalTypeLabel ?? "professional services").toLowerCase()} proposal ` +
+      "(a services engagement — no platform subscription is being sold)"
+    : "commercial safety-platform proposal";
+
   return [
-    "You are a contracts editor working on a commercial safety-platform proposal that a client is about to sign.",
+    `You are a contracts editor working on a ${subject} that a client is about to sign.`,
     "",
     "The proposal's structured fields are the single source of truth. The passages below are prose that was written",
     "earlier and now states figures that contradict those fields. Correct the figures. Change nothing else.",

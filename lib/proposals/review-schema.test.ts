@@ -38,6 +38,39 @@ describe("buildReviewPrompt", () => {
     const prompt = buildReviewPrompt({ state: state(), status: "draft", deterministic: [] });
     expect(prompt).toContain("(none — the automated checks all passed)");
   });
+
+  it("names the deal, so a subscription proposal is reviewed as one", () => {
+    const prompt = buildReviewPrompt({ state: state(), status: "draft", deterministic: [] });
+    expect(prompt).toContain("includes a platform subscription");
+    expect(prompt).toContain("Included users:");
+    expect(prompt).toContain("Base subscription / package:");
+  });
+
+  it("tells the reviewer a services proposal is not a subscription, and gives it no subscription facts", () => {
+    // Without this the reviewer read every document as a platform sale and
+    // wrote findings about the seats and rollout phases a training proposal
+    // "lacked" — while the facts block told it those seats existed.
+    const training: GeneratorState = {
+      v: 1,
+      fields: {
+        clientCompany: "Acme",
+        packageSelect: "none",
+        proposalType: "training",
+        includedUsers: "50",
+        includedSites: "2",
+        customSummary: "Instructor-led courses delivered to your crews.",
+      },
+      phases: [],
+      services: [{ type: "service", key: "firstAid", name: "", qty: 6, price: 145, desc: "", unit: "" }],
+    };
+    const prompt = buildReviewPrompt({ state: training, status: "draft", deterministic: [] });
+
+    expect(prompt).toContain("THIS DEAL: Training Services — standalone services");
+    expect(prompt).toContain("their absence is not a gap");
+    expect(prompt).toContain("Engagement type: Training Services");
+    expect(prompt).not.toContain("Included users:");
+    expect(prompt).not.toContain("Base subscription / package:");
+  });
 });
 
 describe("parseReviewOutput", () => {

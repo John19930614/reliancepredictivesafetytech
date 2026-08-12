@@ -2,7 +2,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildProposalDocumentModel } from "@/components/proposals/proposal-document-model";
-import { isNoPlatformPackageKey, isPackageKey, isPhaseKey, isPilotPackageKey, isServiceKey } from "./catalog";
+import {
+  isNoPlatformPackageKey,
+  isPackageKey,
+  isPhaseKey,
+  isPilotPackageKey,
+  isServiceKey,
+  phaseOptions,
+  serviceOptions,
+} from "./catalog";
 import { scanProposalConsistency } from "./consistency";
 import { isGeneratorState } from "./generator-state";
 import { computeProposalTotals } from "./pricing";
@@ -212,6 +220,67 @@ describe("every built-in template body", () => {
   it("Training carries the First Aid / CPR / AED line Steve asked for", () => {
     const body = buildTransactionTemplateState("training");
     expect(body.services.some((item) => item.key === "firstAid")).toBe(true);
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* Seed quantities must mean something under the line's billing unit         */
+  /*                                                                           */
+  /* A seeded qty is what the client reads until the seller changes it. Since  */
+  /* the certification courses moved to per-participant billing, a course line */
+  /* seeded at 1 quotes a one-person class — under terms that bill a short     */
+  /* roster at six. This is the guard that catches the NEXT catalog entry to   */
+  /* change units, not just the one that already did.                          */
+  /* ------------------------------------------------------------------------ */
+
+  // Stated once, in the Class Size and Minimum Billing clause of
+  // lib/proposals/type-profiles/training.ts.
+  const classMinimum = 6;
+
+  it("never seeds a per-participant course below the stated class minimum", () => {
+    for (const key of transactionTemplateKeys) {
+      for (const seed of buildTransactionTemplateState(key).services) {
+        const option = serviceOptions[seed.key as keyof typeof serviceOptions];
+        const label = `${key}/${seed.key} (${option.unit})`;
+        expect(Number.isFinite(seed.qty), label).toBe(true);
+        expect(seed.qty, label).toBeGreaterThan(0);
+        if (option.unit === "Person") expect(seed.qty, label).toBeGreaterThanOrEqual(classMinimum);
+      }
+    }
+  });
+
+  it("seeds every service line at the catalog price for its key", () => {
+    // Templates version WITH the price book. A seed carrying its own copy of a
+    // price is a number that goes stale silently on the next repricing.
+    for (const key of transactionTemplateKeys) {
+      for (const seed of buildTransactionTemplateState(key).services) {
+        expect(seed.price, `${key}/${seed.key}`).toBe(serviceOptions[seed.key as keyof typeof serviceOptions].price);
+      }
+    }
+  });
+
+  it("leaves name/desc/unit empty on every seed so the catalog copy rides along", () => {
+    // Storing the catalog sentence would freeze it, and storing the unit would
+    // freeze a unit against a price the seller has not set yet.
+    for (const key of transactionTemplateKeys) {
+      for (const seed of [...buildTransactionTemplateState(key).phases, ...buildTransactionTemplateState(key).services]) {
+        expect(seed.name, `${key}/${seed.key}`).toBe("");
+        expect(seed.unit, `${key}/${seed.key}`).toBe("");
+      }
+    }
+  });
+
+  it("prices the pilot's phases at zero and everyone else's at the catalog rate", () => {
+    // The pilot package fee IS the price of the pilot; its phases print as
+    // scope, not as four more fees on top.
+    for (const seed of buildTransactionTemplateState("pilot").phases) expect(seed.price).toBe(0);
+
+    for (const key of transactionTemplateKeys) {
+      if (key === "pilot") continue;
+      for (const seed of buildTransactionTemplateState(key).phases) {
+        expect(seed.price, `${key}/${seed.key}`).toBe(phaseOptions[seed.key as keyof typeof phaseOptions].price);
+        expect(seed.qty, `${key}/${seed.key}`).toBe(1);
+      }
+    }
   });
 
   it("Enterprise's included counts agree with the Enterprise package", () => {
