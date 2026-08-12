@@ -86,6 +86,7 @@ import {
   toggleTeamMember,
   type TeamRosterEntry,
 } from "@/lib/proposals/team-selection";
+import { ProposalAiReviewPanel } from "./ProposalAiReviewPanel";
 import { ProposalConsistencyPanel } from "./ProposalConsistencyPanel";
 import { ProposalDocument } from "./ProposalDocument";
 import { documentLimits, type DocumentSignature, type DocumentTeamMember } from "./proposal-document-model";
@@ -786,6 +787,17 @@ export function ProposalWorkspace({
             state={previewState}
             disabled={!editGate.ok}
             onApply={(patch) => postToGenerator({ type: "proposal:load", state: { v: 1, ...patch } })}
+          />
+
+          {/* Advisory AI review of the live state. The same panel sits on the
+              read-only detail page, so review is available at every workflow
+              stage — this endpoint returns findings only and writes nothing. */}
+          <ProposalAiReviewPanel
+            proposalId={proposal.id}
+            status={proposal.status}
+            state={previewState}
+            validUntil={proposal.valid_until}
+            clientAssigned={Boolean(proposal.client_id)}
           />
 
           <iframe

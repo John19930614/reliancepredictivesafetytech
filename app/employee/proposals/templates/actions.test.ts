@@ -14,6 +14,7 @@ import { resolveProposalRoleFlags } from "@/lib/proposals/policy";
 import { isGeneratorState, type GeneratorState } from "@/lib/proposals/generator-state";
 import {
   createProposalFromTemplate,
+  createProposalFromTransactionType,
   createTemplateFromProposal,
   deleteProposalTemplate,
   listProposalTemplates,
@@ -461,5 +462,72 @@ describe("listProposalTemplates", () => {
     await listProposalTemplates({ includeArchived: true });
 
     expect(findCall(supabase, "client_proposal_templates", "select")?.filters).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Built-in transaction types
+// ---------------------------------------------------------------------------
+describe("createProposalFromTransactionType", () => {
+  it("denies a role outside the portal whitelist without touching the database", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("client_user", supabase);
+
+    const result = await createProposalFromTransactionType({ typeKey: "pilot", title: "Pilot for Acme" });
+
+    expect(result.ok).toBe(false);
+    expect(supabase.calls).toHaveLength(0);
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a key the registry does not offer", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("employee", supabase);
+
+    const result = await createProposalFromTransactionType({ typeKey: "growth_hack", title: "x" });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("proposal type");
+    expect(supabase.calls).toHaveLength(0);
+  });
+
+  it("creates a draft seeded from the type's template, priced from its own line items", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:insert": { data: { id: NEW_PROPOSAL_ID, proposal_number: "RPS-2026-0042" } },
+      "client_proposals:update": {},
+      "client_proposal_revisions:insert": {},
+    });
+    signIn("employee", supabase);
+
+    const result = await createProposalFromTransactionType({ typeKey: "pilot", title: "Pilot for Hunzinger" });
+
+    expect(result.ok).toBe(true);
+    expect(result.proposalId).toBe(NEW_PROPOSAL_ID);
+
+    const inserted = findCall(supabase, "client_proposals", "insert")?.payload as {
+      status: string;
+      proposal_value: number;
+      form_data: GeneratorState;
+    };
+    expect(inserted.status).toBe("draft");
+    // The pilot package's manual price fallback (5000) plus four zero-price phases.
+    expect(inserted.proposal_value).toBe(5000);
+    expect(isGeneratorState(inserted.form_data)).toBe(true);
+    expect(inserted.form_data.fields.packageSelect).toBe("custom");
+    expect(inserted.form_data.fields.clientCompany).toBeUndefined();
+
+    // The allocated reference is stamped onto the saved state...
+    const stamped = findCall(supabase, "client_proposals", "update")?.payload as { form_data: GeneratorState };
+    expect(stamped.form_data.fields.proposalNo).toBe("RPS-2026-0042");
+
+    // ...and revision 1 carries the numbered state and names the type.
+    const revision = findCall(supabase, "client_proposal_revisions", "insert")?.payload as {
+      change_note: string;
+      form_data: GeneratorState;
+    };
+    expect(revision.change_note).toContain("Pilot");
+    expect(revision.form_data.fields.proposalNo).toBe("RPS-2026-0042");
+
+    expect(auditMock).toHaveBeenCalledTimes(1);
   });
 });

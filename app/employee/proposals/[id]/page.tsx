@@ -16,6 +16,7 @@ import {
   ProposalReviewPanel,
   type ProposalApprovalSummary,
 } from "@/components/proposals/ProposalReviewPanel";
+import { ProposalAiReviewPanel } from "@/components/proposals/ProposalAiReviewPanel";
 import { resolveApprovalState } from "@/lib/proposals/approval";
 import { loadApprovalRecords } from "@/lib/proposals/approval-server";
 import {
@@ -313,6 +314,19 @@ export default async function ProposalDetailPage({
           canApprove={canApprove}
           approval={approvalSummary}
         />
+        {/* Advisory AI review of the SAVED state — here rather than only in
+            the editor so the approver deciding an in_review revision, and
+            anyone looking back at a sent or accepted document, can ask for a
+            second read. Findings only; nothing is applied. */}
+        {canManage ? (
+          <ProposalAiReviewPanel
+            proposalId={normalized.id}
+            status={normalized.status}
+            state={documentState}
+            validUntil={normalized.valid_until}
+            clientAssigned={Boolean(normalized.client_id)}
+          />
+        ) : null}
         <ProposalControlPanel
           proposal={normalized}
           clients={clientOptions}

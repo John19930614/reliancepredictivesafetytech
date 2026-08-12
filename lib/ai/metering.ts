@@ -34,7 +34,8 @@ export type AiFeatureKey =
   | "ai_command"
   | "website_command"
   | "sales_meeting_notes"
-  | "proposal_narrative";
+  | "proposal_narrative"
+  | "proposal_review";
 
 export type BudgetDecision =
   | { allowed: true; remainingCents: number; modelOverride: string | null }
