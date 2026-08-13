@@ -1,6 +1,15 @@
+/**
+ * Ordered strongest-first: the index IS the command rank (see
+ * `getPortalRoleCommandRank`), and the role-assignment guards read it, so
+ * reordering this array changes who may promote whom. `super_admin` leads
+ * because it is the only role that may edit employee profiles
+ * (app/employee/users/[id]/actions.ts) and approve time cards
+ * (app/employee/time-cards/actions.ts) — `isPortalSuperAdminRole` gates both,
+ * and `platform_admin` does not satisfy it.
+ */
 export const portalUserRoles = [
-  "platform_admin",
   "super_admin",
+  "platform_admin",
   "company_admin",
   "admin",
   "internal_reviewer",
@@ -8,8 +17,8 @@ export const portalUserRoles = [
   "employee",
 ] as const;
 
-export const portalAdminRoles = ["platform_admin", "super_admin", "company_admin", "admin"] as const;
-export const portalOwnerRoles = ["platform_admin", "super_admin"] as const;
+export const portalAdminRoles = ["super_admin", "platform_admin", "company_admin", "admin"] as const;
+export const portalOwnerRoles = ["super_admin", "platform_admin"] as const;
 
 export const portalAccountStatuses = ["active", "archived"] as const;
 
@@ -34,6 +43,47 @@ export function isPortalOwnerRole(role: string | null | undefined): role is Port
 
 export function isPortalSuperAdminRole(role: string | null | undefined) {
   return role === "super_admin";
+}
+
+/**
+ * Whether `actorRole` may grant `targetRole` to someone.
+ *
+ * Two rules, both required: only owners may hand out owner roles, and nobody
+ * may hand out a role that outranks their own. Without this an `admin` — which
+ * `isPortalAdminRole` accepts but `isPortalOwnerRole` does not — could promote
+ * itself or anyone else to `super_admin`.
+ */
+export function canAssignPortalRole(actorRole: string | null | undefined, targetRole: string | null | undefined) {
+  if (!isPortalAdminRole(actorRole)) {
+    return false;
+  }
+
+  if (isPortalOwnerRole(targetRole) && !isPortalOwnerRole(actorRole)) {
+    return false;
+  }
+
+  return getPortalRoleCommandRank(targetRole) >= getPortalRoleCommandRank(actorRole);
+}
+
+/** The roles `actorRole` is allowed to pick in a role selector. */
+export function getAssignablePortalRoles(actorRole: string | null | undefined) {
+  return portalUserRoles.filter((role) => canAssignPortalRole(actorRole, role));
+}
+
+/**
+ * Whether `actorRole` may act on an account that currently holds `targetRole`.
+ * An account with no role row yet is manageable by any admin.
+ */
+export function canManagePortalUserAccount(actorRole: string | null | undefined, targetRole: string | null | undefined) {
+  if (!isPortalAdminRole(actorRole)) {
+    return false;
+  }
+
+  if (!targetRole) {
+    return true;
+  }
+
+  return getPortalRoleCommandRank(targetRole) >= getPortalRoleCommandRank(actorRole);
 }
 
 export const portalModuleCatalog = [

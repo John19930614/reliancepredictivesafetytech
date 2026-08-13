@@ -16,7 +16,9 @@ describe("resolveFileRoleFlags", () => {
   // Deleting a row orphans the stored object — the one capability that stays
   // admin-only, mirroring company_files_delete_admin in the migration.
   it("grants delete to exactly the four admin roles", () => {
-    expect(portalAdminRoles).toEqual(["platform_admin", "super_admin", "company_admin", "admin"]);
+    // Compared as a set: `portalAdminRoles` is ordered by command rank, and
+    // that order is free to change without affecting who may delete.
+    expect([...portalAdminRoles].sort()).toEqual(["admin", "company_admin", "platform_admin", "super_admin"]);
     for (const role of portalUserRoles) {
       const expected = (portalAdminRoles as readonly string[]).includes(role);
       expect(resolveFileRoleFlags(role, true).canDelete, `${role} canDelete`).toBe(expected);
