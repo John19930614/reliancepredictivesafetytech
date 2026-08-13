@@ -1,6 +1,9 @@
-#!/usr/bin/env node
-//
 // The only supported way to ship this app to production.
+//
+// No shebang on purpose: this always runs as `node scripts/deploy.mjs` via the
+// npm script, and on this Windows checkout git rewrites the file with CRLF
+// endings, which turns a shebang line into a parse error for the test runner
+// that imports this module.
 //
 // Production deploys run `vercel --prod` from the LOCAL WORKING TREE — merging
 // to main does not deploy anything. That means whatever is on disk at the
