@@ -114,6 +114,18 @@ describe("portal module access", () => {
     expect(canAccessEmployeePath("employee", "active", "/employee/clients/client-123", ["active_companies"])).toBe(true);
   });
 
+  // The company directory rides the existing active_companies grant rather than
+  // introducing a key of its own, so anyone who can already open a client record
+  // can list companies — and nobody else gains a surface they did not have.
+  it("gates the company directory on the same grant as the client record", () => {
+    expect(getPortalModuleForPath("/employee/clients")?.key).toBe("active_companies");
+    expect(canAccessEmployeePath("employee", "active", "/employee/clients", ["active_companies"])).toBe(true);
+    expect(canAccessEmployeePath("employee", "active", "/employee/clients", ["dashboard"])).toBe(false);
+    expect(canAccessEmployeePath("employee", "archived", "/employee/clients", ["active_companies"])).toBe(false);
+    // Owners bypass grants entirely, the same way they do everywhere else.
+    expect(canAccessEmployeePath("super_admin", "active", "/employee/clients", [])).toBe(true);
+  });
+
   it("denies unknown paths and inactive users", () => {
     expect(canAccessEmployeePath("employee", "active", "/employee/not-real", ["dashboard"])).toBe(false);
     expect(canAccessEmployeePath("employee", "archived", "/employee", ["dashboard"])).toBe(false);

@@ -8,6 +8,7 @@ import {
   BookOpenCheck,
   Bot,
   BriefcaseBusiness,
+  Building2,
   CalendarDays,
   CarFront,
   ChevronDown,
@@ -72,16 +73,24 @@ const navGroups = [
   },
   {
     label: "Commercial",
+    // Ordered by the deal, not by the org chart: a lead arrives in the Request
+    // Inbox, is worked on the pipeline, lives on its company record, is priced
+    // in a proposal and ends up an active company. The four surfaces below that
+    // line are real work but not steps in a deal, so they sit out of the path.
     items: [
-      { href: "/employee/demo-showcase", label: "Demo Showcase", icon: Presentation },
       { href: "/employee/inbox", label: "Request Inbox", icon: Inbox },
       { href: "/employee/sales", label: "Sales Pipeline", icon: BriefcaseBusiness },
+      // Same module key as Active Companies (active_companies already maps
+      // /employee/clients by path prefix), so this widens nothing — it only
+      // surfaces the directory that reaches every stage rather than the last two.
+      { href: "/employee/clients", label: "Companies", icon: Building2 },
       { href: "/employee/proposals", label: "Proposals", icon: ScrollText },
+      { href: "/employee/active-companies", label: "Active Companies", icon: Gauge },
+      { href: "/employee/demo-showcase", label: "Demo Showcase", icon: Presentation },
       // Same module key as Proposals (client_proposals resolves by path prefix),
       // so this widens nothing — it only surfaces the templates manager.
       { href: "/employee/proposals/templates", label: "Proposal Templates", icon: LayoutTemplate },
       { href: "/employee/talent-engine", label: "Talent Engine", icon: HandCoins },
-      { href: "/employee/active-companies", label: "Active Companies", icon: Gauge },
       { href: "/employee/mail", label: "Employee Mail", icon: Mail },
     ],
   },
