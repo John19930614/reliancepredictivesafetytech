@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { validateAIOutput } from "@/lib/ai/gateway";
 import { generateWorkflowNotificationsForUser } from "@/lib/notifications/rules";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -141,6 +142,22 @@ export async function approveWorkflowProposal(formData: FormData) {
   }
 
   const patch = cleanPatch(proposal.target_table, proposal.proposed_patch);
+
+  // The last gate before AI-authored values reach a business table — including
+  // website_content_items, whose approved_value is live public copy. Checked
+  // here as well as at the propose tools because this is the single choke point
+  // every producer funnels through, and because rows written before the tools
+  // were gated are still sitting in the queue waiting to be approved.
+  const gatewayResult = validateAIOutput({
+    rawOutput: `${proposal.title ?? ""}\n${proposal.description ?? ""}\n${JSON.stringify(patch)}`,
+    promptKey: "approveWorkflowProposal",
+  });
+  if (gatewayResult.status === "blocked") {
+    throw new Error(
+      `The AI Gateway blocked this proposal, so it was not applied: ${gatewayResult.blockedReason ?? "safety check failed"}. Review the proposed changes and apply them manually if they are legitimate.`,
+    );
+  }
+
   const appliedAt = new Date().toISOString();
   let nextStatus = "approved";
 

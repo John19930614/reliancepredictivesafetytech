@@ -13,11 +13,21 @@ import type {
   CompanyLegalIssue,
   CompanySalesActivity,
 } from "@/lib/company-data";
+import {
+  ClientRelatedPanels,
+  type ClientFileRow,
+  type ClientTrainingEventRow,
+} from "@/components/clients/ClientRelatedPanels";
+import type { ClientMeetingRow, ClientProposalRow } from "@/lib/clients/related";
 import { createClient } from "@/lib/supabase/server";
 
 type ClientDetailPageProps = {
   params: Promise<{ id: string }>;
 };
+
+/** Same convention as lib/files/access.ts, for tables absent from the types. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type LooseClient = any;
 
 export default async function ClientDetailPage({ params }: ClientDetailPageProps) {
   const { id } = await params;
@@ -40,6 +50,10 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
     { data: requirements },
     { data: masterTemplates },
     { data: contacts },
+    { data: proposals },
+    { data: files, count: fileCount },
+    { data: meetings },
+    { data: trainingEvents },
   ] = await Promise.all([
       supabase.from("company_sales_activities").select("*").eq("client_id", id).order("created_at", { ascending: false }),
       supabase.from("client_onboarding_items").select("*").eq("client_id", id).order("sort_order"),
@@ -56,6 +70,36 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
         .order("is_primary", { ascending: false })
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true }),
+      // The four families that already key on client_id and had no home on this
+      // page. All read-only; each row links back to the module that owns it.
+      supabase
+        .from("client_proposals")
+        .select("id, title, proposal_number, status, proposal_value, accepted_at, updated_at")
+        .eq("client_id", id)
+        .order("updated_at", { ascending: false })
+        .limit(10),
+      // company_files postdates the last Supabase types regen, so it is reached
+      // through an untyped handle — the same convention lib/files/access.ts
+      // already uses for the whole File Center module.
+      (supabase as LooseClient)
+        .from("company_files")
+        .select("id, name, created_at", { count: "exact" })
+        .eq("client_id", id)
+        .is("archived_at", null)
+        .order("created_at", { ascending: false })
+        .limit(8),
+      supabase
+        .from("sales_video_meetings")
+        .select("id, title, status, scheduled_at")
+        .eq("client_id", id)
+        .order("scheduled_at", { ascending: false })
+        .limit(10),
+      supabase
+        .from("client_training_events")
+        .select("id, title, status, scheduled_start_at, delivery_mode")
+        .eq("client_id", id)
+        .order("scheduled_start_at", { ascending: false })
+        .limit(6),
     ]);
 
   return (
@@ -97,6 +141,15 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
         masterTemplates={(masterTemplates ?? []) as CompanyDocument[]}
         onboardingItems={(items ?? []) as ClientOnboardingItem[]}
         requirements={(requirements ?? []) as CompanyDocumentRequirement[]}
+      />
+
+      <ClientRelatedPanels
+        files={(files ?? []) as ClientFileRow[]}
+        fileCount={fileCount ?? 0}
+        meetings={(meetings ?? []) as ClientMeetingRow[]}
+        now={new Date()}
+        proposals={(proposals ?? []) as ClientProposalRow[]}
+        trainingEvents={(trainingEvents ?? []) as ClientTrainingEventRow[]}
       />
     </>
   );

@@ -52,7 +52,10 @@ describe("validateRecommendation", () => {
       "Submit to client. The professional's SSN 123-45-6789 was confirmed during screening for this placement today.",
     );
     expect(result.checks.find((c) => c.key === "privacy")?.status).toBe("fail");
-    expect(result.status).toBe("fail");
+    // Blocked, not merely failed: a detected SSN is one of the three checks the
+    // gateway's rules table treats as a hard stop. This module rejects both
+    // statuses either way, so the draft was and remains suppressed.
+    expect(result.status).toBe("blocked");
   });
 
   it("fails on an unresolved placeholder", () => {

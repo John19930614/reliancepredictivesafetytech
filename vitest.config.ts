@@ -3,9 +3,12 @@ import path from "path";
 
 // One `vitest run`, two environments.
 //
-//   node — every pure-module suite. `*.test.ts`, environment "node", no setup
-//          file. Deliberately unchanged: the DOM harness (jsdom construction,
-//          Testing Library, jest-dom matchers) is not a cost the pure suites pay.
+//   node — every pure-module suite. `*.test.ts` (plus `*.test.mjs` for the
+//          deploy gate, which is plain Node by necessity — it guards the path
+//          to production and must not depend on the TypeScript pipeline it
+//          checks), environment "node", no setup file. Deliberately unchanged
+//          otherwise: the DOM harness (jsdom construction, Testing Library,
+//          jest-dom matchers) is not a cost the pure suites pay.
 //   dom  — component and route-render suites. `*.test.tsx`, environment "jsdom",
 //          plus ./vitest.setup.dom.ts.
 //
@@ -27,7 +30,7 @@ export default defineConfig({
         test: {
           name: "node",
           environment: "node",
-          include: ["**/*.test.ts"],
+          include: ["**/*.test.ts", "**/*.test.mjs"],
           exclude,
         },
       },

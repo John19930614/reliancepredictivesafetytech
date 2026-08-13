@@ -1,5 +1,6 @@
 import { convertToModelMessages, stepCountIs, streamText, tool, type UIMessage } from "ai";
 import { z } from "zod";
+import { validateAIOutput } from "@/lib/ai/gateway";
 import { checkAiBudget, recordAiUsage } from "@/lib/ai/metering";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@/lib/supabase/types";
@@ -191,6 +192,13 @@ export async function POST(req: Request) {
             priority: z.enum(["low", "medium", "high"]).default("medium"),
           }),
           execute: async ({ title, body, priority }) => {
+            const gatewayResult = validateAIOutput({
+              rawOutput: `${title}\n${body}`,
+              promptKey: "createWebsiteReminderNotification",
+            });
+            if (gatewayResult.status === "blocked") {
+              return { blocked: true, reason: gatewayResult.blockedReason ?? "AI Gateway safety check failed." };
+            }
             const dedupeKey = buildWebsiteNotificationDedupeKey("ai_website_reminder", user.id, title);
             const { data, error } = await supabase
               .from("portal_notifications")
@@ -245,6 +253,17 @@ export async function POST(req: Request) {
             riskLevel: z.enum(["low", "medium", "high", "critical"]).default("medium"),
           }),
           execute: async ({ title, description, actionType, targetTable, targetRecordId, proposedPatch, riskLevel }) => {
+            // The patch is validated alongside the prose. Its values are what
+            // eventually get written into business tables — for this assistant,
+            // into live public website copy — so screening only the title and
+            // description would leave the payload itself unchecked.
+            const gatewayResult = validateAIOutput({
+              rawOutput: `${title}\n${description}\n${JSON.stringify(proposedPatch)}`,
+              promptKey: "proposeWebsiteOperation",
+            });
+            if (gatewayResult.status === "blocked") {
+              return { blocked: true, reason: gatewayResult.blockedReason ?? "AI Gateway safety check failed." };
+            }
             const { data, error } = await supabase
               .from("workflow_action_proposals")
               .insert({

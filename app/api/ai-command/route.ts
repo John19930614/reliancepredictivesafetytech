@@ -409,6 +409,13 @@ export async function POST(req: Request) {
             sourceId: z.string().optional(),
           }),
           execute: async ({ recipientUserId, title, body, priority, actionHref, sourceType, sourceId }) => {
+            const gatewayResult = validateAIOutput({
+              rawOutput: `${title}\n${body}`,
+              promptKey: "createOnboardingNotification",
+            });
+            if (gatewayResult.status === "blocked") {
+              return { blocked: true, reason: gatewayResult.blockedReason ?? "AI Gateway safety check failed." };
+            }
             const dedupeSourceId = sourceId ?? recipientUserId;
             const notification = await createHrAutomationNotification(supabase, {
               recipientUserId,
@@ -440,7 +447,13 @@ export async function POST(req: Request) {
             riskLevel: z.enum(["low", "medium", "high", "critical"]).default("medium"),
           }),
           execute: async ({ title, description, actionType, targetTable, targetRecordId, proposedPatch, riskLevel }) => {
-            const gatewayResult = validateAIOutput({ rawOutput: `${title}\n${description}`, promptKey: "proposeWorkflowAction" });
+            // Includes the patch: its values are what get written into business
+            // tables on approval, so screening only the prose left the payload
+            // that actually lands in the database unchecked.
+            const gatewayResult = validateAIOutput({
+              rawOutput: `${title}\n${description}\n${JSON.stringify(proposedPatch)}`,
+              promptKey: "proposeWorkflowAction",
+            });
             if (gatewayResult.status === "blocked") {
               return { blocked: true, reason: gatewayResult.blockedReason ?? "AI Gateway safety check failed." };
             }

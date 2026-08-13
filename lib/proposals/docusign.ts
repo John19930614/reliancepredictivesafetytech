@@ -9,9 +9,11 @@ import { fileCenterBucket, fileCenterPath, type FileScope } from "@/lib/files/ty
 import { buildStoragePath, maxFileNameLength, sanitizeFileName } from "@/lib/files/validation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findOrCreateProposalsFolder } from "./acceptance-filing";
+import { recordAcceptanceIncome } from "./acceptance-income";
 import { parseClientContacts } from "./client-contacts";
 import { proposalDownloadFilename } from "./downloads";
 import { isGeneratorState, type GeneratorState } from "./generator-state";
+import { notifyProposalEventById } from "./notifications-server";
 import { canTransitionProposal } from "./policy";
 import { renderProposalPdf } from "./pdf";
 import { computeProposalTotals } from "./pricing";
@@ -298,6 +300,12 @@ async function markProposalDeclined(
     severity: "warn",
     actor_role: "docusign_webhook",
   });
+
+  await notifyProposalEventById("declined", proposal.id as string, {
+    channel: "docusign",
+    actorName: who,
+    declineReason: reason,
+  });
 }
 
 export async function recordDocusignEnvelopeEvent(
@@ -421,6 +429,24 @@ export async function recordDocusignEnvelopeEvent(
         accepted_revision_id: envelope.revision_id ?? null,
       })
       .eq("id", envelope.proposal_id);
+
+    // Same bookkeeping the other two acceptance paths do: expected income and
+    // the pipeline stage. Idempotent, so a redelivered envelope event cannot
+    // bill the client twice.
+    await recordAcceptanceIncome({
+      proposalId: envelope.proposal_id as string,
+      revisionId: (envelope.revision_id as string | null) ?? null,
+      actorUserId: null,
+      actorRole: "docusign_connect",
+    });
+
+    // An envelope completes asynchronously with nobody watching — without this
+    // the signature lands in storage and the news reaches no one.
+    await notifyProposalEventById("accepted", envelope.proposal_id as string, {
+      channel: "docusign",
+      actorName: (envelope.recipient_name as string | null) ?? null,
+      revisionNumber,
+    });
   }
 
   if (createdNewFile) {
