@@ -9,11 +9,19 @@ vi.mock("@/lib/audit/events", async (importOriginal) => {
 vi.mock("@/lib/proposals/acceptance-filing", () => ({
   fileAcceptedProposalPdf: vi.fn(async () => ({ ok: true, fileId: "filed-file-1" })),
 }));
+vi.mock("@/lib/proposals/acceptance-income", () => ({
+  recordAcceptanceIncome: vi.fn(async () => ({ ok: true, created: 2, advancedStage: true })),
+}));
+vi.mock("@/lib/proposals/notifications-server", () => ({
+  notifyProposalEventById: vi.fn(async () => ({ ok: true, notified: 1, emailed: 1 })),
+}));
 
 import { revalidatePath } from "next/cache";
 import { getProposalAccess } from "@/lib/proposals/access";
 import { recordAuditEvent } from "@/lib/audit/events";
 import { fileAcceptedProposalPdf } from "@/lib/proposals/acceptance-filing";
+import { recordAcceptanceIncome } from "@/lib/proposals/acceptance-income";
+import { notifyProposalEventById } from "@/lib/proposals/notifications-server";
 import { resolveProposalRoleFlags } from "@/lib/proposals/policy";
 import { isGeneratorState, type GeneratorState } from "@/lib/proposals/generator-state";
 import { phaseOptions } from "@/lib/proposals/catalog";
@@ -37,6 +45,8 @@ const getAccessMock = vi.mocked(getProposalAccess);
 const auditMock = vi.mocked(recordAuditEvent);
 const revalidateMock = vi.mocked(revalidatePath);
 const filingMock = vi.mocked(fileAcceptedProposalPdf);
+const incomeMock = vi.mocked(recordAcceptanceIncome);
+const notifyMock = vi.mocked(notifyProposalEventById);
 
 const PROPOSAL_ID = "11111111-1111-4111-8111-111111111111";
 const CLIENT_ID = "22222222-2222-4222-8222-222222222222";
@@ -977,6 +987,68 @@ describe("acceptance filing", () => {
     expect(warning.severity).toBe("warn");
     expect(warning.summary).toContain("could not be auto-filed");
     expect(warning.summary).toContain("bucket offline");
+  });
+
+  it("files the expected income and advances the client when a proposal is accepted", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "sent" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("employee", supabase);
+
+    const result = await setProposalStatus(PROPOSAL_ID, "accepted");
+
+    expect(result).toEqual({ ok: true });
+    expect(incomeMock).toHaveBeenCalledTimes(1);
+    expect(incomeMock.mock.calls[0][0]).toMatchObject({ proposalId: PROPOSAL_ID });
+  });
+
+  it("does not touch finance on a non-accept transition", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "in_review" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("owner", supabase);
+
+    await setProposalStatus(PROPOSAL_ID, "sent");
+
+    expect(incomeMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the acceptance and audits a warning when the income schedule fails", async () => {
+    incomeMock.mockResolvedValueOnce({ ok: false, error: "finance offline" });
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "sent" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("employee", supabase);
+
+    const result = await setProposalStatus(PROPOSAL_ID, "accepted");
+
+    // Same contract as the filing: bookkeeping failure never fails the deal.
+    expect(result).toEqual({ ok: true });
+    const warning = auditMock.mock.calls.find((call) =>
+      String(call[0]?.summary ?? "").includes("could not file its expected income"),
+    );
+    expect(warning?.[0].severity).toBe("warn");
+    expect(warning?.[0].summary).toContain("finance offline");
+  });
+
+  it("tells the owners about an acceptance", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposal({ status: "sent" }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("employee", supabase);
+
+    await setProposalStatus(PROPOSAL_ID, "accepted");
+
+    expect(notifyMock).toHaveBeenCalledWith(
+      "accepted",
+      PROPOSAL_ID,
+      expect.objectContaining({ channel: "employee" }),
+      expect.anything(),
+    );
   });
 });
 

@@ -57,6 +57,7 @@ import { computeProposalTotals } from "@/lib/proposals/pricing";
 import { proposalStatuses, type ProposalStatus } from "@/lib/proposals/types";
 import { fileAcceptedProposalPdf } from "@/lib/proposals/acceptance-filing";
 import { notifyProposalEventById } from "@/lib/proposals/notifications-server";
+import { recordAcceptanceIncome } from "@/lib/proposals/acceptance-income";
 import { sendProposalForDocusign } from "@/lib/proposals/docusign";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
 
@@ -914,6 +915,23 @@ export async function setProposalStatus(
   // client's File Center folder. The acceptance stands either way — a filing
   // failure is audited as a warning, never surfaced as an action failure.
   if (status === "accepted") {
+    // Same best-effort contract as the filing below: the deal is won either
+    // way, and a bookkeeping failure is audited rather than surfaced.
+    const income = await recordAcceptanceIncome({ proposalId, actorUserId: userId, actorRole: role });
+    if (!income.ok) {
+      await recordAuditEvent({
+        ...buildDataAuditEvent(
+          "update",
+          "client_proposal",
+          proposalId,
+          userId,
+          `Accepted proposal "${proposal.title}" could not file its expected income: ${income.error}`,
+        ),
+        severity: "warn",
+        actor_role: role,
+      });
+    }
+
     const filing = await fileAcceptedProposalPdf({ proposalId, actorUserId: userId, actorRole: role });
     if (!filing.ok) {
       await recordAuditEvent({
@@ -1285,6 +1303,29 @@ export async function acceptProposalViaShareLink(
     user_agent: userAgent,
     evidence_links: [view.linkId],
   });
+
+  // Best-effort, and deliberately before the filing: the receivable is what the
+  // business needs most from an acceptance. Never affects the client's own
+  // result — they accepted successfully whichever of these fails.
+  const income = await recordAcceptanceIncome({
+    proposalId: view.proposalId,
+    revisionId: view.revisionId,
+    actorUserId: null,
+    actorRole: "client_share_link",
+  });
+  if (!income.ok) {
+    await recordAuditEvent({
+      ...buildDataAuditEvent(
+        "update",
+        "client_proposal",
+        view.proposalId,
+        null,
+        `Accepted proposal "${view.title}" could not file its expected income: ${income.error}`,
+      ),
+      severity: "warn",
+      actor_role: "client_share_link",
+    });
+  }
 
   // Best-effort: file the PDF of the revision the client just accepted into
   // their File Center folder. Never affects the client's own result — they
