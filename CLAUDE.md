@@ -3,6 +3,11 @@
 > Machine-readable coding standards for all AI-assisted development on the SafetyIQ platform.
 > These rules are enforced before any code is written, reviewed, or released.
 
+> **Starting a change? Run `/change` first.** This file states the *rules*;
+> `/change` states the *order they run in* — analyze → plan → classify risk →
+> branch → build → gate → review. It refuses to write code before the plan and
+> risk rating exist, and it carries the STOP CONDITIONS below into every stage.
+
 ---
 
 ## INSTRUCTION PRIORITY ORDER
