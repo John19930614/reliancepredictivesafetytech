@@ -12,6 +12,7 @@ import { findOrCreateProposalsFolder } from "./acceptance-filing";
 import { parseClientContacts } from "./client-contacts";
 import { proposalDownloadFilename } from "./downloads";
 import { isGeneratorState, type GeneratorState } from "./generator-state";
+import { notifyProposalEventById } from "./notifications-server";
 import { canTransitionProposal } from "./policy";
 import { renderProposalPdf } from "./pdf";
 import { computeProposalTotals } from "./pricing";
@@ -298,6 +299,12 @@ async function markProposalDeclined(
     severity: "warn",
     actor_role: "docusign_webhook",
   });
+
+  await notifyProposalEventById("declined", proposal.id as string, {
+    channel: "docusign",
+    actorName: who,
+    declineReason: reason,
+  });
 }
 
 export async function recordDocusignEnvelopeEvent(
@@ -421,6 +428,14 @@ export async function recordDocusignEnvelopeEvent(
         accepted_revision_id: envelope.revision_id ?? null,
       })
       .eq("id", envelope.proposal_id);
+
+    // An envelope completes asynchronously with nobody watching — without this
+    // the signature lands in storage and the news reaches no one.
+    await notifyProposalEventById("accepted", envelope.proposal_id as string, {
+      channel: "docusign",
+      actorName: (envelope.recipient_name as string | null) ?? null,
+      revisionNumber,
+    });
   }
 
   if (createdNewFile) {

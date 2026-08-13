@@ -46,6 +46,7 @@ export type CommandSnapshot = {
     websiteContentGaps: number;
     pendingWorkflowProposals: number;
     unreadNotifications: number;
+    proposalsAwaitingReview: number;
   };
   priorityItems: CommandPriorityItem[];
   summary: string;
@@ -125,6 +126,7 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
     { data: websiteRouteReviews },
     { data: pendingWorkflowProposals },
     { data: unreadNotificationRows, count: unreadNotifications },
+    { data: proposalsAwaitingReview },
   ] = await Promise.all([
     supabase.from("demo_requests").select("id, name, company, email, message, created_at").eq("status", "new").order("created_at", { ascending: false }).limit(8),
     supabase
@@ -218,6 +220,14 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
       .eq("status", "unread")
       .order("created_at", { ascending: false })
       .limit(8),
+    // The maker-checker queue. The dashboard's review section has always
+    // claimed to cover proposal reviews; until this query it never looked.
+    supabase
+      .from("client_proposals")
+      .select("id, title, proposal_number, proposal_value, current_revision, updated_at")
+      .eq("status", "in_review")
+      .order("updated_at", { ascending: true })
+      .limit(8),
   ]);
 
   const peopleUserIds = [
@@ -241,6 +251,21 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
   const hrTemplateById = new Map((hrTemplates ?? []).map((template) => [template.id, template]));
 
   const rawPriorityItems: RawCommandPriorityItem[] = [
+    ...((proposalsAwaitingReview ?? []).map((proposal) => ({
+      title: [proposal.proposal_number, proposal.title].filter(Boolean).join(" — ") || "Proposal",
+      label: "Proposal awaiting approval",
+      href: `/employee/proposals/${proposal.id}`,
+      // Nothing can be sent to a client until an owner clears this.
+      priority: "high" as const,
+      detail: `v${proposal.current_revision ?? 1} submitted ${formatDate(proposal.updated_at)}`,
+      owner: null,
+      dueDate: proposal.updated_at,
+      status: "in_review",
+      sourceLabel: "Commercial",
+      sourceType: "client_proposal",
+      sourceId: proposal.id,
+      reviewRequired: true,
+    }))),
     ...((newDemoRequests ?? []).map((request) => ({
       actionHref: getWorkflowActionHref({ sourceType: "demo_request", sourceId: request.id }),
       title: request.company || request.name,
@@ -519,6 +544,7 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
     websiteContentGaps: websiteRouteReviews?.reduce((count, check) => count + (check.content_gaps?.length ?? 0), 0) ?? 0,
     pendingWorkflowProposals: pendingWorkflowProposals?.length ?? 0,
     unreadNotifications: unreadNotifications ?? 0,
+    proposalsAwaitingReview: proposalsAwaitingReview?.length ?? 0,
   };
 
   return {
@@ -526,7 +552,8 @@ export async function getCommandSnapshot(supabase: PortalClient, userId: string)
     counts,
     priorityItems,
     summary:
-      `As of ${todayIsoDate()}, the portal has ${counts.newDemoRequests} new demo requests, ` +
+      `As of ${todayIsoDate()}, the portal has ${counts.proposalsAwaitingReview} proposals awaiting approval, ` +
+      `${counts.newDemoRequests} new demo requests, ` +
       `${counts.highPriorityOperations} high-priority operations records, ${counts.openLegalIssues} legal items due soon, ` +
       `${counts.submittedTimeCards} submitted time cards, ${counts.hrReviewItems} HR tasks, ` +
       `${counts.onboardingCandidates} candidate intakes, ${counts.incompleteOnboarding} incomplete onboarding profiles, ` +

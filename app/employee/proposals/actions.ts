@@ -56,6 +56,7 @@ import type { DocumentSignature, DocumentTeamMember } from "@/components/proposa
 import { computeProposalTotals } from "@/lib/proposals/pricing";
 import { proposalStatuses, type ProposalStatus } from "@/lib/proposals/types";
 import { fileAcceptedProposalPdf } from "@/lib/proposals/acceptance-filing";
+import { notifyProposalEventById } from "@/lib/proposals/notifications-server";
 import { sendProposalForDocusign } from "@/lib/proposals/docusign";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
 
@@ -543,6 +544,15 @@ export async function submitProposalForReview(proposalId: string): Promise<Actio
     { status: "in_review", revision_number: proposal.current_revision },
   );
 
+  // The maker-checker handoff: the approver cannot act on what they were never
+  // told about. Best-effort — the submission stands if the notification fails.
+  await notifyProposalEventById(
+    "submitted_for_review",
+    proposalId,
+    { channel: "employee", revisionNumber: Number(proposal.current_revision ?? 1) },
+    { excludeUserId: userId },
+  );
+
   revalidateProposals(proposalId);
   return { ok: true };
 }
@@ -920,6 +930,20 @@ export async function setProposalStatus(
     }
   }
 
+  // An outcome recorded by an employee still needs to reach the other owner —
+  // acceptance is often relayed by phone and entered by whoever took the call.
+  if (status === "accepted" || status === "declined") {
+    await notifyProposalEventById(
+      status,
+      proposalId,
+      {
+        channel: "employee",
+        declineReason: typeof patch.decline_reason === "string" ? patch.decline_reason : null,
+      },
+      { excludeUserId: userId },
+    );
+  }
+
   revalidateProposals(proposalId);
   return { ok: true };
 }
@@ -1285,6 +1309,14 @@ export async function acceptProposalViaShareLink(
     });
   }
 
+  // The whole point of the feature: a client accepting at 9pm reaches the
+  // owners tonight, not whenever someone next opens the proposals list.
+  await notifyProposalEventById("accepted", view.proposalId, {
+    channel: "share_link",
+    actorName: validation.value.name,
+    revisionNumber: view.revisionNumber,
+  });
+
   revalidateProposals(view.proposalId);
   return { ok: true };
 }
@@ -1358,6 +1390,15 @@ export async function declineProposalViaShareLink(token: string, input: DeclineI
     ip_address: ip,
     user_agent: userAgent,
     evidence_links: [view.linkId],
+  });
+
+  // A loss with a stated reason is the most useful thing the client ever tells
+  // us, and it is worthless if it sits unread.
+  await notifyProposalEventById("declined", view.proposalId, {
+    channel: "share_link",
+    actorName: validation.value.name,
+    declineReason: validation.value.reason,
+    revisionNumber: view.revisionNumber,
   });
 
   revalidateProposals(view.proposalId);
