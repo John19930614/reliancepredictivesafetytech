@@ -128,6 +128,48 @@ describe("the fee table's emphasised rows win their background", () => {
   }
 });
 
+describe("print never relies on a fill that may not paint", () => {
+  // print-color-adjust is a REQUEST. Chrome and Edge honour it; Firefox and
+  // Safari have historically ignored it for backgrounds, and every browser lets
+  // the user switch "Background graphics" off. When the fill is dropped, white
+  // text on navy is white text on white paper — which is how the Total row came
+  // to be invisible on a printed proposal even after the screen was fixed.
+  const printBlock = (() => {
+    // Comments first: the file's own header mentions "@media print" in prose,
+    // and slicing from that match returns the WHOLE stylesheet — which silently
+    // made this suite assert against the screen rules instead of the print
+    // ones. Caught by the assertion failing on a rule it should never have seen.
+    const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const start = withoutComments.indexOf("@media print");
+    expect(start, "no @media print block").toBeGreaterThan(-1);
+    return withoutComments.slice(start);
+  })();
+
+  const printRules = parseRules(printBlock);
+
+  it("re-inks every light-on-dark row for print", () => {
+    // Each of these carries information the client needs — the total, the
+    // column labels, the section numbers — and each is light text on a fill in
+    // the screen rules.
+    for (const selector of [
+      ".rp-doc-fee tfoot tr.rp-doc-fee-total td",
+      ".rp-doc-fee th",
+      ".rp-doc-secno",
+    ]) {
+      const rule = printRules.find((candidate) => candidate.selector === selector);
+      expect(rule, `${selector} has no print rule re-inking it`).toBeDefined();
+      // It must set BOTH: a light background and a dark colour. Setting only
+      // one is how the screen bug happened in the first place.
+      expect(rule!.body, `${selector} print rule sets no background`).toMatch(/background:/);
+      expect(rule!.body, `${selector} print rule sets no colour`).toMatch(/color:/);
+      // And the colour must not be the light panel colour or white.
+      expect(rule!.body, `${selector} still prints light text`).not.toMatch(
+        /color:\s*(var\(--rp-doc-panel\)|#fff\b|#ffffff|white)/i,
+      );
+    }
+  });
+});
+
 describe("colour-carrying fills survive printing", () => {
   // Backgrounds are dropped by default when printing. The navy and gold fills
   // are not decoration — they mark the total, the deposit and the section

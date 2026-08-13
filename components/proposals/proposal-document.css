@@ -433,8 +433,13 @@
  * !important, so a future rule can still override these deliberately.
  */
 .rp-doc-fee tfoot tr.rp-doc-fee-total td {
-  background: var(--rp-doc-navy);
-  color: var(--rp-doc-panel);
+  /* Literal first, variable second: if --rp-doc-navy ever fails to resolve the
+     var() declaration is discarded and this solid colour still stands, so the
+     white text can never end up on an unpainted cell. */
+  background: #0c3450;
+  background: var(--rp-doc-navy, #0c3450);
+  color: #ffffff;
+  color: var(--rp-doc-panel, #ffffff);
   font-weight: 700;
   font-size: 12.5px;
 }
@@ -887,5 +892,42 @@
   .rp-doc-head::after {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+  }
+
+  /* ---------- Light text must not depend on a fill that may not print -------
+   *
+   * print-color-adjust is a REQUEST. Chrome and Edge honour it; Firefox and
+   * Safari have historically ignored it for backgrounds, and every browser lets
+   * the user turn "Background graphics" off. When the fill is dropped, white
+   * text on navy becomes white text on white paper — and the reported symptom
+   * was exactly that: the Total row invisible on a printed proposal.
+   *
+   * So print does not rely on the fill at all. These three rows carry the only
+   * light-on-dark text in the document, and each is information the client
+   * needs — the total, the column labels, the section numbers. In print they
+   * invert to dark ink, with a rule or a border doing the emphasis the fill
+   * used to do. If the fill DOES paint, `background` here overrides it to the
+   * light band so the dark ink still reads.
+   *
+   * Deliberately last in this block, and matched to the qualified selectors
+   * above, so these win on both specificity and order.
+   */
+  .rp-doc-fee tfoot tr.rp-doc-fee-total td {
+    background: #ffffff;
+    color: #0c3450;
+    border-top: 2pt solid #0c3450;
+    border-bottom: 2pt solid #0c3450;
+  }
+
+  .rp-doc-fee th {
+    background: #eef3f8;
+    color: #0c3450;
+    border-bottom: 1pt solid #0c3450;
+  }
+
+  .rp-doc-secno {
+    background: #ffffff;
+    color: #0c3450;
+    border: 1pt solid #0c3450;
   }
 }
