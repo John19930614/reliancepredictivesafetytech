@@ -2,12 +2,105 @@ import { describe, expect, it } from "vitest";
 import {
   buildPortalModuleAccessRows,
   canAccessEmployeePath,
+  canAssignPortalRole,
+  canManagePortalUserAccount,
   defaultEmployeePortalModuleKeys,
+  getAssignablePortalRoles,
   getPortalModuleForPath,
+  getPortalRoleCommandRank,
   hasFullPortalVisibility,
   normalizePortalModuleKeys,
   portalModuleCatalog,
 } from "./user-management";
+
+describe("portal role assignment rank", () => {
+  it("ranks super_admin above platform_admin", () => {
+    // The order of `portalUserRoles` is the command rank, and super_admin has
+    // to lead it: `isPortalSuperAdminRole` — which platform_admin does not
+    // satisfy — is what gates employee profile edits and time-card approval.
+    // Flipping these two would let a platform_admin promote someone into a
+    // role that outranks it.
+    expect(getPortalRoleCommandRank("super_admin")).toBeLessThan(getPortalRoleCommandRank("platform_admin"));
+    expect(canAssignPortalRole("super_admin", "platform_admin")).toBe(true);
+    expect(canAssignPortalRole("platform_admin", "super_admin")).toBe(false);
+  });
+
+  it("lets owners grant owner roles at or below their rank", () => {
+    expect(canAssignPortalRole("super_admin", "super_admin")).toBe(true);
+    expect(canAssignPortalRole("super_admin", "platform_admin")).toBe(true);
+    expect(canAssignPortalRole("platform_admin", "platform_admin")).toBe(true);
+  });
+
+  it("stops non-owner admins from granting owner roles", () => {
+    // `admin` and `company_admin` pass isPortalAdminRole but are not owners, so
+    // without this they could promote anyone — including themselves — to
+    // super_admin through the users module.
+    expect(canAssignPortalRole("admin", "super_admin")).toBe(false);
+    expect(canAssignPortalRole("admin", "platform_admin")).toBe(false);
+    expect(canAssignPortalRole("company_admin", "super_admin")).toBe(false);
+    expect(canAssignPortalRole("company_admin", "platform_admin")).toBe(false);
+  });
+
+  it("stops any admin from granting a role above their own rank", () => {
+    expect(canAssignPortalRole("admin", "company_admin")).toBe(false);
+    expect(canAssignPortalRole("platform_admin", "super_admin")).toBe(false);
+  });
+
+  it("allows peer and lower roles", () => {
+    expect(canAssignPortalRole("admin", "admin")).toBe(true);
+    expect(canAssignPortalRole("admin", "employee")).toBe(true);
+    expect(canAssignPortalRole("admin", "internal_reviewer")).toBe(true);
+    expect(canAssignPortalRole("company_admin", "admin")).toBe(true);
+  });
+
+  it("grants nothing to non-admin roles", () => {
+    expect(canAssignPortalRole("employee", "employee")).toBe(false);
+    expect(canAssignPortalRole("internal_reviewer", "employee")).toBe(false);
+    expect(canAssignPortalRole(null, "employee")).toBe(false);
+    expect(canAssignPortalRole(undefined, "employee")).toBe(false);
+  });
+
+  it("treats an unknown requested role as the lowest rank rather than failing open", () => {
+    expect(canAssignPortalRole("admin", "not_a_role")).toBe(true);
+    expect(canAssignPortalRole("employee", "not_a_role")).toBe(false);
+  });
+
+  it("lists only the roles a caller may pick", () => {
+    expect(getAssignablePortalRoles("admin")).toEqual(["admin", "internal_reviewer", "marketing", "employee"]);
+    // The top role can hand out anything, including its own.
+    expect(getAssignablePortalRoles("super_admin")).toHaveLength(7);
+    expect(getAssignablePortalRoles("platform_admin")).toEqual([
+      "platform_admin",
+      "company_admin",
+      "admin",
+      "internal_reviewer",
+      "marketing",
+      "employee",
+    ]);
+    expect(getAssignablePortalRoles("employee")).toEqual([]);
+  });
+});
+
+describe("portal account management rank", () => {
+  it("stops a lower admin from acting on a higher-ranked account", () => {
+    expect(canManagePortalUserAccount("admin", "super_admin")).toBe(false);
+    expect(canManagePortalUserAccount("admin", "company_admin")).toBe(false);
+    expect(canManagePortalUserAccount("platform_admin", "super_admin")).toBe(false);
+  });
+
+  it("allows peer, lower, and role-less targets", () => {
+    expect(canManagePortalUserAccount("admin", "admin")).toBe(true);
+    expect(canManagePortalUserAccount("admin", "employee")).toBe(true);
+    expect(canManagePortalUserAccount("admin", null)).toBe(true);
+    expect(canManagePortalUserAccount("super_admin", "platform_admin")).toBe(true);
+  });
+
+  it("refuses non-admin callers outright", () => {
+    expect(canManagePortalUserAccount("employee", "employee")).toBe(false);
+    expect(canManagePortalUserAccount("employee", null)).toBe(false);
+    expect(canManagePortalUserAccount(null, "employee")).toBe(false);
+  });
+});
 
 describe("portal module access", () => {
   it("maps exact and nested employee paths to module grants", () => {

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { buildDataAuditEvent, buildSecurityAuditEvent, recordAuditEvent } from "@/lib/audit/events";
 import { ensurePayrollSetupTask, normalizeStateCode } from "@/lib/hr-automation";
 import { assignActiveRequiredHrDocuments } from "@/lib/hr-onboarding";
 import { buildCompanyAuthLink, getCompanyAuthFallbackPath } from "@/lib/company-auth-links";
@@ -10,8 +11,12 @@ import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
 import { createClient } from "@/lib/supabase/server";
 import {
   buildPortalModuleAccessRows,
+  canAssignPortalRole,
+  canManagePortalUserAccount,
   defaultEmployeePortalModuleKeys,
   isPortalAdminRole,
+  isPortalOwnerRole,
+  portalOwnerRoles,
   portalUserRoles,
   type PortalUserRole,
 } from "@/lib/user-management";
@@ -60,7 +65,99 @@ async function getAuthorizedAdmin() {
     redirect(usersPath({ error: "Only portal admins can manage users." }));
   }
 
-  return user;
+  return { user, role: role.role };
+}
+
+type AuthorizedActor = Awaited<ReturnType<typeof getAuthorizedAdmin>>;
+
+async function denyPrivilegeViolation(actor: AuthorizedActor, summary: string, userMessage: string): Promise<never> {
+  await recordAuditEvent({
+    ...buildSecurityAuditEvent("privilege_violation", actor.user.id, summary),
+    actor_role: actor.role,
+    resource_type: "portal_user",
+  });
+
+  return redirect(usersPath({ error: userMessage }));
+}
+
+async function getAuthorizedOwner(deniedMessage: string) {
+  const actor = await getAuthorizedAdmin();
+
+  if (!isPortalOwnerRole(actor.role)) {
+    await denyPrivilegeViolation(actor, `${actor.role} ${actor.user.id} attempted an owner-only user action`, deniedMessage);
+  }
+
+  return actor;
+}
+
+async function assertCanAssignRole(actor: AuthorizedActor, requestedRole: PortalUserRole) {
+  if (!canAssignPortalRole(actor.role, requestedRole)) {
+    await denyPrivilegeViolation(
+      actor,
+      `${actor.role} ${actor.user.id} attempted to grant role ${requestedRole}`,
+      isPortalOwnerRole(requestedRole)
+        ? "Only platform owners can grant owner roles."
+        : "You cannot assign a role above your own.",
+    );
+  }
+}
+
+async function getTargetRoleRow(admin: SupabaseAdminClient, userId: string) {
+  const { data, error } = await admin
+    .from("user_roles")
+    .select("role, team, account_status")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    redirect(usersPath({ error: error.message }));
+  }
+
+  return data;
+}
+
+async function assertOutranksTarget(actor: AuthorizedActor, targetRole: string | null | undefined, attempted: string) {
+  if (!canManagePortalUserAccount(actor.role, targetRole)) {
+    await denyPrivilegeViolation(
+      actor,
+      `${actor.role} ${actor.user.id} attempted to ${attempted} a higher-ranked ${targetRole} account`,
+      "You cannot modify an account that outranks your own role.",
+    );
+  }
+}
+
+/**
+ * A recovery link hands whoever holds it control of the account, so an owner's
+ * address may never be targeted. Owners are a short list (`portalOwnerRoles`),
+ * so we resolve their addresses rather than paging the whole auth directory —
+ * and we fail closed if any of them cannot be resolved, because an unresolved
+ * owner is one we cannot prove the requested address does not belong to.
+ */
+async function assertTargetEmailIsNotOwner(admin: SupabaseAdminClient, actor: AuthorizedActor, email: string) {
+  const { data: ownerRows, error } = await admin
+    .from("user_roles")
+    .select("user_id")
+    .in("role", [...portalOwnerRoles]);
+
+  if (error) {
+    redirect(usersPath({ error: error.message }));
+  }
+
+  for (const row of ownerRows ?? []) {
+    const { data: owner, error: ownerError } = await admin.auth.admin.getUserById(row.user_id);
+
+    if (ownerError) {
+      redirect(usersPath({ error: "Could not verify the target account against the owner list. Try again." }));
+    }
+
+    if (owner?.user?.email?.toLowerCase() === email) {
+      await denyPrivilegeViolation(
+        actor,
+        `${actor.role} ${actor.user.id} attempted to generate a recovery link for owner account ${email}`,
+        "Access links cannot be generated for platform owner accounts.",
+      );
+    }
+  }
 }
 
 function getAdminClientOrRedirect() {
@@ -230,7 +327,7 @@ async function rollbackCreatedAuthUser(admin: SupabaseAdminClient, userId: strin
 }
 
 export async function createCandidateIntake(formData: FormData) {
-  const currentUser = await getAuthorizedAdmin();
+  const { user: currentUser } = await getAuthorizedAdmin();
   const admin = getAdminClientOrRedirect();
   const candidateName = cleanText(formData.get("candidate_name"));
   const email = cleanText(formData.get("email")).toLowerCase();
@@ -265,7 +362,7 @@ export async function createCandidateIntake(formData: FormData) {
 }
 
 export async function approveCandidateForInvite(formData: FormData) {
-  const currentUser = await getAuthorizedAdmin();
+  const { user: currentUser } = await getAuthorizedAdmin();
   const admin = getAdminClientOrRedirect();
   const candidateId = cleanText(formData.get("candidate_id"));
   const notes = cleanText(formData.get("human_decision_notes")) || null;
@@ -321,7 +418,7 @@ export async function approveCandidateForInvite(formData: FormData) {
 }
 
 export async function convertCandidateToInvite(formData: FormData) {
-  const currentUser = await getAuthorizedAdmin();
+  const actor = await getAuthorizedAdmin();
   const admin = getAdminClientOrRedirect();
   const candidateId = cleanText(formData.get("candidate_id"));
 
@@ -363,7 +460,7 @@ export async function convertCandidateToInvite(formData: FormData) {
     team: "People / HR",
     timeCardRoleId: null,
     jurisdictionState: candidate.jurisdiction_state,
-    assignedBy: currentUser.id,
+    assignedBy: actor.user.id,
     userId: data.user.id,
     sourceCandidateId: candidate.id,
   });
@@ -382,6 +479,19 @@ export async function convertCandidateToInvite(formData: FormData) {
     })
     .eq("id", candidate.id);
 
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "create",
+      "portal_user",
+      data.user.id,
+      actor.user.id,
+      `Converted candidate ${candidate.email} to an employee invite`,
+      null,
+      { email: candidate.email, role: "employee", source_candidate_id: candidate.id },
+    ),
+    actor_role: actor.role,
+  });
+
   revalidatePath("/employee/users");
   revalidatePath("/employee/time-cards");
   revalidatePath("/employee/ai");
@@ -394,13 +504,15 @@ export async function convertCandidateToInvite(formData: FormData) {
 }
 
 export async function inviteEmployee(formData: FormData) {
-  const currentUser = await getAuthorizedAdmin();
+  const actor = await getAuthorizedAdmin();
   const admin = getAdminClientOrRedirect();
   const values = getPortalUserSetupValues(formData);
 
   if (!values.email) {
     redirect(usersPath({ error: "Employee email is required." }));
   }
+
+  await assertCanAssignRole(actor, values.role);
 
   const { data, error } = await admin.auth.admin.generateLink({
     type: "invite",
@@ -417,7 +529,7 @@ export async function inviteEmployee(formData: FormData) {
 
   const setupError = await assignPortalUserAccess(admin, {
     ...values,
-    assignedBy: currentUser.id,
+    assignedBy: actor.user.id,
     userId: data.user.id,
   });
 
@@ -426,13 +538,26 @@ export async function inviteEmployee(formData: FormData) {
     redirect(usersPath({ error: setupError.message }));
   }
 
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "create",
+      "portal_user",
+      data.user.id,
+      actor.user.id,
+      `Invited ${values.email} as ${values.role}`,
+      null,
+      { email: values.email, role: values.role, team: values.team || null },
+    ),
+    actor_role: actor.role,
+  });
+
   revalidatePath("/employee/users");
   revalidatePath("/employee/time-cards");
   redirect(usersPath({ message: "Employee invite link generated with HR onboarding assigned.", invite_link: buildCompanyAuthLink(siteUrl, data.properties.hashed_token, "invite") }));
 }
 
 export async function createPortalUser(formData: FormData) {
-  const currentUser = await getAuthorizedAdmin();
+  const actor = await getAuthorizedAdmin();
   const admin = getAdminClientOrRedirect();
   const values = getPortalUserSetupValues(formData);
   const password = cleanText(formData.get("password"));
@@ -440,6 +565,8 @@ export async function createPortalUser(formData: FormData) {
   if (!values.email || !password) {
     redirect(usersPath({ error: "Email and temporary password are required." }));
   }
+
+  await assertCanAssignRole(actor, values.role);
 
   const { data, error } = await admin.auth.admin.createUser({
     email: values.email,
@@ -454,7 +581,7 @@ export async function createPortalUser(formData: FormData) {
 
   const setupError = await assignPortalUserAccess(admin, {
     ...values,
-    assignedBy: currentUser.id,
+    assignedBy: actor.user.id,
     userId: data.user.id,
   });
 
@@ -463,19 +590,34 @@ export async function createPortalUser(formData: FormData) {
     redirect(usersPath({ error: setupError.message }));
   }
 
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "create",
+      "portal_user",
+      data.user.id,
+      actor.user.id,
+      `Created portal user ${values.email} as ${values.role}`,
+      null,
+      { email: values.email, role: values.role, team: values.team || null },
+    ),
+    actor_role: actor.role,
+  });
+
   revalidatePath("/employee/users");
   revalidatePath("/employee/time-cards");
   redirect(usersPath({ message: "User created with HR onboarding assigned." }));
 }
 
 export async function generateEmployeeAccessLink(formData: FormData) {
-  await getAuthorizedAdmin();
+  const actor = await getAuthorizedOwner("Only platform owners can generate account access links.");
   const admin = getAdminClientOrRedirect();
   const email = cleanText(formData.get("email")).toLowerCase();
 
   if (!email) {
     redirect(usersPath({ error: "Choose a user email before generating an access link." }));
   }
+
+  await assertTargetEmailIsNotOwner(admin, actor, email);
 
   const { data, error } = await admin.auth.admin.generateLink({
     type: "recovery",
@@ -489,12 +631,27 @@ export async function generateEmployeeAccessLink(formData: FormData) {
     redirect(usersPath({ error: error?.message ?? "Could not generate employee access link." }));
   }
 
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "update",
+      "portal_user",
+      data.user?.id ?? email,
+      actor.user.id,
+      `Generated a password recovery link for ${email}`,
+      null,
+      { email, link_type: "recovery" },
+    ),
+    event_category: "security",
+    severity: "warn",
+    actor_role: actor.role,
+  });
+
   revalidatePath("/employee/users");
   redirect(usersPath({ message: `Access link generated for ${email}.`, invite_link: buildCompanyAuthLink(siteUrl, data.properties.hashed_token, "recovery") }));
 }
 
 export async function updatePortalUserRole(formData: FormData) {
-  await getAuthorizedAdmin();
+  const actor = await getAuthorizedAdmin();
   const admin = getAdminClientOrRedirect();
   const userId = cleanText(formData.get("user_id"));
   const requestedRole = cleanText(formData.get("role"));
@@ -506,6 +663,13 @@ export async function updatePortalUserRole(formData: FormData) {
   if (!userId) {
     redirect(usersPath({ error: "Choose a user to update." }));
   }
+
+  const previousRole = await getTargetRoleRow(admin, userId);
+
+  // Both directions matter: an admin may not promote anyone above their own
+  // rank, and may not seize an account that already outranks them.
+  await assertOutranksTarget(actor, previousRole?.role, "change the role of");
+  await assertCanAssignRole(actor, role);
 
   const { error } = await admin.from("user_roles").upsert({
     user_id: userId,
@@ -562,13 +726,27 @@ export async function updatePortalUserRole(formData: FormData) {
     redirect(usersPath({ error: chatProfileError.message }));
   }
 
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "update",
+      "portal_user",
+      userId,
+      actor.user.id,
+      `Changed portal role for ${userId} from ${previousRole?.role ?? "none"} to ${role}`,
+      { role: previousRole?.role ?? null, team: previousRole?.team ?? null },
+      { role, team: team || null },
+    ),
+    actor_role: actor.role,
+    severity: previousRole?.role === role ? "info" : "warn",
+  });
+
   revalidatePath("/employee/users");
   revalidatePath("/employee/time-cards");
   redirect(usersPath({ message: "User updated." }));
 }
 
 export async function archivePortalUser(formData: FormData) {
-  const currentUser = await getAuthorizedAdmin();
+  const actor = await getAuthorizedAdmin();
   const admin = getAdminClientOrRedirect();
   const userId = cleanText(formData.get("user_id"));
 
@@ -576,9 +754,13 @@ export async function archivePortalUser(formData: FormData) {
     redirect(usersPath({ error: "Choose a user to archive." }));
   }
 
-  if (userId === currentUser.id) {
+  if (userId === actor.user.id) {
     redirect(usersPath({ error: "You cannot archive your own account." }));
   }
+
+  const targetRole = await getTargetRoleRow(admin, userId);
+
+  await assertOutranksTarget(actor, targetRole?.role, "archive");
 
   const { error } = await admin.from("user_roles").update({ account_status: "archived" }).eq("user_id", userId);
 
@@ -589,13 +771,27 @@ export async function archivePortalUser(formData: FormData) {
   await admin.from("employee_profiles").update({ profile_status: "archived" }).eq("user_id", userId);
   await admin.from("employee_chat_profiles").update({ account_status: "archived" }).eq("user_id", userId);
 
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "update",
+      "portal_user",
+      userId,
+      actor.user.id,
+      `Archived portal user ${userId} (${targetRole?.role ?? "no role"})`,
+      { role: targetRole?.role ?? null, account_status: targetRole?.account_status ?? null },
+      { role: targetRole?.role ?? null, account_status: "archived" },
+    ),
+    actor_role: actor.role,
+    severity: "warn",
+  });
+
   revalidatePath("/employee/users");
   revalidatePath("/employee/time-cards");
   redirect(usersPath({ message: "User archived." }));
 }
 
 export async function deletePortalUser(formData: FormData) {
-  const currentUser = await getAuthorizedAdmin();
+  const actor = await getAuthorizedAdmin();
   const admin = getAdminClientOrRedirect();
   const userId = cleanText(formData.get("user_id"));
 
@@ -603,9 +799,13 @@ export async function deletePortalUser(formData: FormData) {
     redirect(usersPath({ error: "Choose a user to delete." }));
   }
 
-  if (userId === currentUser.id) {
+  if (userId === actor.user.id) {
     redirect(usersPath({ error: "You cannot delete your own account." }));
   }
+
+  const targetRole = await getTargetRoleRow(admin, userId);
+
+  await assertOutranksTarget(actor, targetRole?.role, "delete");
 
   const { error } = await admin.auth.admin.deleteUser(userId, false);
 
@@ -615,6 +815,20 @@ export async function deletePortalUser(formData: FormData) {
 
   await admin.from("user_roles").delete().eq("user_id", userId);
   await admin.from("employee_chat_profiles").delete().eq("user_id", userId);
+
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "delete",
+      "portal_user",
+      userId,
+      actor.user.id,
+      `Deleted portal user ${userId} (${targetRole?.role ?? "no role"})`,
+      { role: targetRole?.role ?? null, team: targetRole?.team ?? null, account_status: targetRole?.account_status ?? null },
+      null,
+    ),
+    actor_role: actor.role,
+    severity: "warn",
+  });
 
   revalidatePath("/employee/users");
   revalidatePath("/employee/time-cards");

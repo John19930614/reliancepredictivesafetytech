@@ -16,7 +16,14 @@ import { friendlyError } from "@/lib/friendly-error";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { EmployeePayrollSetupTask, HrCandidateIntake, TimeCardRole } from "@/lib/company-data";
-import { formatPortalRole, getPortalRoleCommandRank, isPortalAdminRole, portalUserRoles } from "@/lib/user-management";
+import {
+  canManagePortalUserAccount,
+  formatPortalRole,
+  getAssignablePortalRoles,
+  getPortalRoleCommandRank,
+  isPortalAdminRole,
+  isPortalOwnerRole,
+} from "@/lib/user-management";
 
 type UsersPageProps = {
   searchParams: Promise<{ message?: string; error?: string; invite_link?: string; q?: string }>;
@@ -67,6 +74,11 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
 
   const canManageUsers =
     currentRole?.account_status === "active" && isPortalAdminRole(currentRole.role);
+  // Mirrors the server-side gates in ./actions.ts so the page never offers a
+  // control the action will reject.
+  const actorRole = canManageUsers ? currentRole.role : null;
+  const assignableRoles = getAssignablePortalRoles(actorRole);
+  const canGenerateAccessLinks = isPortalOwnerRole(actorRole);
   const admin = canManageUsers ? createAdminClient() : null;
   const [
     { data: authData, error: usersError },
@@ -179,7 +191,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
               <div className="field">
                 <label htmlFor="role">Role</label>
                 <select id="role" name="role" defaultValue="employee">
-                  {portalUserRoles.map((role) => (
+                  {assignableRoles.map((role) => (
                     <option key={role} value={role}>
                       {formatPortalRole(role)}
                     </option>
@@ -265,7 +277,16 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
               {filteredUsers.length === 0 ? (
                 <div className="empty-state">{query ? "No accounts match." : "No users found."}</div>
               ) : (
-                filteredUsers.map((portalUser) => (
+                filteredUsers.map((portalUser) => {
+                  const canManageThisAccount = canManagePortalUserAccount(actorRole, portalUser.role);
+                  // A role the actor may not grant still has to appear as the
+                  // selected option, otherwise the select would silently
+                  // default to a different role than the one on screen.
+                  const roleOptions = assignableRoles.includes(portalUser.role as (typeof assignableRoles)[number])
+                    ? assignableRoles
+                    : [portalUser.role, ...assignableRoles];
+
+                  return (
                   <article className="user-row" key={portalUser.id}>
                     <div>
                       <h3>{portalUser.email}</h3>
@@ -282,12 +303,17 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                       </div>
                     </div>
 
+                    {!canManageThisAccount ? (
+                      <p className="muted-copy">
+                        {formatPortalRole(portalUser.role)} outranks your role, so this account is read-only for you.
+                      </p>
+                    ) : (
                     <form action={updatePortalUserRole} className="user-row-form">
                       <input name="user_id" type="hidden" value={portalUser.id} />
                       <div className="field">
                         <label htmlFor={`role-${portalUser.id}`}>Role</label>
                         <select id={`role-${portalUser.id}`} name="role" defaultValue={portalUser.role}>
-                          {portalUserRoles.map((role) => (
+                          {roleOptions.map((role) => (
                             <option key={role} value={role}>
                               {formatPortalRole(role)}
                             </option>
@@ -318,18 +344,23 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                         Save
                       </SubmitButton>
                     </form>
+                    )}
 
                     <div className="user-row-actions">
                       <Link className="button button-light" href={`/employee/users/${portalUser.id}`}>
                         Profile
                       </Link>
-                      <form action={generateEmployeeAccessLink}>
-                        <input name="email" type="hidden" value={portalUser.email} />
-                        <SubmitButton className="button button-light" pendingLabel="Generating…">
-                          <Send size={16} />
-                          Access Link
-                        </SubmitButton>
-                      </form>
+                      {canGenerateAccessLinks && !isPortalOwnerRole(portalUser.role) ? (
+                        <form action={generateEmployeeAccessLink}>
+                          <input name="email" type="hidden" value={portalUser.email} />
+                          <SubmitButton className="button button-light" pendingLabel="Generating…">
+                            <Send size={16} />
+                            Access Link
+                          </SubmitButton>
+                        </form>
+                      ) : null}
+                      {canManageThisAccount ? (
+                      <>
                       <form action={archivePortalUser}>
                         <input name="user_id" type="hidden" value={portalUser.id} />
                         {portalUser.accountStatus === "archived" ? (
@@ -351,9 +382,12 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                           Delete
                         </ConfirmSubmit>
                       </form>
+                      </>
+                      ) : null}
                     </div>
                   </article>
-                ))
+                  );
+                })
               )}
             </div>
           </section>
