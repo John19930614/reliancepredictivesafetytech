@@ -1,4 +1,13 @@
 import { ReportsManager } from "@/components/ReportsManager";
+import { RevenueReportSection } from "@/components/reports/RevenueReportSection";
+import {
+  buildRevenueByMonth,
+  buildSentAging,
+  summarizePipeline,
+  summarizeReceivables,
+  type RevenueIncomeRow,
+  type RevenueProposalRow,
+} from "@/lib/reports/revenue";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function ReportsPage() {
@@ -21,9 +30,11 @@ export default async function ReportsPage() {
   let timecards: TimecardRow[] = [];
   let certifications: CertRow[] = [];
   let docAssignments: DocRow[] = [];
+  let revenueProposals: RevenueProposalRow[] = [];
+  let incomeRows: RevenueIncomeRow[] = [];
 
   if (supabase) {
-    const [p, c, pri, pr, e, tc, cert, da] = await Promise.all([
+    const [p, c, pri, pr, e, tc, cert, da, prop, inc] = await Promise.all([
       supabase.from("employee_profiles").select("user_id, profile_status"),
       supabase.from("hr_candidate_intakes").select("status"),
       supabase.from("employee_payroll_run_items").select("gross_pay, total_hours, payroll_run_id"),
@@ -32,6 +43,14 @@ export default async function ReportsPage() {
       supabase.from("employee_time_cards").select("status"),
       supabase.from("training_certifications").select("status"),
       supabase.from("employee_document_assignments").select("status"),
+      // The Commercial side, which this page has never reported on.
+      supabase
+        .from("client_proposals")
+        .select("id, status, proposal_value, accepted_at, declined_at, updated_at"),
+      supabase
+        .from("company_finance_transactions")
+        .select("amount, status, transaction_date")
+        .eq("transaction_type", "income"),
     ]);
     profiles = (p.data ?? []) as ProfileRow[];
     candidates = (c.data ?? []) as CandidateRow[];
@@ -41,7 +60,17 @@ export default async function ReportsPage() {
     timecards = (tc.data ?? []) as TimecardRow[];
     certifications = (cert.data ?? []) as CertRow[];
     docAssignments = (da.data ?? []) as DocRow[];
+    revenueProposals = (prop.data ?? []) as RevenueProposalRow[];
+    incomeRows = (inc.data ?? []) as RevenueIncomeRow[];
   }
+
+  // One clock for every revenue figure, so aging bands and overdue flags on the
+  // same render cannot disagree about what "today" is.
+  const now = new Date();
+  const pipeline = summarizePipeline(revenueProposals);
+  const revenueMonths = buildRevenueByMonth(revenueProposals);
+  const sentAging = buildSentAging(revenueProposals, now);
+  const receivables = summarizeReceivables(incomeRows, now);
 
   // Headcount
   const activeEmployees = profiles.filter((p) => p.profile_status === "active").length;
@@ -106,8 +135,18 @@ export default async function ReportsPage() {
         <div>
           <div className="eyebrow">Command</div>
           <h1>Reports</h1>
-          <p>Headcount, payroll, expenses, hiring pipeline, and compliance at a glance.</p>
+          <p>Revenue, pipeline, headcount, payroll, expenses, hiring, and compliance at a glance.</p>
         </div>
+      </div>
+
+      {/* Revenue leads: it is the question the owners open this page to answer. */}
+      <div className="reports-layout">
+        <RevenueReportSection
+          aging={sentAging}
+          months={revenueMonths}
+          pipeline={pipeline}
+          receivables={receivables}
+        />
       </div>
 
       <ReportsManager
