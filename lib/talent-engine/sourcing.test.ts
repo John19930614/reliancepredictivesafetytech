@@ -445,7 +445,10 @@ describe("validateSourcingLead", () => {
     const verdict = validateSourcingLead(
       parsedLead({ summary: "Available for contract work in Houston; SSN 123-45-6789 was listed on the posting." }),
     );
-    expect(verdict.status).toBe("fail");
+    // Blocked, not merely failed: a detected SSN is a hard stop in the
+    // gateway's rules table. gatewayRejects() covers both, so the lead was and
+    // remains discarded.
+    expect(verdict.status).toBe("blocked");
     expect(verdict.checks.find((c) => c.key === "privacy")?.status).toBe("fail");
   });
 

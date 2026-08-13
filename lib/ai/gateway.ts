@@ -113,8 +113,16 @@ export function validateAIOutput(input: GatewayInput): GatewayValidationResult {
     checks.push({ key: "nothing_missed", label: "Nothing missed", status: "pass" });
   }
 
-  // Determine overall status
-  const hasBlock = checks.some((c) => c.status === "fail" && (c.key === "safety" || c.key === "structural"));
+  // Determine overall status.
+  //
+  // Privacy belongs in this set. Every caller gates on `status === "blocked"`,
+  // so while a PII failure only produced "fail", detected SSNs and card numbers
+  // were reported and then written anyway — into notifications, workflow
+  // proposals, and from there into business records. The rules table this
+  // module implements has always said BLOCK for privacy; only the status
+  // derivation disagreed.
+  const BLOCKING_CHECKS: ValidationCheckKey[] = ["safety", "structural", "privacy"];
+  const hasBlock = checks.some((c) => c.status === "fail" && BLOCKING_CHECKS.includes(c.key));
   const hasFail = checks.some((c) => c.status === "fail");
   const hasWarn = checks.some((c) => c.status === "warn");
 
@@ -128,7 +136,7 @@ export function validateAIOutput(input: GatewayInput): GatewayValidationResult {
     checks,
     overallConfidence: confidenceHeuristic,
     requiresHumanReview: hasFail || hasWarn || confidenceHeuristic < threshold,
-    blockedReason: hasBlock ? checks.find((c) => c.status === "fail" && (c.key === "safety" || c.key === "structural"))?.detail : undefined,
+    blockedReason: hasBlock ? checks.find((c) => c.status === "fail" && BLOCKING_CHECKS.includes(c.key))?.detail : undefined,
   };
 }
 
