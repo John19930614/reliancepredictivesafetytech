@@ -1,0 +1,36 @@
+# Code owners — the paths where a wrong change is expensive to undo.
+#
+# This file only has teeth once branch protection on `main` has "Require review
+# from Code Owners" enabled. Without that it is documentation; with it, it is
+# the merge-time half of change control.
+#
+# Everything below is a STOP CONDITION in CLAUDE.md, a HIGH/CRITICAL risk class,
+# or a control that protects the others.
+
+# Schema. A migration is the one artifact that cannot be rolled back by
+# reverting a commit.
+/supabase/migrations/        @John19930614
+
+# Auth, the service-role client, and session handling.
+/lib/supabase/middleware.ts  @John19930614
+/lib/supabase/admin.ts       @John19930614
+
+# Role and permission logic.
+/lib/user-management.ts      @John19930614
+
+# The AI gateway. validateAIOutput() is what keeps model output from entering
+# an official workflow unreviewed.
+/lib/ai/gateway.ts           @John19930614
+
+# The audit trail. If this stops recording, nothing else here is provable.
+/lib/audit/                  @John19930614
+
+# The codified guardrails themselves.
+/lib/guardrails/             @John19930614
+
+# The gate. A change here can disable every other control in this file.
+/.github/                    @John19930614
+
+# The standards.
+/CLAUDE.md                   @John19930614
+/.env.example                @John19930614
