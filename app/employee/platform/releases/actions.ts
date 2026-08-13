@@ -3,6 +3,7 @@
 import { requireClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
+import { canSetReleaseStatus } from "@/lib/platform/release-policy";
 
 export async function getReleases() {
   const supabase = await requireClient();
@@ -33,6 +34,21 @@ export async function createRelease(form: FormData) {
 export async function updateReleaseStatus(id: string, status: string) {
   const supabase = await requireClient();
   const { data: { user } } = await supabase.auth.getUser();
+
+  // Read the sign-off back rather than trusting the page that rendered the
+  // button: the release may have been signed off — or not — since this form
+  // was drawn.
+  const { data: release } = await supabase
+    .from("platform_releases")
+    .select("signed_off_at")
+    .eq("id", id)
+    .maybeSingle();
+
+  const gate = canSetReleaseStatus({ nextStatus: status, signedOffAt: release?.signed_off_at ?? null });
+  if (!gate.ok) {
+    throw new Error(gate.reason);
+  }
+
   await supabase.from("platform_releases").update({
     status,
     ...(status === "deployed" ? { deployed_at: new Date().toISOString() } : {}),

@@ -10,6 +10,7 @@
     "lint": "npm run typecheck",
     "start": "next start",
     "test": "vitest run",
+    "deploy": "node scripts/deploy.mjs",
     "typecheck": "tsc --noEmit",
     "types:generate": "supabase gen types typescript --project-id kmwgyoalstydoejqjemy > lib/supabase/types.ts"
   },
