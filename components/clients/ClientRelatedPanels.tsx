@@ -27,6 +27,8 @@ export interface ClientTrainingEventRow {
 }
 
 interface ClientRelatedPanelsProps {
+  /** Lets the outbound links carry this company instead of dropping the context. */
+  clientId: string;
   proposals: ClientProposalRow[];
   files: ClientFileRow[];
   fileCount: number;
@@ -56,6 +58,7 @@ function proposalLabel(status: string | null): string {
 }
 
 export function ClientRelatedPanels({
+  clientId,
   proposals,
   files,
   fileCount,
@@ -169,7 +172,9 @@ export function ClientRelatedPanels({
               </div>
             )}
             <p style={{ marginTop: 10 }}>
-              <Link href="/employee/sales-meetings">All sales meetings</Link>
+              <Link href={`/employee/sales-meetings?client=${clientId}`}>
+                All meetings for this company
+              </Link>
             </p>
           </section>
 

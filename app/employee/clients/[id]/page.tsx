@@ -144,6 +144,7 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
       />
 
       <ClientRelatedPanels
+        clientId={client.id}
         files={(files ?? []) as ClientFileRow[]}
         fileCount={fileCount ?? 0}
         meetings={(meetings ?? []) as ClientMeetingRow[]}

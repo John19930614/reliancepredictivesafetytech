@@ -74,11 +74,11 @@ export function summarizeClientProposals(
   return summary;
 }
 
-export interface SplitMeetings {
+export interface SplitMeetings<Row extends ClientMeetingRow = ClientMeetingRow> {
   /** Soonest first — the next thing on the calendar leads. */
-  upcoming: ClientMeetingRow[];
+  upcoming: Row[];
   /** Most recent first. */
-  past: ClientMeetingRow[];
+  past: Row[];
 }
 
 /**
@@ -88,14 +88,18 @@ export interface SplitMeetings {
  * next Tuesday is history, and showing it as upcoming would have someone
  * preparing for a call that is not happening. A meeting with no scheduled_at
  * cannot be upcoming either — there is nothing to be early for.
+ *
+ * Generic over the row so a caller carrying extra columns — the meetings index
+ * joins the company name — keeps them through the split instead of widening to
+ * the base shape.
  */
-export function splitMeetingsByTime(
-  meetings: readonly ClientMeetingRow[] | null | undefined,
+export function splitMeetingsByTime<Row extends ClientMeetingRow>(
+  meetings: readonly Row[] | null | undefined,
   now: Date,
-): SplitMeetings {
+): SplitMeetings<Row> {
   const nowMs = now.getTime();
-  const upcoming: ClientMeetingRow[] = [];
-  const past: ClientMeetingRow[] = [];
+  const upcoming: Row[] = [];
+  const past: Row[] = [];
 
   for (const meeting of meetings ?? []) {
     const at = meeting.scheduled_at ? Date.parse(meeting.scheduled_at) : Number.NaN;
@@ -104,7 +108,7 @@ export function splitMeetingsByTime(
     else past.push(meeting);
   }
 
-  const byTime = (a: ClientMeetingRow, b: ClientMeetingRow, direction: 1 | -1) => {
+  const byTime = (a: Row, b: Row, direction: 1 | -1) => {
     const left = a.scheduled_at ? Date.parse(a.scheduled_at) : 0;
     const right = b.scheduled_at ? Date.parse(b.scheduled_at) : 0;
     return (left - right) * direction;

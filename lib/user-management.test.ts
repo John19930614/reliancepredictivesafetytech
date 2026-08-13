@@ -126,6 +126,15 @@ describe("portal module access", () => {
     expect(canAccessEmployeePath("super_admin", "active", "/employee/clients", [])).toBe(true);
   });
 
+  // The meetings index and the meeting room both ride the sales_pipeline grant,
+  // so listing meetings never reaches someone who cannot open one.
+  it("gates the sales meetings index on the sales pipeline grant", () => {
+    expect(getPortalModuleForPath("/employee/sales-meetings")?.key).toBe("sales_pipeline");
+    expect(canAccessEmployeePath("employee", "active", "/employee/sales-meetings", ["sales_pipeline"])).toBe(true);
+    expect(canAccessEmployeePath("employee", "active", "/employee/sales-meetings", ["dashboard"])).toBe(false);
+    expect(canAccessEmployeePath("employee", "archived", "/employee/sales-meetings", ["sales_pipeline"])).toBe(false);
+  });
+
   it("denies unknown paths and inactive users", () => {
     expect(canAccessEmployeePath("employee", "active", "/employee/not-real", ["dashboard"])).toBe(false);
     expect(canAccessEmployeePath("employee", "archived", "/employee", ["dashboard"])).toBe(false);
