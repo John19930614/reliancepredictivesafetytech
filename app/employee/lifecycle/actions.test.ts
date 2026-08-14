@@ -19,6 +19,7 @@ import {
   linkOpportunityToClient,
   linkProposalToOpportunity,
   markOpportunityQualified,
+  markOpportunityWon,
   reopenOpportunity,
   saveOpportunityQualification,
   skipOpportunityToStep,
@@ -1187,5 +1188,151 @@ describe("linkProposalToOpportunity", () => {
     signOut();
     expect((await linkProposalToOpportunity(OPP_ID, PROPOSAL_ID, true)).ok).toBe(false);
     expect(supabase.calls).toHaveLength(0);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Step 11 — closing the deal won                                             */
+/* -------------------------------------------------------------------------- */
+
+describe("markOpportunityWon", () => {
+  function wonReady(over: Record<string, unknown> = {}) {
+    return opportunity({ step: "closed_won_onboarded", status: "open", ...over });
+  }
+
+  it("closes a deal that is at the last step with a company attached", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: wonReady() },
+      "opportunities:update": { data: [{ id: OPP_ID }] },
+      "opportunity_stage_events:insert": { data: null },
+    });
+    signIn("employee", supabase);
+
+    expect(await markOpportunityWon(OPP_ID)).toEqual({ ok: true });
+
+    const write = findCall(supabase, "opportunities", "update");
+    expect(write?.payload).toEqual({ step: "closed_won_onboarded", status: "won" });
+    // Compare-and-set on both axes, so a concurrent exit is not overwritten.
+    expect(write?.filters).toContainEqual(["step", "closed_won_onboarded"]);
+    expect(write?.filters).toContainEqual(["status", "open"]);
+  });
+
+  // "won" is not an exit — the exit kinds are the three LOST paths and the
+  // exception index is built on them.
+  it("records a 'won' stage event at the same step, needing no reason", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: wonReady() },
+      "opportunities:update": { data: [{ id: OPP_ID }] },
+      "opportunity_stage_events:insert": { data: null },
+    });
+    signIn("employee", supabase);
+
+    await markOpportunityWon(OPP_ID);
+
+    const event = findCall(supabase, "opportunity_stage_events", "insert")?.payload as Record<string, unknown>;
+    expect(event.kind).toBe("won");
+    expect(event.from_status).toBe("open");
+    expect(event.to_status).toBe("won");
+    expect(event.from_step).toBe("closed_won_onboarded");
+    expect(event.to_step).toBe("closed_won_onboarded");
+    expect(event.reason).toBeNull();
+    expect(event.steps_skipped).toBe(0);
+  });
+
+  // Winning changes numbers other people report on, so it is not an `info` line
+  // in the audit trail.
+  it("audits the win at warn severity", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: wonReady() },
+      "opportunities:update": { data: [{ id: OPP_ID }] },
+      "opportunity_stage_events:insert": { data: null },
+    });
+    signIn("employee", supabase);
+
+    await markOpportunityWon(OPP_ID);
+
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock.mock.calls[0][0]).toMatchObject({ severity: "warn" });
+    expect(revalidateMock).toHaveBeenCalled();
+  });
+
+  // A deal can reach step 11 while the contract is still being counter-signed;
+  // a deal at Discovery has not been won by anyone.
+  it("refuses at any step before the last one", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ step: "negotiation_approval", status: "open" }) },
+    });
+    signIn("employee", supabase);
+
+    const result = await markOpportunityWon(OPP_ID);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Closed Won");
+    expect(findCall(supabase, "opportunities", "update")).toBeUndefined();
+  });
+
+  // A won deal with nothing to onboard is not a won deal, it is a missing
+  // client record.
+  it("refuses a deal with no company attached", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: wonReady({ client_id: null }) },
+    });
+    signIn("employee", supabase);
+
+    const result = await markOpportunityWon(OPP_ID);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Attach this opportunity to a company");
+    expect(findCall(supabase, "opportunities", "update")).toBeUndefined();
+  });
+
+  it("is idempotent on a deal that is already won", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: wonReady({ status: "won" }) },
+    });
+    signIn("employee", supabase);
+
+    expect(await markOpportunityWon(OPP_ID)).toEqual({ ok: true });
+    expect(findCall(supabase, "opportunities", "update")).toBeUndefined();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a deal that exited, and says to reopen it first", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: wonReady({ status: "closed_lost" }) },
+    });
+    signIn("employee", supabase);
+
+    const result = await markOpportunityWon(OPP_ID);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Reopen");
+    expect(findCall(supabase, "opportunities", "update")).toBeUndefined();
+  });
+
+  it("reports the race rather than success when the write matches no row", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: wonReady() },
+      "opportunities:update": { data: [] },
+    });
+    signIn("employee", supabase);
+
+    const result = await markOpportunityWon(OPP_ID);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Reload");
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a signed-out caller and a malformed reference without querying", async () => {
+    const supabase = createSupabaseMock({});
+    signOut();
+    expect((await markOpportunityWon(OPP_ID)).ok).toBe(false);
+
+    signIn("employee", supabase);
+    expect((await markOpportunityWon("not-a-uuid")).ok).toBe(false);
+
+    expect(supabase.calls).toHaveLength(0);
+    expect(auditMock).not.toHaveBeenCalled();
   });
 });

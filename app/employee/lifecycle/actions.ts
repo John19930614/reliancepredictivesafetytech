@@ -22,6 +22,7 @@ import { friendlyError } from "@/lib/friendly-error";
 import { getLifecycleAccess } from "@/lib/lifecycle/access";
 import { checkExitInput, isClosed, lifecycleExit } from "@/lib/lifecycle/exits";
 import {
+  finalStepKey,
   firstStepKey,
   isLifecycleStepKey,
   lifecycleStep,
@@ -1008,6 +1009,64 @@ export async function linkProposalToOpportunity(
   revalidatePath("/employee/proposals");
   revalidatePath(`/employee/proposals/${proposalId}`);
   return { ok: true };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Step 11 — closing the deal won                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Marks a deal won.
+ *
+ * Reaching step 11 and BEING won are different facts, and until now only the
+ * first was recorded: advanceOpportunity carries the status forward unchanged,
+ * so a deal at Closed Won & Onboarded sat there still marked open, and every
+ * count of won deals read it as live. This is the act that closes it.
+ *
+ * Deliberately its own action rather than a side effect of the last advance. A
+ * deal can reach step 11 while the contract is still being counter-signed;
+ * winning is a claim somebody makes, and it changes numbers other people report
+ * on. It also requires a company — a won deal with nothing to onboard is not a
+ * won deal, it is a missing client record.
+ */
+export async function markOpportunityWon(opportunityId: string): Promise<LifecycleActionResult> {
+  const { supabase, userId, role, canAdvance } = await getLifecycleAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
+  if (!canAdvance) return { ok: false, error: "You do not have permission to move opportunities." };
+  if (!UUID.test(opportunityId)) return { ok: false, error: "Malformed opportunity reference." };
+
+  const target = await readMoveTarget(supabase, opportunityId);
+  if (!target.ok) return { ok: false, error: target.error };
+  const before = target.row;
+
+  if (before.status === "won") return { ok: true };
+  if (isClosed(before.status)) {
+    return { ok: false, error: "This opportunity has left the lifecycle. Reopen it before closing it won." };
+  }
+  if (before.step !== finalStepKey) {
+    return {
+      ok: false,
+      error: `A deal is closed won at ${lifecycleStep(finalStepKey)?.label ?? finalStepKey}. Move it there first.`,
+    };
+  }
+  if (!before.client_id) {
+    return { ok: false, error: "Attach this opportunity to a company before closing it won." };
+  }
+
+  return applyMove({
+    supabase,
+    userId,
+    role,
+    before,
+    // The step does not change: step 11 IS the won step. Only the status moves.
+    toStep: before.step,
+    toStatus: "won",
+    kind: "won",
+    reason: null,
+    summary: `Closed "${before.name}" won`,
+    // Reported on by other people, and reversible only by an admin reopen.
+    severity: "warn",
+  });
 }
 
 /** The columns a lifecycle read asks for. Re-exported so the page and the

@@ -11,7 +11,18 @@
 // built, so the lifecycle is walkable end to end rather than eight blank pages.
 
 import Link from "next/link";
-import { AlertTriangle, FileSearch, Inbox, PenLine, Receipt, ScanSearch, Scale, UserCheck } from "lucide-react";
+import {
+  AlertTriangle,
+  FileSearch,
+  Handshake,
+  Inbox,
+  ListChecks,
+  PenLine,
+  Receipt,
+  ScanSearch,
+  Scale,
+  UserCheck,
+} from "lucide-react";
 import {
   acceptedProposal,
   billedInvoices,
@@ -21,6 +32,15 @@ import {
   type DealContext,
   type DealProposal,
 } from "@/lib/lifecycle/deal-context";
+import {
+  handoffState,
+  issuedInvoices,
+  onboardingProgress,
+  outstandingItems,
+  postWinItems,
+  type OnboardingContext,
+} from "@/lib/lifecycle/onboarding-context";
+import { CloseWonAction } from "@/components/lifecycle/CloseWonAction";
 import { ProposalLink } from "@/components/lifecycle/ProposalLink";
 import type { LeadContext } from "@/lib/lifecycle/lead-context";
 import { scoreBand } from "@/lib/lifecycle/lead-context";
@@ -861,6 +881,177 @@ export function CommitContractPanels({ opportunity, deal }: { opportunity: Oppor
             { label: "Deal value", value: money(opportunity.value, opportunity.currency) },
           ]}
         />
+      </LifecyclePanel>
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Step 11 — the handoff                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Step 11 — Closed Won & Onboarded.
+ *
+ * A report on the client's own records, plus a door into the screen that runs
+ * onboarding. The checklist, the gates and the invoicing all live at
+ * /employee/clients/[id]/workflow already; a second copy here would give
+ * onboarding two front doors whose gates disagree within a week.
+ */
+export function ClosedWonPanels({
+  opportunity,
+  onboarding,
+  canAdvance,
+}: {
+  opportunity: OpportunityRow;
+  onboarding: OnboardingContext;
+  canAdvance: boolean;
+}) {
+  const state = handoffState(onboarding);
+  const relevant = postWinItems(onboarding.items);
+  const progress = onboardingProgress(relevant);
+  const outstanding = outstandingItems(relevant);
+  const issued = issuedInvoices(onboarding.invoices);
+  const won = opportunity.status === "won";
+
+  return (
+    <>
+      <LifecyclePanel
+        aside={
+          won ? <span className="lc-pill lc-pill-good">Won</span> : <span className="lc-pill lc-pill-warn">Not yet</span>
+        }
+        title="Close the deal"
+      >
+        <CloseWonAction
+          canAdvance={canAdvance}
+          clientId={opportunity.client_id}
+          opportunityId={opportunity.id}
+          won={won}
+        />
+      </LifecyclePanel>
+
+      <LifecyclePanel
+        aside={
+          onboarding.client ? (
+            <Link href={`/employee/clients/${onboarding.client.id}/workflow`}>Open the case view</Link>
+          ) : null
+        }
+        title="Client record"
+      >
+        {onboarding.client ? (
+          <LifecycleFacts
+            rows={[
+              {
+                label: "Company",
+                value: <Link href={`/employee/clients/${onboarding.client.id}`}>{onboarding.client.name}</Link>,
+              },
+              { label: "Board stage", value: onboarding.client.lifecycle_stage },
+              { label: "Account status", value: onboarding.client.status },
+              { label: "Owner", value: onboarding.client.owner || "Unassigned" },
+            ]}
+          />
+        ) : (
+          <p className="lc-empty">
+            <Handshake aria-hidden="true" size={14} /> No company is attached to this deal, so there is nothing to
+            onboard yet.
+          </p>
+        )}
+        {onboarding.client && !state.handedOver ? (
+          <p className="lc-meta">
+            The company is still on {onboarding.client.lifecycle_stage}. Onboarding starts once it reaches Invoicing on
+            its own board — that move happens in the case view, not here.
+          </p>
+        ) : null}
+      </LifecyclePanel>
+
+      <LifecyclePanel
+        aside={
+          progress.total > 0 ? (
+            <span className={`lc-pill lc-pill-${state.onboarded ? "good" : "warn"}`}>
+              {progress.done}/{progress.total}
+            </span>
+          ) : null
+        }
+        title="Onboarding checklist"
+      >
+        {progress.total === 0 ? (
+          <p className="lc-empty">
+            <ListChecks aria-hidden="true" size={14} /> No onboarding items exist for this company yet.
+          </p>
+        ) : (
+          <>
+            <p className="lc-body">
+              {progress.percent}% complete across Invoicing, Onboarding, Pilot / Setup and Active Company.
+            </p>
+            {outstanding.length > 0 ? (
+              <ul className="lc-capacity">
+                {outstanding.slice(0, 8).map((item) => (
+                  <li className="lc-capacity-row" key={item.id}>
+                    <span className="lc-capacity-name">{item.title}</span>
+                    <span className="lc-capacity-meta">
+                      {item.lifecycle_stage}
+                      {item.due_date ? ` · due ${item.due_date}` : ""}
+                      {item.owner ? ` · ${item.owner}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="lc-meta">Every post-win item is complete.</p>
+            )}
+            {outstanding.length > 8 ? (
+              <p className="lc-meta">{outstanding.length - 8} more outstanding in the case view.</p>
+            ) : null}
+          </>
+        )}
+      </LifecyclePanel>
+
+      <LifecyclePanel
+        aside={
+          issued.length > 0 ? (
+            <span className="lc-pill lc-pill-good">{issued.length} issued</span>
+          ) : (
+            <span className="lc-pill lc-pill-warn">Not billed</span>
+          )
+        }
+        title="First invoice"
+      >
+        {onboarding.invoices.length === 0 ? (
+          <p className="lc-empty">
+            <Receipt aria-hidden="true" size={14} /> Nothing has been raised for this company yet. Invoices are raised
+            from the accepted proposal in the case view.
+          </p>
+        ) : (
+          <ul className="lc-capacity">
+            {onboarding.invoices.slice(0, 6).map((invoice) => (
+              <li className="lc-capacity-row" key={invoice.id}>
+                <span className="lc-capacity-name">
+                  {invoice.invoice_number} · {invoice.kind}
+                </span>
+                <span className="lc-capacity-meta">
+                  {invoice.status} · {money(invoice.total, invoice.currency)}
+                  {invoice.due_date ? ` · due ${invoice.due_date}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </LifecyclePanel>
+
+      <LifecyclePanel title="Handoff" wide>
+        <LifecycleFacts
+          rows={[
+            { label: "Deal closed won", value: won ? "Yes" : "Not yet" },
+            { label: "Client record created", value: state.hasClient ? "Yes" : "No company attached" },
+            { label: "Handed to onboarding", value: state.handedOver ? "Yes" : "Still pre-Invoicing on the board" },
+            { label: "Billed", value: state.billed ? "Yes" : "No invoice issued" },
+            { label: "Onboarding complete", value: state.onboarded ? "Yes" : "Outstanding items remain" },
+          ]}
+        />
+        <p className="lc-meta">
+          Every line is read from the company&apos;s own records. The lifecycle reports this state; the case view is
+          where it changes.
+        </p>
       </LifecyclePanel>
     </>
   );

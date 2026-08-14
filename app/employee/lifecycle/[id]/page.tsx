@@ -45,6 +45,7 @@ import { LifecycleStepActions } from "@/components/lifecycle/LifecycleStepAction
 import {
   AiTriagePanels,
   AssignOwnerPanels,
+  ClosedWonPanels,
   CommitContractPanels,
   DiscoveryPanels,
   LeadCapturedPanels,
@@ -55,6 +56,7 @@ import {
   SolutionProposalPanels,
 } from "@/components/lifecycle/StepPanels";
 import { emptyDealContext, loadDealContext } from "@/lib/lifecycle/deal-context";
+import { emptyOnboardingContext, loadOnboardingContext } from "@/lib/lifecycle/onboarding-context";
 import { findOwner, loadOwnerOptions } from "@/lib/lifecycle/owners";
 import type { QualificationRow } from "@/lib/lifecycle/qualification";
 import {
@@ -157,7 +159,7 @@ export default async function LifecycleRecordPage({ params }: PageProps) {
 
   const onDealStep = dealSteps.has(opportunity.step);
 
-  const [clientResult, historyResult, leadContext, owners, qualificationResult, deal, clientsResult] =
+  const [clientResult, historyResult, leadContext, owners, qualificationResult, deal, clientsResult, onboarding] =
     await Promise.all([
       opportunity.client_id
         ? supabase.from("company_clients").select("id, name").eq("id", opportunity.client_id).maybeSingle()
@@ -187,6 +189,11 @@ export default async function LifecycleRecordPage({ params }: PageProps) {
       step?.key === "solution_proposal" && canManage && !opportunity.client_id
         ? supabase.from("company_clients").select("id, name").order("name", { ascending: true }).limit(clientPickerLimit)
         : Promise.resolve({ data: [] }),
+      // Step 11 reports the company's own onboarding state rather than keeping
+      // a second copy of it.
+      step?.key === "closed_won_onboarded"
+        ? loadOnboardingContext(supabase, opportunity.client_id)
+        : Promise.resolve(emptyOnboardingContext),
     ]);
 
   const client = (clientResult?.data ?? null) as { id: string; name: string } | null;
@@ -370,6 +377,9 @@ export default async function LifecycleRecordPage({ params }: PageProps) {
         {step?.key === "proposal_review" ? <ProposalReviewPanels deal={deal} /> : null}
         {step?.key === "negotiation_approval" ? <NegotiationPanels deal={deal} /> : null}
         {step?.key === "commit_contract" ? <CommitContractPanels deal={deal} opportunity={opportunity} /> : null}
+        {step?.key === "closed_won_onboarded" ? (
+          <ClosedWonPanels canAdvance={canAdvance} onboarding={onboarding} opportunity={opportunity} />
+        ) : null}
 
         <LifecyclePanel
           aside={<Link href="/employee/lifecycle">All opportunities</Link>}

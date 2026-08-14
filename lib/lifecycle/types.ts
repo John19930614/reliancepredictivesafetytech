@@ -51,7 +51,14 @@ export interface OpportunityRow {
   updated_at: string;
 }
 
-export type StageEventKind = "advance" | "skip" | "back" | "exit" | "reopen";
+/**
+ * Mirrors the CHECK on opportunity_stage_events.kind.
+ *
+ * "won" is not an exit: the exit kinds are the three LOST paths, and the
+ * exception index is built on them. Folding a win in there would make "deals
+ * that left without closing" start counting wins.
+ */
+export type StageEventKind = "advance" | "skip" | "back" | "exit" | "reopen" | "won";
 
 export interface OpportunityStageEventRow {
   id: string;
