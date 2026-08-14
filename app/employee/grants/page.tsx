@@ -352,7 +352,9 @@ export default async function GrantsPage({ searchParams }: { searchParams: Promi
                         // components/files/FileCenterManager.tsx.
                         <tr key={row.id} style={closed ? { opacity: 0.55 } : undefined}>
                           <td>
-                            <strong>{row.name}</strong>
+                            <Link href={`/employee/grants/${row.id}`}>
+                              <strong>{row.name}</strong>
+                            </Link>
                             {row.sub_agency ? <div className="table-subtext">{row.sub_agency}</div> : null}
                           </td>
                           <td>{row.agency ?? "—"}</td>
