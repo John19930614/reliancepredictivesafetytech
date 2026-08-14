@@ -23,6 +23,7 @@ import { isGeneratorState } from "@/lib/proposals/generator-state";
 import { computeProposalTotals } from "@/lib/proposals/pricing";
 import { parseProposalTerm } from "@/lib/proposals/term";
 import { buildIncomeSchedule } from "@/lib/proposals/income-schedule";
+import { isAtOrPastStage } from "@/lib/pipeline/stages";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
 
 /** Same convention as the rest of the proposals module (see access.ts). */
@@ -33,17 +34,19 @@ type LooseClient = any;
 export const wonLifecycleStage = "Signed / Won";
 
 /**
- * Stages at or past "won". Reached this far, the client's stage is not walked
- * backwards by a later acceptance — a company already Onboarding must not be
- * dragged back to Signed / Won because a second proposal closed.
+ * Whether the client has already reached "won". Past this point the stage is
+ * not walked backwards by a later acceptance — a company already Onboarding
+ * must not be dragged back to Signed / Won because a second proposal closed.
+ *
+ * Derived from the ordered stage list rather than a hand-maintained set. The
+ * set this replaces listed the four stages that followed "won" at the time it
+ * was written, so inserting Invoicing between Signed / Won and Onboarding
+ * (2026-08-14) silently made it wrong: a client mid-billing whose second
+ * proposal was accepted would have been dragged back a step.
  */
-const STAGES_AT_OR_PAST_WON = new Set([
-  wonLifecycleStage,
-  "Onboarding",
-  "Pilot / Setup",
-  "Active Company",
-  "Renewal / Expansion",
-]);
+function isAtOrPastWon(stage: string): boolean {
+  return isAtOrPastStage(stage, wonLifecycleStage);
+}
 
 /** Finance category these rows land under (lib/company-data.ts). */
 const INCOME_CATEGORY = "Sales / Revenue";
@@ -181,7 +184,7 @@ async function advanceClientStage(db: LooseClient, clientId: string): Promise<bo
   if (!client) return false;
 
   const current = (client.lifecycle_stage as string | null) ?? "";
-  if (STAGES_AT_OR_PAST_WON.has(current)) return false;
+  if (isAtOrPastWon(current)) return false;
 
   const { data: updated } = await db
     .from("company_clients")

@@ -8718,3 +8718,456 @@ a.platform-card:hover {
 }
 
 /* ===== End EHS Talent Engine ============================================= */
+
+/* ===== Client workflow (lead → active) =================================== *
+   The per-client view of the journey: a numbered rail, one current-step card,
+   and the billing panel behind the Invoicing step.
+
+   Brand colour comes from the portal variables (--portal-gold,
+   --portal-gold-bright, --portal-muted). The state greys and the done-green are
+   the same literals the get-started steps already use (#e6f4ea / #2e7d32 /
+   #edf0f4 / #64707d), so a completed step reads identically on the dashboard
+   and here. Per CLAUDE.md no brand colour is written as an inline style — the
+   components carry class names only and the palette lives here.
+   ------------------------------------------------------------------------- */
+
+.wf-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- Stage rail ---------------------------------------------------------- */
+
+.wf-rail-wrap {
+  margin-bottom: 18px;
+  padding: 18px 18px 14px;
+  overflow-x: auto;
+  border: 1px solid #e0e4e8;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.07);
+}
+
+.wf-rail {
+  display: flex;
+  align-items: flex-start;
+  min-width: max-content;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wf-rail-step {
+  position: relative;
+  display: flex;
+  flex: 1 0 108px;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  text-align: center;
+}
+
+/* The connector runs from the previous node's centre to this one's. It is
+   drawn on the LATER step because a step being done (or current) is what
+   proves the segment behind it is complete — CSS has no previous-sibling
+   selector to express it the other way round. */
+.wf-rail-step + .wf-rail-step::before {
+  content: "";
+  position: absolute;
+  top: 16px;
+  right: 50%;
+  left: -50%;
+  height: 2px;
+  background: #dbe2e9;
+}
+
+.wf-rail-step-done + .wf-rail-step-done::before,
+.wf-rail-step-done + .wf-rail-step-current::before {
+  background: #2e7d32;
+}
+
+.wf-rail-node {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e8ecf0;
+  border-radius: 999px;
+  background: #edf0f4;
+  color: #64707d;
+  font-size: 0.84rem;
+  font-weight: 900;
+}
+
+.wf-rail-step-done .wf-rail-node {
+  border-color: #cbe6d2;
+  background: #e6f4ea;
+  color: #2e7d32;
+}
+
+.wf-rail-step-current .wf-rail-node {
+  border-color: #111;
+  background: #111;
+  color: var(--portal-gold-bright);
+  box-shadow: 0 0 0 4px rgba(201, 147, 43, 0.18);
+}
+
+.wf-rail-label {
+  max-width: 104px;
+  color: #64707d;
+  font-size: 0.74rem;
+  font-weight: 750;
+  line-height: 1.3;
+}
+
+.wf-rail-step-done .wf-rail-label {
+  color: #2e7d32;
+}
+
+.wf-rail-step-current .wf-rail-label {
+  color: #111;
+  font-weight: 900;
+}
+
+/* --- Layout -------------------------------------------------------------- */
+
+.wf-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.wf-side {
+  display: grid;
+  gap: 18px;
+}
+
+.wf-topline-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 960px) {
+  .wf-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* --- Current step card --------------------------------------------------- */
+
+/* Geometry borrowed from .onboarding-banner, which is the established way this
+   app says "here is the thing to do next". */
+.wf-step-card {
+  padding: 22px 24px;
+  border: 1px solid rgba(201, 147, 43, 0.45);
+  border-left: 4px solid var(--portal-gold);
+  border-radius: 8px;
+  background: #fff8e8;
+}
+
+/* A blocked step is not an error — it is a step that is not finished. Cooling
+   it to a neutral surface keeps the alarm colours for things that are wrong. */
+.wf-step-card-blocked {
+  border-color: #e0e4e8;
+  border-left-color: #98a2b3;
+  background: #fbfcfd;
+}
+
+.wf-step-eyebrow {
+  margin: 0 0 6px;
+  color: var(--portal-gold);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.wf-step-card-blocked .wf-step-eyebrow {
+  color: #64707d;
+}
+
+.wf-step-headline {
+  margin: 0 0 8px;
+  font-size: 1.32rem;
+  line-height: 1.25;
+}
+
+.wf-step-body {
+  margin: 0;
+  max-width: 62ch;
+  color: #6b5a34;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.wf-step-card-blocked .wf-step-body {
+  color: #64707d;
+}
+
+.wf-req-list {
+  display: grid;
+  gap: 7px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wf-req {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: #64707d;
+  font-size: 0.87rem;
+  line-height: 1.45;
+}
+
+.wf-req-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding-top: 1px;
+  color: #98a2b3;
+}
+
+.wf-req-done {
+  color: #2e7d32;
+}
+
+.wf-req-done .wf-req-icon {
+  color: #2e7d32;
+}
+
+.wf-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.wf-step-note,
+.wf-step-terminal {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 14px 0 0;
+  color: var(--portal-muted);
+  font-size: 0.83rem;
+  line-height: 1.5;
+}
+
+.wf-step-error {
+  margin: 14px 0 0;
+  padding: 10px 13px;
+  border: 1px solid rgba(138, 31, 31, 0.34);
+  border-radius: 6px;
+  background: #fff0f0;
+  color: #5e1111;
+  font-size: 0.86rem;
+}
+
+.wf-step-notice {
+  margin: 12px 0 0;
+  padding: 10px 13px;
+  border: 1px solid rgba(46, 125, 50, 0.32);
+  border-radius: 6px;
+  background: #e6f4ea;
+  color: #1b5e20;
+  font-size: 0.86rem;
+}
+
+/* --- Override -------------------------------------------------------------*/
+
+.wf-override {
+  margin-top: 16px;
+  padding: 15px 16px;
+  border: 1px solid rgba(201, 147, 43, 0.45);
+  border-radius: 8px;
+  background: #fffdf7;
+}
+
+.wf-override-label {
+  display: block;
+  margin-bottom: 7px;
+  color: #7a4e08;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.wf-override-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d9e0ea;
+  border-radius: 6px;
+  background: #fff;
+  color: #111;
+  font: inherit;
+  font-size: 0.88rem;
+  resize: vertical;
+}
+
+.wf-override-input:focus-visible {
+  border-color: var(--portal-gold);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(201, 147, 43, 0.18);
+}
+
+/* --- Side panels ----------------------------------------------------------*/
+
+.wf-panel {
+  padding: 20px;
+  border: 1px solid #e0e4e8;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.07);
+}
+
+.wf-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  font-size: 1.02rem;
+}
+
+.wf-panel-title svg {
+  color: var(--portal-gold);
+}
+
+/* --- Invoices -------------------------------------------------------------*/
+
+.wf-invoice-list {
+  display: grid;
+  gap: 11px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.wf-invoice {
+  padding: 13px 14px;
+  border: 1px solid #e8ecf0;
+  border-radius: 8px;
+  background: #f9fafc;
+}
+
+.wf-invoice-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wf-invoice-head svg {
+  color: var(--portal-muted);
+}
+
+.wf-invoice-total {
+  margin-left: auto;
+  font-weight: 900;
+}
+
+.wf-invoice-meta {
+  margin: 5px 0 0;
+  color: var(--portal-muted);
+  font-size: 0.79rem;
+}
+
+.wf-invoice-form {
+  display: grid;
+  gap: 11px;
+  padding-top: 15px;
+  border-top: 1px solid #edf0f2;
+}
+
+.wf-field {
+  display: grid;
+  gap: 5px;
+}
+
+.wf-field span {
+  color: var(--portal-muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.wf-field select {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 11px;
+  border: 1px solid #d9e0ea;
+  border-radius: 6px;
+  background: #fff;
+  color: #111;
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+.wf-field select:disabled {
+  background: #f4f6f9;
+  color: #98a2b3;
+  cursor: not-allowed;
+}
+
+/* --- Stage history --------------------------------------------------------*/
+
+.wf-history {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0 0 0 16px;
+  border-left: 2px solid #dbe2e9;
+  list-style: none;
+}
+
+.wf-history-row {
+  position: relative;
+  font-size: 0.87rem;
+}
+
+.wf-history-row::before {
+  content: "";
+  position: absolute;
+  top: 5px;
+  left: -21px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #cbd5e1;
+}
+
+.wf-history-row-override::before {
+  background: var(--portal-gold);
+}
+
+.wf-history-meta {
+  display: block;
+  margin-top: 2px;
+  color: var(--portal-muted);
+  font-size: 0.78rem;
+}
+
+.wf-history-reason {
+  margin: 5px 0 0;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: #fffaf0;
+  color: #6b5a34;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+/* ===== End client workflow =============================================== */

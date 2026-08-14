@@ -23,6 +23,10 @@ import {
   lifecycleStages,
   type CompanyClient,
 } from "@/lib/company-data";
+import {
+  liveStages as pipelineLiveStages,
+  stageDetails as pipelineStageDetails,
+} from "@/lib/pipeline/stages";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/friendly-error";
 
@@ -44,23 +48,16 @@ type SalesPipelineManagerProps = {
   demoRequests: DemoRequest[];
 };
 
-const negotiatingStages = new Set(["Proposal Sent", "Legal Review", "Contract Sent", "Signed / Won"]);
-const liveStages = new Set(["Active Company", "Renewal / Expansion"]);
+const negotiatingStages = new Set(["Proposal Sent", "Legal Review", "Contract Sent", "Signed / Won", "Invoicing"]);
+// Widened to string: lifecycle_stage is free text in the database, so the
+// lookup has to accept a value that is not a known stage and simply miss.
+const liveStages = new Set<string>(pipelineLiveStages);
 
-const stageDetails: Record<string, { lane: string; summary: string }> = {
-  Lead: { lane: "Intake", summary: "New account fit and ownership" },
-  "First Pitch": { lane: "Engaged", summary: "Initial conversation complete" },
-  "Demo Scheduled": { lane: "Calendar", summary: "Demo date and attendee prep" },
-  "Demo Completed": { lane: "Qualified", summary: "Demo recap and next action" },
-  "Proposal Sent": { lane: "Proposal", summary: "Commercial package delivered" },
-  "Legal Review": { lane: "Review", summary: "Terms, security, and approvals" },
-  "Contract Sent": { lane: "Signature", summary: "Final documents in circulation" },
-  "Signed / Won": { lane: "Won", summary: "Ready for activation handoff" },
-  Onboarding: { lane: "Launch", summary: "Admin setup and kickoff" },
-  "Pilot / Setup": { lane: "Deploy", summary: "Pilot workspace configuration" },
-  "Active Company": { lane: "Live", summary: "Operational account" },
-  "Renewal / Expansion": { lane: "Growth", summary: "Expansion and renewal motion" },
-};
+// `lane` and `summary` used to be a second copy of the stage table maintained
+// here. They now come from lib/pipeline/stages so the board and the per-client
+// workflow view cannot describe the same stage differently — and so adding a
+// stage means editing one file, not three.
+const stageDetails = pipelineStageDetails as Record<string, { lane: string; summary: string }>;
 
 export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipelineManagerProps) {
   const [clients, setClients] = useState(initialClients);
@@ -446,8 +443,14 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
                           {formatDate(client.updated_at)}
                         </span>
                       </div>
-                      <Link className="button button-light" href={`/employee/clients/${client.id}`}>
-                        Open record <ArrowRight size={16} />
+                      {/* The board answers "where is everything"; the workflow
+                          view answers "what happens next to this one", which is
+                          where the stage gates and the invoice step live. */}
+                      <Link className="button button-light" href={`/employee/clients/${client.id}/workflow`}>
+                        Open workflow <ArrowRight size={16} />
+                      </Link>
+                      <Link className="button button-secondary" href={`/employee/clients/${client.id}`}>
+                        Full record
                       </Link>
                       <button
                         className="button button-secondary"
