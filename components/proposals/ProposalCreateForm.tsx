@@ -35,7 +35,7 @@ export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
     () => clients.find((client) => client.id === clientId) ?? null,
     [clients, clientId],
   );
-  const existingCode = (selectedClient?.client_code ?? "").trim().toUpperCase();
+  const existingCode = (selectedClient?.client_code ?? "").trim();
   const needsCode = selectedClient !== null && existingCode === "";
 
   const takenCodes = useMemo(
@@ -160,12 +160,12 @@ export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
             <input
               id="client_code"
               value={codeDraft}
-              onChange={(event) => setCodeDraft(event.target.value.toUpperCase())}
-              maxLength={3}
-              pattern="[A-Za-z]{2,3}"
+              onChange={(event) => setCodeDraft(event.target.value)}
+              maxLength={24}
+              pattern="[A-Za-z][A-Za-z0-9]{1,23}"
               title={clientCodeRule}
-              placeholder="e.g. HUN"
-              style={{ textTransform: "uppercase", letterSpacing: "0.12em" }}
+              placeholder="e.g. Wondfo"
+              style={{ letterSpacing: "0.02em" }}
               required
             />
             <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem", marginTop: 4 }}>

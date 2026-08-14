@@ -69,7 +69,7 @@ export function CompanyAddressAndContacts({
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  const [savedCode, setSavedCode] = useState((clientCode ?? "").trim().toUpperCase());
+  const [savedCode, setSavedCode] = useState((clientCode ?? "").trim());
   const [codeDraft, setCodeDraft] = useState(() => savedCode || suggestClientCode(clientName));
 
   const [addressDraft, setAddressDraft] = useState({
@@ -132,7 +132,7 @@ export function CompanyAddressAndContacts({
             run(
               () => assignClientCode(clientId, attempted),
               `Code ${attempted.trim()} assigned — this company's draft proposals now number from ${formatClientDocumentNumber(attempted, exampleYear, 1)}.`,
-              () => setSavedCode(attempted.trim().toUpperCase()),
+              () => setSavedCode(attempted.trim()),
             );
           }}
         >
@@ -148,12 +148,12 @@ export function CompanyAddressAndContacts({
               <input
                 id="company-client-code"
                 value={codeDraft}
-                onChange={(event) => setCodeDraft(event.target.value.toUpperCase())}
-                maxLength={3}
-                pattern="[A-Za-z]{2,3}"
+                onChange={(event) => setCodeDraft(event.target.value)}
+                maxLength={24}
+                pattern="[A-Za-z][A-Za-z0-9]{1,23}"
                 title={clientCodeRule}
-                placeholder="e.g. HUN"
-                style={{ textTransform: "uppercase", letterSpacing: "0.12em" }}
+                placeholder="e.g. Wondfo"
+                style={{ letterSpacing: "0.02em" }}
                 required
               />
             </div>
