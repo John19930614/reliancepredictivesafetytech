@@ -9030,6 +9030,13 @@ a.platform-card:hover {
   border: 1px solid #e0e4e8;
   border-radius: 8px;
   background: #fff;
+  /* body sets color: var(--white) against the dark shell, so a panel that
+     paints itself white MUST re-set the text colour — without this, every
+     child that does not name its own colour renders white on white. That was
+     the invoice number and the invoice total: the two things the panel exists
+     to show. The muted meta line, the badges and the buttons all survived
+     because each sets a colour of its own, which is what made it easy to miss. */
+  color: #111;
   box-shadow: 0 16px 42px rgba(15, 23, 42, 0.07);
 }
 
