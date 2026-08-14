@@ -38,9 +38,11 @@ import {
   stepNumber,
 } from "@/lib/lifecycle/steps";
 import { opportunitySelect, type OpportunityRow, type OpportunityStageEventRow } from "@/lib/lifecycle/types";
+import { loadLeadContext, scoreBand } from "@/lib/lifecycle/lead-context";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
 import { LifecycleRail } from "@/components/lifecycle/LifecycleRail";
 import { LifecycleStepActions } from "@/components/lifecycle/LifecycleStepActions";
+import { AiTriagePanels, LeadCapturedPanels, SalesReviewPanels } from "@/components/lifecycle/StepPanels";
 import {
   LifecycleFacts,
   LifecycleIndicators,
@@ -102,7 +104,7 @@ export default async function LifecycleRecordPage({ params }: PageProps) {
   const { id } = await params;
   if (!UUID.test(id)) notFound();
 
-  const { supabase, canRead, canAdvance, canSkip, canExit, canReopen } = await getLifecycleAccess();
+  const { supabase, canRead, canManage, canAdvance, canSkip, canExit, canReopen } = await getLifecycleAccess();
 
   if (!supabase) {
     return <section className="portal-card empty-state">Supabase is not configured yet.</section>;
@@ -135,7 +137,7 @@ export default async function LifecycleRecordPage({ params }: PageProps) {
   const closed = isClosed(opportunity.status);
   const exit = lifecycleExit(opportunity.status);
 
-  const [clientResult, historyResult] = await Promise.all([
+  const [clientResult, historyResult, leadContext] = await Promise.all([
     opportunity.client_id
       ? supabase.from("company_clients").select("id, name").eq("id", opportunity.client_id).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -145,6 +147,7 @@ export default async function LifecycleRecordPage({ params }: PageProps) {
       .eq("opportunity_id", id)
       .order("changed_at", { ascending: false })
       .limit(historyLimit),
+    loadLeadContext(supabase, opportunity.demo_request_id),
   ]);
 
   const client = (clientResult?.data ?? null) as { id: string; name: string } | null;
@@ -156,7 +159,49 @@ export default async function LifecycleRecordPage({ params }: PageProps) {
   const toClose = daysUntil(opportunity.expected_close_date);
   const weighted = (opportunity.value * opportunity.probability) / 100;
 
-  const tiles: KpiTile[] = [
+  // Steps 1–3 are about a LEAD, not yet a deal: a value and a close date on a
+  // lead nobody has qualified are noise. Those steps get the lead's own numbers.
+  const leadStep = step?.number !== undefined && step.number <= 3;
+  const triage = leadContext.triage;
+  const band = scoreBand(triage?.priority_score ?? opportunity.ai_score);
+
+  const leadTiles: KpiTile[] = [
+    {
+      label: "AI Score",
+      value: triage ? String(triage.priority_score) : "Not scored",
+      detail: triage ? `${triage.confidence} confidence · rank #${triage.priority_rank}` : "Awaiting the triage job",
+      tone: triage ? (band === "high" ? "good" : band === "low" ? "warn" : "default") : "warn",
+      icon: <Brain size={18} />,
+    },
+    {
+      label: "Segment",
+      value: triage?.segment || "Unsegmented",
+      detail: triage ? "as the model read it" : "no triage yet",
+      icon: <Target size={18} />,
+    },
+    {
+      label: "Lead Age",
+      value: leadContext.lead ? `${daysSince(leadContext.lead.created_at) ?? 0}d` : "—",
+      detail: leadContext.lead ? "since it arrived" : "opened by hand",
+      icon: <Clock3 size={18} />,
+    },
+    {
+      label: "Review Status",
+      value: triage ? triage.status : "n/a",
+      detail:
+        triage?.status === "suggested"
+          ? "waiting on a person"
+          : triage?.status === "accepted"
+            ? "score applied to the deal"
+            : triage?.status === "dismissed"
+              ? "opportunity left unscored"
+              : "nothing to review",
+      tone: triage?.status === "suggested" ? "warn" : "default",
+      icon: <Gauge size={18} />,
+    },
+  ];
+
+  const dealTiles: KpiTile[] = [
     {
       label: "Deal Value",
       value: money(opportunity.value, opportunity.currency),
@@ -196,6 +241,8 @@ export default async function LifecycleRecordPage({ params }: PageProps) {
       icon: <CalendarClock size={18} />,
     },
   ];
+
+  const tiles: KpiTile[] = leadStep ? leadTiles : dealTiles;
 
   const indicators: Indicator[] = [
     { label: "Status", value: exit ? exit.label : opportunity.status === "won" ? "Won" : "Open", tone: exit ? "bad" : "good" },
@@ -250,6 +297,12 @@ export default async function LifecycleRecordPage({ params }: PageProps) {
       <LifecycleKpis tiles={tiles} />
 
       <div className="lc-grid">
+        {step?.key === "lead_captured" ? <LeadCapturedPanels context={leadContext} /> : null}
+        {step?.key === "ai_triage" ? <AiTriagePanels context={leadContext} /> : null}
+        {step?.key === "sales_review" ? (
+          <SalesReviewPanels canManage={canManage} context={leadContext} opportunity={opportunity} />
+        ) : null}
+
         <LifecyclePanel
           aside={<Link href="/employee/lifecycle">All opportunities</Link>}
           title="Opportunity Summary"

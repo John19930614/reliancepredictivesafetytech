@@ -576,6 +576,130 @@ export async function updateOpportunity(
   return { ok: true };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Sales Review — the human decision on the AI's triage                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Records a person's decision on the AI triage, and — only on accept — carries
+ * the model's score onto the opportunity.
+ *
+ * THIS IS THE HUMAN AUTHORITY RULE, applied to scoring. The nightly triage job
+ * writes to lead_triage_results and nowhere else; it never touches an
+ * opportunity. The score reaches the deal record here, because a person pressed
+ * accept, and not before. Dismissing records the decision and leaves the
+ * opportunity unscored — which is the honest state, since nobody has agreed
+ * with the model.
+ *
+ * Deliberately does not advance the step. Deciding and moving on are two acts,
+ * and an operator who accepts the score may still want to look at the lead
+ * before assigning it.
+ */
+export async function applyTriageDecision(
+  opportunityId: string,
+  decision: "accepted" | "dismissed",
+): Promise<LifecycleActionResult> {
+  const { supabase, userId, role, canManage } = await getLifecycleAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
+  if (!canManage) return { ok: false, error: "You do not have permission to review lead scoring." };
+  if (!UUID.test(opportunityId)) return { ok: false, error: "Malformed opportunity reference." };
+  if (decision !== "accepted" && decision !== "dismissed") {
+    return { ok: false, error: "Choose accept or dismiss." };
+  }
+
+  const { data: opportunityRow } = await supabase
+    .from("opportunities")
+    .select("id, name, status, demo_request_id")
+    .eq("id", opportunityId)
+    .maybeSingle();
+
+  if (!opportunityRow) return { ok: false, error: NOT_FOUND };
+
+  const opportunity = opportunityRow as {
+    id: string;
+    name: string;
+    status: string;
+    demo_request_id: string | null;
+  };
+
+  if (isClosed(opportunity.status)) {
+    return { ok: false, error: "This opportunity has left the lifecycle." };
+  }
+  if (!opportunity.demo_request_id) {
+    return { ok: false, error: "This opportunity has no inbound lead behind it, so there is no triage to review." };
+  }
+
+  const { data: triageRows } = await supabase
+    .from("lead_triage_results")
+    .select("id, priority_score, segment, next_step, rationale, confidence, status")
+    .eq("lead_id", opportunity.demo_request_id)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  const triage = Array.isArray(triageRows) ? triageRows[0] : null;
+  if (!triage) return { ok: false, error: "This lead has not been triaged yet." };
+  if (triage.status !== "suggested") {
+    return { ok: false, error: `This suggestion was already ${triage.status}.` };
+  }
+
+  // The decision is recorded first. If the score write below fails, the record
+  // still shows a human acted — the opposite order could leave a scored
+  // opportunity with no decision behind it.
+  const { data: acted, error: actError } = await supabase
+    .from("lead_triage_results")
+    .update({ status: decision, acted_by: userId, acted_at: new Date().toISOString() })
+    .eq("id", triage.id)
+    .eq("status", "suggested")
+    .select("id");
+
+  if (actError) return { ok: false, error: friendlyError(actError, "Could not record that decision.") };
+  if (!Array.isArray(acted) || acted.length === 0) {
+    return { ok: false, error: "Someone else acted on this suggestion. Reload and try again." };
+  }
+
+  if (decision === "accepted") {
+    const { error: scoreError } = await supabase
+      .from("opportunities")
+      .update({
+        ai_score: triage.priority_score,
+        ai_confidence: triage.confidence,
+        ai_recommendation: [triage.segment, triage.next_step, triage.rationale].filter(Boolean).join(" — "),
+        ai_scored_at: new Date().toISOString(),
+      })
+      .eq("id", opportunityId)
+      .select("id");
+
+    if (scoreError) {
+      // The decision stands; only the copy onto the deal failed.
+      return { ok: false, error: friendlyError(scoreError, "The decision was recorded, but the score could not be applied.") };
+    }
+  }
+
+  await recordAuditEvent({
+    event_type: `lifecycle.triage_${decision}`,
+    event_category: "ai",
+    severity: "info",
+    actor_id: userId,
+    actor_role: role,
+    resource_type: "opportunity",
+    resource_id: opportunityId,
+    summary:
+      decision === "accepted"
+        ? `Accepted the AI triage for "${opportunity.name}" and applied a score of ${triage.priority_score}`
+        : `Dismissed the AI triage for "${opportunity.name}"`,
+    after_state: {
+      decision,
+      lead_id: opportunity.demo_request_id,
+      triage_result_id: triage.id,
+      score: decision === "accepted" ? triage.priority_score : null,
+    },
+  });
+
+  revalidateLifecycle(opportunityId);
+  revalidatePath("/employee/inbox");
+  return { ok: true };
+}
+
 /** The columns a lifecycle read asks for. Re-exported so the page and the
  *  actions cannot drift; `"use server"` files may only export async functions,
  *  hence the wrapper rather than a bare const. */

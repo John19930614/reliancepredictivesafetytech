@@ -1,0 +1,281 @@
+// The bespoke panels for steps 1–3: Lead Captured, AI Triage & Score, and
+// Sales Review.
+//
+// Server-safe and presentational — the page loads the data, these render it.
+// All three run on machinery that already exists in the platform:
+// demo_requests is the public intake, and lead_triage_runs/lead_triage_results
+// is the nightly scoring job that goes through validateAIOutput(). Nothing here
+// is a second copy of that; it is the same records, shown as lifecycle steps.
+//
+// Steps 4–11 fall back to the generic step content until their own panels are
+// built, so the lifecycle is walkable end to end rather than eight blank pages.
+
+import { AlertTriangle, Inbox, ScanSearch, UserCheck } from "lucide-react";
+import type { LeadContext } from "@/lib/lifecycle/lead-context";
+import { scoreBand } from "@/lib/lifecycle/lead-context";
+import type { OpportunityRow } from "@/lib/lifecycle/types";
+import { TriageDecision } from "@/components/lifecycle/TriageDecision";
+import { LifecycleFacts, LifecyclePanel } from "@/components/lifecycle/LifecycleFurniture";
+
+function formatDate(value: string | null): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+const bandTone: Record<string, string> = { high: "good", medium: "warn", low: "bad" };
+
+/** Shown on every step 1–3 screen when the opportunity has no lead behind it. */
+function NoLead({ what }: { what: string }) {
+  return (
+    <LifecyclePanel title={what}>
+      <p className="lc-empty">
+        <Inbox aria-hidden="true" size={14} /> This opportunity was opened by hand, so there is no inbound lead behind
+        it. {what} applies to leads that arrived through the website, a referral, an event or email.
+      </p>
+    </LifecyclePanel>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Step 1 — Lead Captured                                                     */
+/* -------------------------------------------------------------------------- */
+
+export function LeadCapturedPanels({ context }: { context: LeadContext }) {
+  const { lead, triage } = context;
+
+  if (!lead) return <NoLead what="Lead details" />;
+
+  const products = Array.isArray(lead.interested_products) ? lead.interested_products.filter(Boolean) : [];
+
+  return (
+    <>
+      <LifecyclePanel
+        aside={<span className="lc-pill lc-pill-neutral">{lead.status}</span>}
+        title="Lead Details"
+      >
+        <LifecycleFacts
+          rows={[
+            { label: "Company", value: lead.company || "—" },
+            { label: "Contact", value: lead.name },
+            { label: "Title", value: lead.role || "—" },
+            { label: "Email", value: lead.email },
+            { label: "Phone", value: lead.phone || "—" },
+            { label: "Industry", value: lead.company_type || "—" },
+            { label: "Captured", value: formatDate(lead.created_at) },
+          ]}
+        />
+      </LifecyclePanel>
+
+      <LifecyclePanel
+        aside={
+          triage ? (
+            <span className="lc-pill lc-pill-good">Scored</span>
+          ) : (
+            <span className="lc-pill lc-pill-warn">Scoring pending</span>
+          )
+        }
+        title="AI Pre-Screen / Intake Status"
+      >
+        {triage ? (
+          <p className="lc-body">
+            The nightly triage job has scored this lead. Its opinion is on the AI Triage &amp; Score step, and reaches
+            this opportunity only once a person accepts it at Sales Review.
+          </p>
+        ) : (
+          <p className="lc-body">
+            This lead is waiting on AI scoring and enrichment. The triage job runs daily and writes to its own record —
+            it never edits a lead or an opportunity directly.
+          </p>
+        )}
+        {products.length > 0 ? (
+          <p className="lc-meta">Interested in: {products.join(", ")}</p>
+        ) : null}
+      </LifecyclePanel>
+
+      {lead.message ? (
+        <LifecyclePanel title="What they asked for">
+          <p className="lc-body">{lead.message}</p>
+        </LifecyclePanel>
+      ) : null}
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Step 2 — AI Triage & Score                                                 */
+/* -------------------------------------------------------------------------- */
+
+export function AiTriagePanels({ context }: { context: LeadContext }) {
+  const { lead, triage, triageUnavailable } = context;
+
+  if (triageUnavailable) {
+    return (
+      <LifecyclePanel title="AI Triage &amp; Score">
+        <p className="lc-empty">
+          <AlertTriangle aria-hidden="true" size={14} /> Lead triage is not set up in Supabase yet. Apply the latest
+          database migrations and try again.
+        </p>
+      </LifecyclePanel>
+    );
+  }
+
+  if (!lead) return <NoLead what="AI triage" />;
+
+  if (!triage) {
+    return (
+      <LifecyclePanel aside={<span className="lc-pill lc-pill-warn">Not scored</span>} title="AI Triage &amp; Score">
+        <p className="lc-empty">
+          <ScanSearch aria-hidden="true" size={14} /> The triage job has not scored this lead yet. It runs daily and
+          picks up leads from the last 60 days.
+        </p>
+      </LifecyclePanel>
+    );
+  }
+
+  const band = scoreBand(triage.priority_score);
+
+  return (
+    <>
+      <LifecyclePanel
+        aside={<span className={`lc-pill lc-pill-${band ? bandTone[band] : "neutral"}`}>{band ?? "unscored"} fit</span>}
+        title="AI Score"
+      >
+        <LifecycleFacts
+          rows={[
+            { label: "Score", value: `${triage.priority_score} / 100` },
+            { label: "Confidence", value: triage.confidence },
+            { label: "Priority rank", value: `#${triage.priority_rank}` },
+            { label: "Segment", value: triage.segment || "—" },
+            { label: "Scored", value: formatDate(triage.created_at) },
+          ]}
+        />
+      </LifecyclePanel>
+
+      <LifecyclePanel title="Recommended Next Action">
+        <p className="lc-body">{triage.next_step}</p>
+        {triage.rationale ? <p className="lc-meta">{triage.rationale}</p> : null}
+      </LifecyclePanel>
+
+      <LifecyclePanel
+        aside={
+          triage.human_review_required ? (
+            <span className="lc-pill lc-pill-warn">Review required</span>
+          ) : (
+            <span className="lc-pill lc-pill-neutral">Routine</span>
+          )
+        }
+        title="Human Authority"
+      >
+        <p className="lc-body">
+          {/* Stating this on the screen, not just in the code, because it is the
+              rule an operator has to be able to rely on. */}
+          Nothing on this step has been written to the opportunity. The model&apos;s output is advisory until a person
+          accepts it at Sales Review — that is where the score reaches the deal record.
+        </p>
+        <p className="lc-meta">
+          Current decision: {triage.status}
+          {triage.acted_at ? ` on ${formatDate(triage.acted_at)}` : ""}
+        </p>
+      </LifecyclePanel>
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Step 3 — Sales Review                                                      */
+/* -------------------------------------------------------------------------- */
+
+export function SalesReviewPanels({
+  context,
+  opportunity,
+  canManage,
+}: {
+  context: LeadContext;
+  opportunity: OpportunityRow;
+  canManage: boolean;
+}) {
+  const { lead, triage } = context;
+
+  if (!lead || !triage) {
+    return (
+      <LifecyclePanel title="Sales Review">
+        <p className="lc-empty">
+          <UserCheck aria-hidden="true" size={14} />{" "}
+          {lead
+            ? "This lead has not been triaged, so there is no AI opinion to review. Decide on it from the lead details and move on."
+            : "This opportunity was opened by hand, so there is no AI triage to review."}
+        </p>
+      </LifecyclePanel>
+    );
+  }
+
+  const band = scoreBand(triage.priority_score);
+  const applied = opportunity.ai_score !== null;
+
+  return (
+    <>
+      <LifecyclePanel
+        aside={<span className={`lc-pill lc-pill-${band ? bandTone[band] : "neutral"}`}>{triage.priority_score}</span>}
+        title="AI Recommendation Summary"
+      >
+        <LifecycleFacts
+          rows={[
+            { label: "Segment", value: triage.segment || "—" },
+            { label: "Confidence", value: triage.confidence },
+            { label: "Recommended", value: triage.next_step },
+          ]}
+        />
+        {triage.rationale ? <p className="lc-meta">{triage.rationale}</p> : null}
+      </LifecyclePanel>
+
+      <LifecyclePanel
+        aside={
+          applied ? (
+            <span className="lc-pill lc-pill-good">Applied</span>
+          ) : (
+            <span className="lc-pill lc-pill-warn">Not applied</span>
+          )
+        }
+        title="Score on the Opportunity"
+      >
+        {applied ? (
+          <LifecycleFacts
+            rows={[
+              { label: "AI score", value: `${opportunity.ai_score} / 100` },
+              { label: "Confidence", value: opportunity.ai_confidence || "—" },
+              { label: "Applied", value: formatDate(opportunity.ai_scored_at) },
+            ]}
+          />
+        ) : (
+          <p className="lc-body">
+            The opportunity is unscored. Accepting the suggestion below carries the model&apos;s score onto it;
+            dismissing leaves it unscored, which is the honest state when nobody has agreed with the model.
+          </p>
+        )}
+      </LifecyclePanel>
+
+      <LifecyclePanel title="Review Decision">
+        <TriageDecision
+          canManage={canManage}
+          humanReviewRequired={triage.human_review_required}
+          opportunityId={opportunity.id}
+          triageStatus={triage.status}
+        />
+      </LifecyclePanel>
+
+      <LifecyclePanel title="Lead Summary">
+        <LifecycleFacts
+          rows={[
+            { label: "Company", value: lead.company || "—" },
+            { label: "Contact", value: lead.name },
+            { label: "Title", value: lead.role || "—" },
+            { label: "Industry", value: lead.company_type || "—" },
+            { label: "Lead age", value: `${Math.max(0, Math.floor((Date.now() - new Date(lead.created_at).getTime()) / 86_400_000))} days` },
+          ]}
+        />
+      </LifecyclePanel>
+    </>
+  );
+}

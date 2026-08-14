@@ -13,6 +13,7 @@ import { getLifecycleAccess } from "@/lib/lifecycle/access";
 import { resolveLifecycleRoleFlags } from "@/lib/lifecycle/policy";
 import {
   advanceOpportunity,
+  applyTriageDecision,
   createOpportunity,
   exitOpportunity,
   reopenOpportunity,
@@ -624,6 +625,149 @@ describe("updateOpportunity", () => {
     signIn("employee", supabase);
 
     expect(await updateOpportunity(OPP_ID, {})).toEqual({ ok: true });
+    expect(supabase.calls).toHaveLength(0);
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* applyTriageDecision — the Human Authority gate                             */
+/* -------------------------------------------------------------------------- */
+
+const LEAD_ID = "44444444-4444-4444-8444-444444444444";
+const TRIAGE_ID = "55555555-5555-4555-8555-555555555555";
+
+function triageRow(over: Record<string, unknown> = {}) {
+  return {
+    id: TRIAGE_ID,
+    priority_score: 82,
+    segment: "Enterprise manufacturing",
+    next_step: "Call the safety director to book a demo.",
+    rationale: "Senior role, named product.",
+    confidence: "high",
+    status: "suggested",
+    ...over,
+  };
+}
+
+describe("applyTriageDecision", () => {
+  // THE RULE: the nightly triage job writes to lead_triage_results and nowhere
+  // else. The score reaches the deal here, because a person pressed accept.
+  it("carries the score onto the opportunity only on accept", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ demo_request_id: LEAD_ID }) },
+      "lead_triage_results:select": { data: [triageRow()] },
+      "lead_triage_results:update": { data: [{ id: TRIAGE_ID }] },
+      "opportunities:update": { data: [{ id: OPP_ID }] },
+    });
+    signIn("employee", supabase);
+
+    expect(await applyTriageDecision(OPP_ID, "accepted")).toEqual({ ok: true });
+
+    const scored = findCall(supabase, "opportunities", "update");
+    expect(scored?.payload).toMatchObject({ ai_score: 82, ai_confidence: "high" });
+    expect((scored?.payload as Record<string, unknown>).ai_recommendation).toContain("Enterprise manufacturing");
+
+    const decision = findCall(supabase, "lead_triage_results", "update");
+    expect(decision?.payload).toMatchObject({ status: "accepted", acted_by: USER_ID });
+    expect(auditMock.mock.calls[0][0].event_category).toBe("ai");
+  });
+
+  // Dismissing leaves the opportunity unscored, which is the honest state when
+  // nobody has agreed with the model.
+  it("records a dismissal without touching the opportunity", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ demo_request_id: LEAD_ID }) },
+      "lead_triage_results:select": { data: [triageRow()] },
+      "lead_triage_results:update": { data: [{ id: TRIAGE_ID }] },
+    });
+    signIn("employee", supabase);
+
+    expect(await applyTriageDecision(OPP_ID, "dismissed")).toEqual({ ok: true });
+
+    expect(findCall(supabase, "opportunities", "update")).toBeUndefined();
+    expect(findCall(supabase, "lead_triage_results", "update")?.payload).toMatchObject({ status: "dismissed" });
+  });
+
+  it("refuses a decision that has already been made", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ demo_request_id: LEAD_ID }) },
+      "lead_triage_results:select": { data: [triageRow({ status: "accepted" })] },
+    });
+    signIn("employee", supabase);
+
+    const result = await applyTriageDecision(OPP_ID, "accepted");
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("already accepted");
+    expect(findCall(supabase, "opportunities", "update")).toBeUndefined();
+  });
+
+  // Two reviewers pressing accept at once: the second is told, not silently
+  // ignored, because the guarded update matches zero rows.
+  it("treats a raced decision as a conflict", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ demo_request_id: LEAD_ID }) },
+      "lead_triage_results:select": { data: [triageRow()] },
+      "lead_triage_results:update": { data: [] },
+    });
+    signIn("employee", supabase);
+
+    const result = await applyTriageDecision(OPP_ID, "accepted");
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Someone else acted");
+    expect(findCall(supabase, "opportunities", "update")).toBeUndefined();
+  });
+
+  it("says so when the lead has never been triaged", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ demo_request_id: LEAD_ID }) },
+      "lead_triage_results:select": { data: [] },
+    });
+    signIn("employee", supabase);
+
+    const result = await applyTriageDecision(OPP_ID, "accepted");
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("not been triaged");
+  });
+
+  it("says so when the opportunity has no inbound lead behind it", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ demo_request_id: null }) },
+    });
+    signIn("employee", supabase);
+
+    const result = await applyTriageDecision(OPP_ID, "accepted");
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("no inbound lead");
+  });
+
+  it("refuses on a deal that has left the lifecycle", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ demo_request_id: LEAD_ID, status: "closed_lost" }) },
+    });
+    signIn("employee", supabase);
+
+    expect((await applyTriageDecision(OPP_ID, "accepted")).ok).toBe(false);
+  });
+
+  it("refuses an unrecognised decision before any query", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("employee", supabase);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((await applyTriageDecision(OPP_ID, "maybe" as any)).ok).toBe(false);
+    expect(supabase.calls).toHaveLength(0);
+  });
+
+  it("refuses when signed out, and never queries", async () => {
+    const supabase = createSupabaseMock({});
+    signOut();
+
+    expect((await applyTriageDecision(OPP_ID, "accepted")).ok).toBe(false);
     expect(supabase.calls).toHaveLength(0);
     expect(auditMock).not.toHaveBeenCalled();
   });
