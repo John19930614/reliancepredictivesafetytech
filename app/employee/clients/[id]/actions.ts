@@ -415,3 +415,145 @@ export async function deleteCompanyContact(
   revalidateCompany(clientId);
   return { ok: true };
 }
+
+/* -------------------------------------------------------------------------- */
+/* Company profile — what the contract is priced on                           */
+/* -------------------------------------------------------------------------- */
+
+export interface CompanyProfileInput {
+  employee_count?: string | null;
+  site_count?: string | null;
+  annual_revenue?: string | null;
+  primary_state?: string | null;
+  states_operated?: string | null;
+  naics_code?: string | null;
+  hazard_class?: string | null;
+  emr?: string | null;
+  trir?: string | null;
+  recordables_12mo?: string | null;
+  lost_time_12mo?: string | null;
+  osha_citations_3yr?: string | null;
+  contractor_share_pct?: string | null;
+  union_workforce?: boolean | null;
+  notes?: string | null;
+}
+
+/**
+ * Saves the firmographics and loss record a safety contract is scoped on.
+ *
+ * Fields arrive as STRINGS from the form, and a blank means "not known" rather
+ * than zero — the estimator treats a stored 0 for headcount, sites or EMR as
+ * missing precisely because 0 is a value somebody typed, not a gap. Writing
+ * null keeps that distinction intact all the way to the database.
+ */
+export async function saveCompanyProfile(
+  clientId: string,
+  input: CompanyProfileInput,
+): Promise<CompanyActionResult> {
+  if (!UUID.test(clientId)) return { ok: false, error: "Missing company id." };
+
+  const { supabase, userId } = await requireEmployee();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+
+  const fieldErrors: Record<string, string> = {};
+
+  /** A blank stays null; anything else must be a real number in range. */
+  const num = (raw: string | null | undefined, key: string, label: string, min: number, max: number, whole = true) => {
+    const trimmed = typeof raw === "string" ? raw.trim() : "";
+    if (trimmed.length === 0) return null;
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) {
+      fieldErrors[key] = `${label} has to be a number.`;
+      return null;
+    }
+    if (parsed < min || parsed > max) {
+      fieldErrors[key] = `${label} has to be between ${min} and ${max}.`;
+      return null;
+    }
+    return whole ? Math.round(parsed) : Math.round(parsed * 100) / 100;
+  };
+
+  // Every bound below mirrors a CHECK on company_profiles, so the form refuses
+  // what the database would refuse — with a message naming the field, rather
+  // than a raw 23514 the operator cannot act on.
+  const patch = {
+    employee_count: num(input.employee_count, "employee_count", "Employees", 0, 500_000),
+    site_count: num(input.site_count, "site_count", "Locations", 0, 5_000),
+    annual_revenue: num(input.annual_revenue, "annual_revenue", "Annual revenue", 0, 1e14, false),
+    emr: num(input.emr, "emr", "EMR", 0, 10, false),
+    trir: num(input.trir, "trir", "TRIR", 0, 200, false),
+    recordables_12mo: num(input.recordables_12mo, "recordables_12mo", "Recordables", 0, 100_000),
+    lost_time_12mo: num(input.lost_time_12mo, "lost_time_12mo", "Lost-time incidents", 0, 100_000),
+    osha_citations_3yr: num(input.osha_citations_3yr, "osha_citations_3yr", "OSHA citations", 0, 100_000),
+    contractor_share_pct: num(input.contractor_share_pct, "contractor_share_pct", "Contract labour share", 0, 100),
+    primary_state: text(input.primary_state) || null,
+    states_operated: text(input.states_operated) || null,
+    naics_code: text(input.naics_code) || null,
+    hazard_class: text(input.hazard_class) || null,
+    union_workforce: typeof input.union_workforce === "boolean" ? input.union_workforce : null,
+    notes: text(input.notes) || null,
+    updated_by: userId,
+  };
+
+  if (patch.naics_code && !/^[0-9]{2,6}$/.test(patch.naics_code)) {
+    fieldErrors.naics_code = "A NAICS code is 2 to 6 digits.";
+  }
+  if (patch.hazard_class && !["low", "moderate", "high", "severe"].includes(patch.hazard_class)) {
+    fieldErrors.hazard_class = "Choose a hazard class from the list.";
+  }
+  // Lost-time incidents are a subset of recordables. The database enforces this
+  // too; catching it here names the field instead of failing the whole save.
+  if (
+    patch.lost_time_12mo !== null &&
+    patch.recordables_12mo !== null &&
+    patch.lost_time_12mo > patch.recordables_12mo
+  ) {
+    fieldErrors.lost_time_12mo = "Lost-time incidents cannot exceed total recordables.";
+  }
+
+  const first = Object.values(fieldErrors)[0];
+  if (first) return { ok: false, error: first, fieldErrors };
+
+  // Upsert: provisioning creates an empty row for new companies, but every
+  // company that predates it has none, and the editor must work for both.
+  // company_profiles is newer than the generated types; same escape hatch the
+  // rest of the repo uses until lib/supabase/types.ts is regenerated.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = supabase as any;
+  const { data, error } = await db
+    .from("company_profiles")
+    .upsert({ client_id: clientId, ...patch }, { onConflict: "client_id" })
+    .select("client_id");
+
+  if (error) {
+    return { ok: false, error: friendlyProfileError(error) };
+  }
+  if (!Array.isArray(data) || data.length === 0) {
+    return { ok: false, error: "That company was not found, or you do not have permission to edit it." };
+  }
+
+  await recordAuditEvent({
+    ...buildDataAuditEvent("update", "company_profile", clientId, userId, "Updated the company profile", null, {
+      employee_count: patch.employee_count,
+      site_count: patch.site_count,
+      hazard_class: patch.hazard_class,
+      emr: patch.emr,
+    }),
+  });
+
+  revalidatePath(`/employee/clients/${clientId}`);
+  revalidatePath("/employee/lifecycle");
+  return { ok: true };
+}
+
+/** The one Postgres code worth translating here. */
+function friendlyProfileError(error: unknown): string {
+  const code = (error as { code?: string } | null)?.code;
+  if (code === "23514") {
+    return "One of those numbers is outside the range the database allows. Check the incident counts and rates.";
+  }
+  if (code === "42P01" || code === "PGRST205") {
+    return "Company profiles are not set up in Supabase yet. Apply the latest database migrations and try again.";
+  }
+  return "Could not save the company profile.";
+}

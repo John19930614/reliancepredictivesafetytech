@@ -16,7 +16,6 @@ import {
   History,
   LayoutGrid,
   Receipt,
-  ShieldCheck,
   StickyNote,
   Swords,
   Users,
@@ -136,8 +135,7 @@ export type RecordTabKey =
   | "competitors"
   | "ai"
   | "timeline"
-  | "invoicing"
-  | "audit";
+  | "invoicing";
 
 interface RecordTab {
   key: RecordTabKey;
@@ -168,8 +166,20 @@ export function LifecycleRecordTabs({
 
   const tabs: RecordTab[] = [
     { key: "overview", label: "Overview", icon: <LayoutGrid size={15} />, href: base },
-    { key: "activities", label: "Activities", icon: <Activity size={15} /> },
-    { key: "notes", label: "Notes", icon: <StickyNote size={15} /> },
+    // Activities and Notes already have a home on the company record; a second
+    // copy scoped to the deal would be a third place to look for the same note.
+    {
+      key: "activities",
+      label: "Activities",
+      icon: <Activity size={15} />,
+      href: clientId ? `/employee/clients/${clientId}` : undefined,
+    },
+    {
+      key: "notes",
+      label: "Notes",
+      icon: <StickyNote size={15} />,
+      href: clientId ? `/employee/clients/${clientId}` : undefined,
+    },
     // These three already have real homes elsewhere in the platform, so they
     // point at them rather than pretending to be new screens.
     { key: "files", label: "Files", icon: <FolderOpen size={15} />, href: "/employee/files" },
@@ -179,11 +189,9 @@ export function LifecycleRecordTabs({
       icon: <Users size={15} />,
       href: clientId ? `/employee/clients/${clientId}` : undefined,
     },
-    { key: "competitors", label: "Competitors", icon: <Swords size={15} /> },
-    { key: "ai", label: "AI Insights", icon: <BadgeCheck size={15} /> },
-    // The step history renders on the overview today; a dedicated screen is a
-    // later change, so the tab stays visibly unbuilt rather than dead-linking.
-    { key: "timeline", label: "Timeline", icon: <History size={15} /> },
+    { key: "competitors", label: "Competitors", icon: <Swords size={15} />, href: `${base}/competitors` },
+    { key: "ai", label: "AI Insights", icon: <BadgeCheck size={15} />, href: `${base}/insights` },
+    { key: "timeline", label: "Timeline", icon: <History size={15} />, href: `${base}/timeline` },
     {
       key: "invoicing",
       label: "Invoicing",
@@ -191,7 +199,11 @@ export function LifecycleRecordTabs({
       href: clientId ? `/employee/clients/${clientId}/workflow` : undefined,
       badge: "New",
     },
-    { key: "audit", label: "Audit Trail", icon: <ShieldCheck size={15} />, href: "/employee/platform/audit" },
+    // No Audit Trail tab. /employee/platform/audit is platform-admin-only, and
+    // RLS returning zero rows there renders as "No audit events recorded yet" —
+    // a Commercial user would be told nothing had happened, which is false. A
+    // tab that lands on a falsehood is worse than no tab, and Timeline already
+    // answers the question a deal's audit tab was there to answer.
   ];
 
   return (
