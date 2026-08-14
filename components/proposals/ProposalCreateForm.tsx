@@ -11,7 +11,7 @@ import {
 import { assignClientCode } from "@/app/employee/clients/[id]/actions";
 import {
   clientCodeRule,
-  formatClientProposalNumber,
+  formatClientDocumentNumber,
   suggestClientCode,
 } from "@/lib/proposals/client-codes";
 import { ProposalTemplatePicker, transactionTypeOptionPrefix } from "./ProposalTemplatePicker";
@@ -170,7 +170,7 @@ export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
             />
             <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem", marginTop: 4 }}>
               First proposal for this company — you assign its code ({clientCodeRule}) and this document becomes{" "}
-              {formatClientProposalNumber(codeDraft || "SE", 1)}. The code is checked for uniqueness and stays fixed.
+              {formatClientDocumentNumber(codeDraft || "Wondfo", new Date().getUTCFullYear(), 1)}. The code is checked for uniqueness and stays fixed.
             </p>
           </div>
         ) : existingCode !== "" ? (
