@@ -10200,3 +10200,18 @@ a.platform-card:hover {
   margin: 0 0 0.7rem;
   line-height: 1.5;
 }
+
+/* The "this company is not fully set up" panel on a client record.
+   A gold left edge rather than the red of .lc-provision-warning: nothing has
+   gone wrong, the record is simply older than the provisioning that would have
+   filled it in, and the button beside this fixes it in one press. */
+.lc-setup-banner {
+  border-left: 3px solid var(--portal-gold);
+}
+
+.lc-setup-banner .lc-panel-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--portal-gold);
+}

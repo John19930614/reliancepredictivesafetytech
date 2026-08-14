@@ -19,6 +19,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
 import { clientCodeRule, isValidClientCode, normalizeClientCode } from "@/lib/proposals/client-codes";
+import { seedEmptyProfile, seedOnboardingChecklist } from "@/lib/clients/provision";
+import { missingFolderNames } from "@/lib/clients/setup-status";
 
 export interface CompanyActionResult {
   ok: boolean;
@@ -556,4 +558,150 @@ function friendlyProfileError(error: unknown): string {
     return "Company profiles are not set up in Supabase yet. Apply the latest database migrations and try again.";
   }
   return "Could not save the company profile.";
+}
+
+/* -------------------------------------------------------------------------- */
+/* Setting up a company that predates provisioning                            */
+/* -------------------------------------------------------------------------- */
+
+export interface ClientSetupCounts {
+  onboarding: number;
+  folders: number;
+  profile: number;
+}
+
+export interface ClientSetupResult extends CompanyActionResult {
+  /** How many rows each piece actually added. All zeroes means nothing was missing. */
+  created?: ClientSetupCounts;
+}
+
+/**
+ * Creates the pieces a company is missing: checklist, folders, profile.
+ *
+ * WHY THIS HAS TO EXIST. lib/clients/provision.ts gives every NEW company a
+ * checklist, a folder set and a profile row. Every company created before it —
+ * which is all of the ones on the board today — has none of them. A company
+ * with no checklist cannot clear a single stage gate, because lib/pipeline/
+ * gates.ts reads exactly those rows and finds nothing to satisfy. Until now no
+ * screen anywhere could create one, so those companies were stuck permanently
+ * with nothing on screen explaining why.
+ *
+ * IDEMPOTENT BY READING FIRST, not by catching 23505. Pressing the button twice
+ * must not duplicate a checklist, and a company that is missing two of its five
+ * folders must end up with five — not with a unique-violation that abandons the
+ * other three. So each piece checks what is already there and inserts only the
+ * difference.
+ *
+ * Runs as the caller. company_file_folders' insert policy requires
+ * created_by = auth.uid(), and every read below is RLS-filtered, so a signed-in
+ * non-employee sees nothing to backfill and writes nothing.
+ */
+export async function backfillClientSetup(clientId: string): Promise<ClientSetupResult> {
+  if (!UUID.test(clientId)) return { ok: false, error: "Missing company id." };
+
+  const { supabase, userId } = await requireEmployee();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+
+  // The company must be visible to this caller before anything is written for
+  // it — otherwise a bad id would seed rows against a client they cannot read.
+  const { data: company, error: companyError } = await supabase
+    .from("company_clients")
+    .select("id, name, owner")
+    .eq("id", clientId)
+    .maybeSingle();
+
+  if (companyError) return { ok: false, error: "Could not read that company." };
+  if (!company) {
+    return { ok: false, error: "That company was not found, or you do not have permission to edit it." };
+  }
+
+  const created: ClientSetupCounts = { onboarding: 0, folders: 0, profile: 0 };
+  const failed: string[] = [];
+
+  // --- Checklist ---------------------------------------------------------
+  const { count: itemCount, error: itemCountError } = await supabase
+    .from("client_onboarding_items")
+    .select("id", { count: "exact", head: true })
+    .eq("client_id", clientId);
+
+  if (itemCountError) {
+    failed.push("the onboarding checklist");
+  } else if ((itemCount ?? 0) === 0) {
+    const owner = typeof company.owner === "string" ? company.owner : "";
+    const step = await seedOnboardingChecklist(supabase, clientId, owner);
+    if (step.ok) created.onboarding = step.created;
+    else failed.push("the onboarding checklist");
+  }
+
+  // --- Folders -----------------------------------------------------------
+  // Only the names that are genuinely absent, matched case-insensitively
+  // because the sibling-name unique index is on lower(name).
+  // company_file_folders postdates the last types regen; same untyped handle
+  // the rest of the File Center uses.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const folderDb = supabase as any;
+  const { data: existingFolders, error: folderReadError } = await folderDb
+    .from("company_file_folders")
+    .select("name")
+    .eq("scope", "client")
+    .eq("client_id", clientId)
+    .is("parent_id", null);
+
+  if (folderReadError) {
+    failed.push("the File Center folders");
+  } else {
+    // Same case-insensitive matching the page's banner uses to decide there is
+    // anything to offer, so the button cannot disagree with the sentence above
+    // it — and the same rule the sibling-name unique index enforces.
+    const missing = missingFolderNames((existingFolders ?? []) as Array<{ name?: unknown }>);
+
+    if (missing.length > 0) {
+      const { data: madeFolders, error: folderError } = await folderDb
+        .from("company_file_folders")
+        .insert(
+          missing.map((name) => ({
+            scope: "client",
+            client_id: clientId,
+            parent_id: null,
+            name,
+            created_by: userId,
+          })),
+        )
+        .select("id");
+
+      if (folderError) failed.push("the File Center folders");
+      else created.folders = Array.isArray(madeFolders) ? madeFolders.length : missing.length;
+    }
+  }
+
+  // --- Profile -----------------------------------------------------------
+  const step = await seedEmptyProfile(supabase, clientId, userId);
+  if (step.ok) created.profile = step.created;
+  else failed.push("the company profile");
+
+  if (failed.length > 0) {
+    const list =
+      failed.length === 1 ? failed[0] : `${failed.slice(0, -1).join(", ")} and ${failed[failed.length - 1]}`;
+    return { ok: false, error: `Could not set up ${list}. Try again in a moment.`, created };
+  }
+
+  const total = created.onboarding + created.folders + created.profile;
+  if (total > 0) {
+    await recordAuditEvent({
+      ...buildDataAuditEvent(
+        "create",
+        "client_setup",
+        clientId,
+        userId,
+        `Set up ${company.name ?? "a company"}: ${created.onboarding} checklist items, ${created.folders} folders, ${created.profile} profile`,
+        null,
+        created as unknown as Record<string, unknown>,
+      ),
+    });
+  }
+
+  revalidatePath(`/employee/clients/${clientId}`);
+  revalidatePath("/employee/sales");
+  revalidatePath("/employee/files");
+  return { ok: true, created };
 }
