@@ -20,6 +20,7 @@ export function NewOpportunityForm({ canManage, clients }: NewOpportunityFormPro
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<{ text: string; opportunityId: string } | null>(null);
   const [name, setName] = useState("");
   const [clientId, setClientId] = useState("");
   const [value, setValue] = useState("");
@@ -38,6 +39,20 @@ export function NewOpportunityForm({ canManage, clients }: NewOpportunityFormPro
           source: source || null,
         });
         if (result.ok && result.opportunityId) {
+          // Provisioning is best-effort: the company is created first and
+          // alone, then its checklist, folders and profile. When one of those
+          // fails the deal still opens — but navigating straight past the
+          // warning is exactly the "silently broken" that provision.ts was
+          // written to end, and it is the likeliest reason a company ends up
+          // with no checklist (and so cannot clear a single stage gate) with
+          // nothing anywhere saying why.
+          //
+          // So a warning HOLDS the form. The deal exists and is linked; the
+          // operator decides when to move on, having read what did not get made.
+          if (result.warning) {
+            setWarning({ text: result.warning, opportunityId: result.opportunityId });
+            return;
+          }
           router.push(`/employee/lifecycle/${result.opportunityId}`);
         } else {
           setError(result.error ?? "Could not open the opportunity.");
@@ -51,6 +66,15 @@ export function NewOpportunityForm({ canManage, clients }: NewOpportunityFormPro
   return (
     <form className="lc-new" onSubmit={submit}>
       <p className="lc-form-title">Open an opportunity</p>
+
+      {warning ? (
+        <div className="lc-provision-warning" role="alert">
+          <p>{warning.text}</p>
+          <a className="lc-btn lc-btn-primary" href={`/employee/lifecycle/${warning.opportunityId}`}>
+            Open the opportunity anyway
+          </a>
+        </div>
+      ) : null}
 
       {error ? (
         <p className="lc-error" role="alert">

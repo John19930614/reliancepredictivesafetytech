@@ -86,6 +86,13 @@ export function QualificationForm({
 
   const met = bantTests.filter((test) => draft[bantField[test.key]]).length;
 
+  // The server re-reads the SAVED row before qualifying, so a tick that is only
+  // in the draft does not count. Comparing the two is what stops the trap:
+  // four boxes visibly ticked, "Mark qualified" enabled, and the server
+  // answering "Budget, Authority, Need, Timeline not yet established".
+  const unsaved = bantTests.some((test) => draft[bantField[test.key]] !== initial[bantField[test.key]]);
+  const savedMet = bantTests.filter((test) => initial[bantField[test.key]]).length;
+
   return (
     <div>
       {error ? (
@@ -265,13 +272,25 @@ export function QualificationForm({
                 </span>
               </label>
 
+              {unsaved && met === bantTests.length ? (
+                <p className="lc-meta">
+                  Save these answers first — qualifying reads what is stored, not what is on screen.
+                </p>
+              ) : null}
+
               <button
                 className="lc-btn lc-btn-primary"
-                disabled={pending || !canManage || met < bantTests.length}
+                disabled={pending || !canManage || savedMet < bantTests.length || unsaved}
                 onClick={() =>
                   run(() => markOpportunityQualified(opportunityId, applyProbability), "Opportunity qualified.")
                 }
-                title={met < bantTests.length ? "All four have to be established first." : undefined}
+                title={
+                  unsaved
+                    ? "Save the discovery answers before qualifying."
+                    : savedMet < bantTests.length
+                      ? "All four have to be established and saved first."
+                      : undefined
+                }
                 type="button"
               >
                 <ShieldCheck size={15} /> Mark qualified

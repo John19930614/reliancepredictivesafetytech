@@ -10183,3 +10183,20 @@ a.platform-card:hover {
 .lc-estimate-drivers span {
   color: var(--portal-muted);
 }
+
+/* A provisioning failure holds the New Opportunity form rather than scrolling
+   past — the deal exists, but something it needs does not, and the operator
+   has to see which before moving on. */
+.lc-provision-warning {
+  margin: 0 0 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(180, 35, 24, 0.4);
+  border-radius: 10px;
+  background: rgba(180, 35, 24, 0.08);
+  color: var(--white);
+}
+
+.lc-provision-warning p {
+  margin: 0 0 0.7rem;
+  line-height: 1.5;
+}

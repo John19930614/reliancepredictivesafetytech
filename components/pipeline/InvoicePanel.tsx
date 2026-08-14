@@ -140,6 +140,20 @@ export function InvoicePanel({
                 {invoice.due_date ? ` · due ${invoice.due_date}` : ""}
               </p>
 
+              {/* Rendered whether or not this role may settle. Hiding the
+                  control entirely was the dead end: an employee raises the
+                  draft, the Invoicing gate keeps saying "raise an invoice and
+                  issue it", and the button that would issue it is not on the
+                  page at all — not disabled, not explained, absent. The work
+                  looks undone with no way to find out why. */}
+              {!canSettleInvoice && (invoice.status === "draft" || invoice.status === "issued") ? (
+                <p className="wf-step-note">
+                  {invoice.status === "draft"
+                    ? "This draft is ready to issue. Issuing an invoice asks a client for money, so it takes an admin — ask one to issue it."
+                    : "Marking an invoice paid takes an admin."}
+                </p>
+              ) : null}
+
               {canSettleInvoice && (invoice.status === "draft" || invoice.status === "issued") ? (
                 <div className="wf-step-actions">
                   {invoice.status === "draft" ? (
