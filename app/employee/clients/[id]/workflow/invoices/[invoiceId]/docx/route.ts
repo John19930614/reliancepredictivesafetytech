@@ -118,7 +118,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
   // The invoice's own snapshot of the proposal number wins over the live row: a
   // sent invoice must keep saying what it said when it was sent.
-  let referenceProposalNumber = text(row.reference_proposal_number);
+  // Read live from the proposal record — see the note in the sibling pdf route:
+  // snapshotting the number belongs with the Phase 2 numbering change.
+  let referenceProposalNumber = "";
   let proposalTitle = "";
   if (row.proposal_id) {
     const { data: proposal } = await supabase
@@ -166,7 +168,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       contactName: text(client.contact_name),
       email: text(client.email),
     },
-    consultant: text(row.consultant),
+    consultant: text(row.consultant_name),
     jobName: text(row.job_name) || proposalTitle,
     paymentTerms: text(row.payment_terms),
     dueDate: date(row.due_date),
@@ -175,7 +177,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     // Until the sales_tax column lands, the SALES TAX row carries the residual
     // between the stored subtotal and total, so the three total rows add up on
     // the face of the document.
-    salesTax: row.sales_tax === undefined || row.sales_tax === null ? total - subtotal : num(row.sales_tax),
+    salesTax: row.tax_amount === undefined || row.tax_amount === null ? total - subtotal : num(row.tax_amount),
     total,
     preparedBy: preparedByName(row.prepared_by),
     // THE CLIENT'S OWN agreement / PO number — never our proposal number and

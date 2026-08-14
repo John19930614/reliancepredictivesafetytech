@@ -366,6 +366,26 @@ export function InvoicePanel({
                     <Pencil aria-hidden="true" size={13} />{" "}
                     {isOpen ? "Hide lines" : editable ? "Lines & details" : "View lines"}
                   </button>
+                  {/*
+                    Plain links, not fetch + blob: the route handler already
+                    verifies the session and sets Content-Disposition, and a link
+                    lets the browser name the file from that header — which is
+                    where the "Invoice <number> <date>" filing convention lives.
+                  */}
+                  <a
+                    className="button button-neutral button-sm"
+                    download
+                    href={`/employee/clients/${clientId}/workflow/invoices/${invoice.id}/pdf`}
+                  >
+                    <FileText aria-hidden="true" size={13} /> PDF
+                  </a>
+                  <a
+                    className="button button-neutral button-sm"
+                    download
+                    href={`/employee/clients/${clientId}/workflow/invoices/${invoice.id}/docx`}
+                  >
+                    <FileText aria-hidden="true" size={13} /> Word
+                  </a>
                 </div>
 
                 {isOpen ? (

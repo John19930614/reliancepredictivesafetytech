@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { packageData, phaseOptions, serviceOptions, stripPhaseOrdinal } from "./catalog";
+import { packageData, phaseOptions, serviceOptions, serviceQtyBasis, stripPhaseOrdinal } from "./catalog";
+import { deliveryModeLabels, qtyBases, qtyFieldLabel, unitToQtyBasis } from "./qty-basis";
 
 // The generator asset carries its OWN copy of the price book, and that copy is
 // not decoration: when a seller adds a line, the asset writes the catalog's name
@@ -97,6 +98,77 @@ describe("asset price book matches lib/proposals/catalog.ts", () => {
         expect(Number(field(body, "price")), `packageData.${key}.price`).toBe(option.price);
       }
     }
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Billing basis parity                                                        */
+/*                                                                             */
+/* The basis decides the MATH, not just a label, so a drift between the asset  */
+/* and lib/proposals/qty-basis.ts is a proposal that prices one way in the     */
+/* generator and another on the server — on the same saved state.              */
+/* -------------------------------------------------------------------------- */
+
+/** Extracts a single-line `const NAME=...;` declaration from the asset script. */
+function assetConst(name: string): string {
+  const start = asset.indexOf(`const ${name}=`);
+  expect(start, `${name} not found in the asset`).toBeGreaterThan(-1);
+  const end = asset.indexOf(";\n", start);
+  expect(end, `${name} is not terminated`).toBeGreaterThan(start);
+  return asset.slice(start + `const ${name}=`.length, end);
+}
+
+/** `key:'value'` / `'key with spaces':'value'` pairs out of a flat literal. */
+function assetStringMap(name: string, quote: "'" | '"' = "'"): Record<string, string> {
+  const body = assetConst(name);
+  const pattern = new RegExp(`(?:'([^']+)'|(\\w+))\\s*:\\s*${quote}([^${quote}]*)${quote}`, "g");
+  const out: Record<string, string> = {};
+  for (const match of body.matchAll(pattern)) out[match[1] ?? match[2]] = match[3];
+  return out;
+}
+
+describe("asset billing basis matches lib/proposals/qty-basis.ts", () => {
+  it("carries the same four bases, in the same order", () => {
+    const assetBases = [...assetConst("QTY_BASES").matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    expect(assetBases).toEqual([...qtyBases]);
+  });
+
+  it("maps every unit onto the same basis on both sides", () => {
+    const assetMap = assetStringMap("UNIT_BASIS");
+    expect(Object.keys(assetMap).length).toBeGreaterThan(0);
+    for (const [unit, basis] of Object.entries(assetMap)) {
+      expect(unitToQtyBasis(unit), `UNIT_BASIS.${unit}`).toBe(basis);
+    }
+    // And nothing the platform maps is missing from the asset: every unit the
+    // price book actually ships has to resolve identically in both places.
+    for (const [key, option] of Object.entries(serviceOptions)) {
+      const fromAsset = assetMap[option.unit.toLowerCase()] ?? null;
+      expect(fromAsset, `serviceOptions.${key} (unit ${option.unit})`).toBe(serviceQtyBasis(key));
+    }
+  });
+
+  it("never lets a shipped catalog unit imply a flat fee", () => {
+    // THE BACKWARD-COMPATIBILITY INVARIANT. A row saved before qty_basis
+    // existed derives its basis from its unit; the moment a unit implies
+    // `flat`, every such row silently stops multiplying and the totals on
+    // proposals already signed change underneath the client.
+    const assetMap = assetStringMap("UNIT_BASIS");
+    for (const [key, option] of Object.entries(serviceOptions)) {
+      expect(assetMap[option.unit.toLowerCase()] ?? null, `serviceOptions.${key}`).not.toBe("flat");
+      expect(serviceQtyBasis(key), `serviceOptions.${key}`).not.toBe("flat");
+    }
+  });
+
+  it("captions the Qty field with the same words", () => {
+    const assetLabels = assetStringMap("BASIS_FIELD_LABEL");
+    for (const basis of qtyBases) {
+      expect(assetLabels[basis], `BASIS_FIELD_LABEL.${basis}`).toBe(qtyFieldLabel(basis));
+    }
+  });
+
+  it("offers the same two delivery modes, worded identically", () => {
+    // This wording is printed on the client's document by both surfaces.
+    expect(assetStringMap("DELIVERY_MODES", '"')).toEqual({ ...deliveryModeLabels });
   });
 });
 

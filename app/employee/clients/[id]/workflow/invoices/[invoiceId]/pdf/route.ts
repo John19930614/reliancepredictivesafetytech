@@ -131,10 +131,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     loadCompanyProfile(supabase),
   ]);
 
-  // The proposal this invoice bills against, read only when the invoice does not
-  // already carry its own snapshot of the number. A sent invoice must keep
-  // saying what it said when it was sent, so the stored value wins.
-  let referenceProposalNumber = text(row.reference_proposal_number);
+  // The proposal this invoice bills against, read live from the proposal record.
+  //
+  // A sent invoice ought to keep saying what it said when it was sent, which
+  // argues for snapshotting the number onto the invoice row. There is no column
+  // for that yet, and adding one belongs with the Phase 2 numbering change that
+  // reshapes proposal numbers anyway — snapshotting the current format now would
+  // freeze the format we are about to replace. Until then this reads live, which
+  // matches how the number behaves everywhere else in the portal today.
+  let referenceProposalNumber = "";
   let proposalTitle = "";
   if (row.proposal_id) {
     const { data: proposal } = await supabase
@@ -184,18 +189,24 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       contactName: text(client.contact_name),
       email: text(client.email),
     },
-    consultant: text(row.consultant),
+    consultant: text(row.consultant_name),
     jobName: text(row.job_name) || proposalTitle,
     paymentTerms: text(row.payment_terms),
     dueDate: date(row.due_date),
     lines,
     subtotal,
-    // Until the sales_tax column lands, the SALES TAX row shows the residual
-    // between the stored subtotal and total — which is what makes the three
-    // total rows add up on the face of the document. A proposal-level DISCOUNT
-    // currently surfaces here as a negative residual; that needs its own row and
-    // is flagged rather than hidden.
-    salesTax: row.sales_tax === undefined || row.sales_tax === null ? total - subtotal : num(row.sales_tax),
+    // tax_amount is the recorded tax. For rows written before that column
+    // existed it is null, and the SALES TAX row falls back to the residual
+    // between the stored subtotal and total so the three totals rows still add
+    // up on the face of the document.
+    //
+    // KNOWN GAP: a proposal-level DISCOUNT has no row on this layout, so on a
+    // legacy row it surfaces here as a negative residual — a discount printed
+    // as negative sales tax. It needs its own totals row or a discount line,
+    // which is a layout decision against Steve's Word original. Flagged, not
+    // hidden: rendering it wrongly on a document a client's AP department reads
+    // is worse than the gap being visible here.
+    salesTax: row.tax_amount === undefined || row.tax_amount === null ? total - subtotal : num(row.tax_amount),
     total,
     preparedBy: preparedByName(row.prepared_by),
     // THE CLIENT'S OWN agreement / PO number. Never our proposal number, never
