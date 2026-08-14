@@ -94,14 +94,20 @@ const engagementFloor = 6_000;
 const perAdditionalSite = 2_400;
 
 /**
- * Volume discount bands. Large populations cost less per head to serve because
- * the programme, the templates and the training library are written once.
+ * Volume discount bands, charged MARGINALLY — like tax brackets.
+ *
+ * The first 250 heads are charged in full, the next 750 at 90%, and so on. This
+ * has to be marginal rather than a whole-population factor: applying the band
+ * factor to everyone makes each threshold a cliff, so a company that hires ONE
+ * more person is quoted less than it was — up to $130,000 less at the 5,000
+ * mark. A client who grows should never get a smaller number, and a salesperson
+ * should never be able to lower a quote by rounding headcount up.
  */
-const volumeBands: ReadonlyArray<{ from: number; factor: number }> = [
-  { from: 0, factor: 1 },
-  { from: 250, factor: 0.9 },
-  { from: 1_000, factor: 0.8 },
-  { from: 5_000, factor: 0.7 },
+const volumeBands: ReadonlyArray<{ upTo: number; factor: number }> = [
+  { upTo: 250, factor: 1 },
+  { upTo: 1_000, factor: 0.9 },
+  { upTo: 5_000, factor: 0.8 },
+  { upTo: Number.POSITIVE_INFINITY, factor: 0.7 },
 ];
 
 /** Estimates are quoted as a band this wide either side of the midpoint. */
@@ -176,13 +182,38 @@ export function contractorMultiplier(sharePct: number | null | undefined): numbe
   return 1 + share * 0.25;
 }
 
-/** The per-head volume discount for a given population. */
-export function volumeFactor(employeeCount: number): number {
-  let factor = 1;
+/**
+ * The headcount charge, with the volume discount applied MARGINALLY.
+ *
+ * Each band prices only the heads that fall inside it, so the curve is
+ * continuous and strictly increasing: employee 250 costs 90% of a full head
+ * rather than re-pricing the 249 before them, and the total can never fall as
+ * the population grows.
+ */
+export function headcountCharge(employeeCount: number, perHead: number): number {
+  let total = 0;
+  let counted = 0;
+
   for (const band of volumeBands) {
-    if (employeeCount >= band.from) factor = band.factor;
+    if (employeeCount <= counted) break;
+    const inBand = Math.min(employeeCount, band.upTo) - counted;
+    total += inBand * perHead * band.factor;
+    counted += inBand;
   }
-  return factor;
+
+  return Math.round(total);
+}
+
+/**
+ * The BLENDED per-head rate actually charged, for the driver text.
+ *
+ * Reported rather than the band factor, because "250 employees at an average of
+ * $164/head" is the number a reader can multiply out; a marginal band table is
+ * not.
+ */
+export function blendedRate(employeeCount: number, perHead: number): number {
+  if (employeeCount <= 0) return perHead;
+  return headcountCharge(employeeCount, perHead) / employeeCount;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -230,11 +261,15 @@ const requiredField = "employeeCount";
  * number that would produce one.
  */
 export function estimateContractValue(
-  input: ContractEstimateInput,
+  input: ContractEstimateInput | null | undefined,
   currency = "USD",
 ): ContractEstimate {
-  const employees = clampInt(input.employeeCount, 1, maxEmployees);
-  const missing = missingFields(input);
+  // `estimateContractValue(client.profile)` is the obvious call site, and a
+  // company with no profile row yet has none. Taking out the render is a worse
+  // answer than "no estimate".
+  const given = input ?? {};
+  const employees = clampInt(given.employeeCount, 1, maxEmployees);
+  const missing = missingFields(given);
 
   if (employees === null) {
     return {
@@ -250,36 +285,45 @@ export function estimateContractValue(
     };
   }
 
-  const hazard = isHazardClass(input.hazardClass) ? input.hazardClass : defaultHazard;
+  const hazard = isHazardClass(given.hazardClass) ? given.hazardClass : defaultHazard;
   const perHead = perEmployeeByHazard[hazard];
-  const volume = volumeFactor(employees);
-  const headcountValue = Math.round(employees * perHead * volume);
+  const headcountValue = headcountCharge(employees, perHead);
+  const rate = blendedRate(employees, perHead);
 
-  const sites = siteSurcharge(input.siteCount);
-  const loss = lossRecordMultiplier(input.emr, input.trir);
-  const contractor = contractorMultiplier(input.contractorSharePct);
+  const sites = siteSurcharge(given.siteCount);
+  const loss = lossRecordMultiplier(given.emr, given.trir);
+  const contractor = contractorMultiplier(given.contractorSharePct);
 
   const beforeFloor = Math.round((headcountValue + sites) * loss * contractor);
+  const ceiling = revenueCeiling(given.annualRevenue);
+
   let mid = Math.max(engagementFloor, beforeFloor);
 
   // Revenue is a ceiling, never a driver — a company cannot spend what it does
   // not earn, however many people it employs.
-  let cappedByRevenue = false;
-  const ceiling = revenueCeiling(input.annualRevenue);
-  if (ceiling !== null && mid > ceiling) {
-    // Never below the floor: if even the ceiling is under it, the engagement is
-    // too small to run, and saying so is more useful than quoting an
-    // uneconomic number.
-    mid = Math.max(engagementFloor, ceiling);
-    cappedByRevenue = true;
-  }
+  //
+  // The flag says the cap CHANGED the answer, not merely that it was computed.
+  // When the ceiling lands under the engagement floor the floor wins, so the
+  // quote was not capped by revenue at all, and claiming it was would have the
+  // screen state a cap of $3,000 directly above a quote of $6,000.
+  const cappedByRevenue = ceiling !== null && ceiling < mid && ceiling > engagementFloor;
+  if (cappedByRevenue) mid = ceiling;
+
+  // The floor and the ceiling bound the whole QUOTE, not just its midpoint.
+  // A `low` under the stated minimum, or a `high` 20% over the stated ceiling,
+  // contradicts the driver text sitting beside it — and a client anchors on the
+  // end of the band that suits them.
+  const rawLow = roundTo(mid * (1 - bandWidth), 500);
+  const rawHigh = roundTo(mid * (1 + bandWidth), 500);
+  const low = Math.max(engagementFloor, rawLow);
+  const high = ceiling !== null ? Math.max(mid, Math.min(ceiling, rawHigh)) : rawHigh;
 
   const drivers: EstimateDriver[] = [
     {
       label: "Headcount",
-      detail: `${employees.toLocaleString("en-US")} employees at ${formatUsd(perHead)}/head (${hazard} hazard)${
-        volume < 1 ? `, less a ${Math.round((1 - volume) * 100)}% volume discount` : ""
-      }`,
+      detail: `${employees.toLocaleString("en-US")} employees at an average of ${formatUsd(rate)}/head (${hazard} hazard${
+        rate < perHead ? `, ${formatUsd(perHead)} before the marginal volume discount` : ""
+      })`,
       amount: headcountValue,
     },
   ];
@@ -287,7 +331,7 @@ export function estimateContractValue(
   if (sites > 0) {
     drivers.push({
       label: "Sites",
-      detail: `${clampInt(input.siteCount, 1, maxSites)} locations — coordination beyond the first, charged sub-linearly`,
+      detail: `${clampInt(given.siteCount, 1, maxSites)} locations — coordination beyond the first, charged sub-linearly`,
       amount: sites,
     });
   }
@@ -296,22 +340,22 @@ export function estimateContractValue(
       label: "Loss record",
       detail:
         loss > 1
-          ? `EMR ${fmt(input.emr)} / TRIR ${fmt(input.trir)} are above average — the need is demonstrated and the insurance saving is bankable`
-          : `EMR ${fmt(input.emr)} / TRIR ${fmt(input.trir)} are better than average — a smaller, harder sale`,
+          ? `EMR ${fmt(given.emr)} / TRIR ${fmt(given.trir)} are above average — the need is demonstrated and the insurance saving is bankable`
+          : `EMR ${fmt(given.emr)} / TRIR ${fmt(given.trir)} are better than average — a smaller, harder sale`,
       multiplier: round2(loss),
     });
   }
   if (contractor !== 1) {
     drivers.push({
       label: "Contract labour",
-      detail: `${Math.round(clamp(input.contractorSharePct ?? 0, 0, 100))}% of the workforce turns over — orientation and verification repeat`,
+      detail: `${Math.round(clamp(given.contractorSharePct ?? 0, 0, 100))}% of the workforce turns over — orientation and verification repeat`,
       multiplier: round2(contractor),
     });
   }
   if (cappedByRevenue) {
     drivers.push({
       label: "Revenue ceiling",
-      detail: `Capped at ${Math.round(revenueCeilingShare * 100)}% of ${formatUsd(input.annualRevenue ?? 0)} annual revenue`,
+      detail: `Capped at ${Math.round(revenueCeilingShare * 100)}% of ${formatUsd(given.annualRevenue ?? 0)} annual revenue`,
     });
   }
   if (mid === engagementFloor && beforeFloor < engagementFloor) {
@@ -323,11 +367,11 @@ export function estimateContractValue(
 
   return {
     ok: true,
-    low: roundTo(mid * (1 - bandWidth), 500),
+    low,
     mid: roundTo(mid, 500),
-    high: roundTo(mid * (1 + bandWidth), 500),
+    high,
     currency,
-    confidence: confidenceFor(input),
+    confidence: confidenceFor(given),
     drivers,
     missing,
     cappedByRevenue,
@@ -354,7 +398,17 @@ export function missingFields(input: ContractEstimateInput): string[] {
     .filter(({ key }) => {
       const value = input[key];
       if (key === "hazardClass") return !isHazardClass(value as string | null | undefined);
-      return !isFiniteNumber(value as number | null | undefined);
+
+      const numeric = value as number | null | undefined;
+      if (!isFiniteNumber(numeric)) return true;
+
+      // The database stores 0 for these quite happily, but the estimator cannot
+      // use them: a company with 0 employees is not a company, and an EMR or
+      // site count of 0 is a blank someone typed a zero into. Counting them as
+      // PRESENT was the bug — the estimate then refused with a gap list that
+      // omitted the very field causing the refusal, so nobody could fix it.
+      if (key === "employeeCount" || key === "siteCount" || key === "emr") return numeric <= 0;
+      return false;
     })
     .map(({ label }) => label);
 }
@@ -365,11 +419,15 @@ export function missingFields(input: ContractEstimateInput): string[] {
  * Headcount alone is a guess dressed as a number, so it never rates above low.
  */
 function confidenceFor(input: ContractEstimateInput): ContractEstimate["confidence"] {
-  if (!isFiniteNumber(input.employeeCount)) return "none";
+  if (missingFields(input).includes("Number of employees")) return "none";
 
-  const hasHazard = isHazardClass(input.hazardClass);
-  const hasSites = isFiniteNumber(input.siteCount);
-  const hasLoss = isFiniteNumber(input.emr) || isFiniteNumber(input.trir);
+  // Derived from the same rule as missingFields, so a 0 cannot buy confidence
+  // it did not earn.
+  const gaps = new Set(missingFields(input));
+  const hasHazard = !gaps.has("Hazard class of the work");
+  const hasSites = !gaps.has("Number of locations");
+  const hasLoss =
+    !gaps.has("EMR (experience modification rate)") || !gaps.has("TRIR (recordable incident rate)");
 
   if (hasHazard && hasSites && hasLoss) return "high";
   if (hasHazard && (hasSites || hasLoss)) return "medium";

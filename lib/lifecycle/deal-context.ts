@@ -120,21 +120,27 @@ export const emptyDealContext: DealContext = {
 };
 
 /**
- * Reads one list, normalising a missing relation into an empty result.
+ * Reads one list. Throws unless the caller explicitly tolerates the failure.
  *
- * `allowMissingColumn` widens that to 42703 ("column does not exist") and is set
- * on exactly one read: the opportunity_id probe, whose column legitimately does
- * not exist until this feature's migration lands. Everywhere else a missing
- * column means the query is wrong, and an empty "no approvals recorded" panel
- * would be a false statement about a maker-checker gate — so it throws and the
- * error boundary says so.
+ * `tolerateMissing` is set on exactly ONE read — the opportunity_id probe, whose
+ * column legitimately does not exist until this feature's migration lands.
+ *
+ * Everywhere else this throws, including on a missing relation. PGRST205 is
+ * "could not find the table in the schema cache", which after a deploy usually
+ * means a stale cache rather than an absent table — and swallowing it would
+ * render "No approval decision recorded" over a proposal that was in fact
+ * approved. A false statement about a maker-checker gate, made in the one place
+ * somebody checks it, is worse than an error boundary.
  */
-async function readList<T>(query: unknown, allowMissingColumn = false): Promise<{ rows: T[]; missing: boolean }> {
+async function readList<T>(query: unknown, tolerateMissing = false): Promise<{ rows: T[]; missing: boolean }> {
   const result = (await query) as { data?: unknown; error?: unknown };
   const error = (result?.error ?? null) as { code?: string; message?: string } | null;
   if (error) {
-    const missing = isMissingSchemaRelationError(error) || (allowMissingColumn && error.code === "42703");
-    if (missing) return { rows: [], missing: true };
+    // 42703 is "column does not exist" — the pre-migration case for
+    // opportunity_id specifically.
+    if (tolerateMissing && (isMissingSchemaRelationError(error) || error.code === "42703")) {
+      return { rows: [], missing: true };
+    }
     throw new Error(error.message ?? "Could not read the deal context.");
   }
   return { rows: Array.isArray(result?.data) ? (result.data as T[]) : [], missing: false };

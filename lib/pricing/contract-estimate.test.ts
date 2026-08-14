@@ -6,7 +6,8 @@ import {
   lossRecordMultiplier,
   missingFields,
   siteSurcharge,
-  volumeFactor,
+  blendedRate,
+  headcountCharge,
   type ContractEstimateInput,
 } from "./contract-estimate";
 
@@ -53,6 +54,30 @@ describe("headcount is required", () => {
     for (const employeeCount of [0, -5, Number.NaN, null, undefined]) {
       expect(estimateContractValue({ employeeCount }).ok).toBe(false);
     }
+  });
+
+  // company_profiles stores 0 quite happily. Counting it as PRESENT meant the
+  // estimate refused while the gap list omitted the field causing the refusal,
+  // so nobody could work out what to fix.
+  it("names headcount as missing when it is zero, not just when it is null", () => {
+    for (const employeeCount of [0, -5]) {
+      expect(estimateContractValue({ employeeCount }).missing).toContain("Number of employees");
+    }
+  });
+
+  it("does not let a zero EMR or zero site count buy confidence", () => {
+    const result = estimateContractValue(profile({ emr: 0, trir: null, siteCount: 0 }));
+
+    expect(result.missing).toContain("EMR (experience modification rate)");
+    expect(result.missing).toContain("Number of locations");
+    expect(result.confidence).not.toBe("high");
+  });
+
+  // estimateContractValue(client.profile) is the obvious call site, and a
+  // company with no profile row has none.
+  it("returns no estimate rather than throwing on a null profile", () => {
+    expect(estimateContractValue(null).ok).toBe(false);
+    expect(estimateContractValue(undefined).ok).toBe(false);
   });
 });
 
@@ -166,18 +191,51 @@ describe("contractorMultiplier", () => {
   });
 });
 
-describe("volumeFactor", () => {
+describe("the volume discount", () => {
   // The programme, templates and training library are written once, so serving
-  // 5,000 people costs less per head than serving 50.
-  it("discounts larger populations, never smaller ones", () => {
-    expect(volumeFactor(50)).toBe(1);
-    expect(volumeFactor(400)).toBeLessThan(1);
-    expect(volumeFactor(6_000)).toBeLessThan(volumeFactor(400));
+  // 5,000 people costs less PER HEAD than serving 50.
+  it("lowers the blended rate as the population grows", () => {
+    expect(blendedRate(50, 100)).toBe(100);
+    expect(blendedRate(600, 100)).toBeLessThan(100);
+    expect(blendedRate(6_000, 100)).toBeLessThan(blendedRate(600, 100));
   });
 
-  it("applies each band from its threshold", () => {
-    expect(volumeFactor(249)).toBe(1);
-    expect(volumeFactor(250)).toBeLessThan(1);
+  // THE BUG THIS GUARDS. A whole-population factor makes every band edge a
+  // cliff: at 5,000 employees the old version quoted $130,000 LESS than at
+  // 4,999. A client who hires someone must never be quoted less, and a
+  // salesperson must never be able to lower a quote by rounding headcount up.
+  it("never charges less in total for one more employee", () => {
+    for (let n = 1; n < 6_000; n += 1) {
+      const here = headcountCharge(n, 165);
+      const next = headcountCharge(n + 1, 165);
+      if (next < here) {
+        throw new Error(`headcountCharge fell from ${here} at ${n} to ${next} at ${n + 1}`);
+      }
+    }
+  });
+
+  it("is continuous across every band edge", () => {
+    for (const edge of [250, 1_000, 5_000]) {
+      expect(headcountCharge(edge, 165)).toBeGreaterThan(headcountCharge(edge - 1, 165));
+    }
+  });
+
+  // Marginal, like tax brackets: the first 250 heads pay full freight whatever
+  // the total, so the estimate for a small firm is unchanged by the bands.
+  it("charges the first band in full", () => {
+    expect(headcountCharge(100, 100)).toBe(10_000);
+    expect(headcountCharge(250, 100)).toBe(25_000);
+    // The 251st head is the first discounted one.
+    expect(headcountCharge(251, 100)).toBe(25_090);
+  });
+
+  it("keeps the whole estimate monotonic in headcount, not just the charge", () => {
+    let previous = 0;
+    for (const employeeCount of [1, 100, 249, 250, 251, 999, 1_000, 1_001, 4_999, 5_000, 5_001, 20_000]) {
+      const { mid } = estimateContractValue(profile({ employeeCount, annualRevenue: null }));
+      expect(mid).toBeGreaterThanOrEqual(previous);
+      previous = mid;
+    }
   });
 });
 
@@ -209,6 +267,21 @@ describe("revenue ceiling", () => {
     const result = estimateContractValue(profile({ employeeCount: 3_000, annualRevenue: 1 }));
 
     expect(result.mid).toBeGreaterThanOrEqual(6_000);
+  });
+
+  // The flag says the cap CHANGED the answer, not merely that one was computed.
+  // Claiming otherwise had the screen state a cap of $3,000 directly above a
+  // quote of $6,000.
+  it("does not claim a cap when the floor is what actually bound the quote", () => {
+    // 100 heads at $90 is $9,000 — above the floor, so the floor is not what
+    // binds either. The 3% ceiling ($3,000) is BELOW the floor, so it cannot be
+    // applied without quoting an uneconomic engagement: it is discarded, and
+    // the output must not claim a cap it did not apply.
+    const result = estimateContractValue({ employeeCount: 100, hazardClass: "moderate", annualRevenue: 100_000 });
+
+    expect(result.mid).toBe(9_000);
+    expect(result.cappedByRevenue).toBe(false);
+    expect(result.drivers.some((driver) => driver.label === "Revenue ceiling")).toBe(false);
   });
 
   it("ignores a missing or nonsensical revenue", () => {
@@ -245,6 +318,21 @@ describe("the quoted band", () => {
 
     expect(low).toBeLessThan(mid);
     expect(mid).toBeLessThan(high);
+  });
+
+  // A client anchors on whichever end suits them, so neither end may contradict
+  // the driver text beside it: no quote below the stated minimum, and none
+  // above the stated revenue ceiling.
+  it("never quotes below the engagement floor, even at the bottom of the band", () => {
+    expect(estimateContractValue({ employeeCount: 3, hazardClass: "low" }).low).toBeGreaterThanOrEqual(6_000);
+  });
+
+  it("never quotes above the revenue ceiling, even at the top of the band", () => {
+    const input = profile({ employeeCount: 4_000, annualRevenue: 2_000_000 });
+    const result = estimateContractValue(input);
+
+    expect(result.cappedByRevenue).toBe(true);
+    expect(result.high).toBeLessThanOrEqual(Math.round(2_000_000 * 0.03));
   });
 
   it("rounds to something a person would say out loud", () => {

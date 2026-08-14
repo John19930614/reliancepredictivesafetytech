@@ -700,11 +700,23 @@ export async function applyTriageDecision(
     return { ok: false, error: "Someone else acted on this suggestion. Reload and try again." };
   }
 
+  // lead_triage_results.priority_score is numeric(5,2) and the model routinely
+  // returns a fraction; opportunities.ai_score is an integer. Postgres refuses
+  // 82.50 for an integer column outright (22P02), and because the decision above
+  // is already committed, the retry path is closed — the deal would sit
+  // permanently unscored under a triage row saying a human accepted it. Round at
+  // the boundary rather than widening the column: a score is a rank, and its
+  // second decimal place was never meaningful.
+  const score =
+    typeof triage.priority_score === "number" && Number.isFinite(triage.priority_score)
+      ? Math.round(triage.priority_score)
+      : null;
+
   if (decision === "accepted") {
-    const { error: scoreError } = await supabase
+    const { data: scored, error: scoreError } = await supabase
       .from("opportunities")
       .update({
-        ai_score: triage.priority_score,
+        ai_score: score,
         ai_confidence: triage.confidence,
         ai_recommendation: [triage.segment, triage.next_step, triage.rationale].filter(Boolean).join(" — "),
         ai_scored_at: new Date().toISOString(),
@@ -712,9 +724,36 @@ export async function applyTriageDecision(
       .eq("id", opportunityId)
       .select("id");
 
-    if (scoreError) {
-      // The decision stands; only the copy onto the deal failed.
-      return { ok: false, error: friendlyError(scoreError, "The decision was recorded, but the score could not be applied.") };
+    // The row count was asked for; it has to be read. RLS filters an exited deal
+    // out of the employee UPDATE policy, and PostgREST reports that as 200 with
+    // an empty array — so without this check the action returns ok, audits
+    // "applied a score of 82", and leaves ai_score null with the suggestion
+    // already marked accepted and therefore unretryable.
+    const scoreMissed = !scoreError && (!Array.isArray(scored) || scored.length === 0);
+
+    if (scoreError || scoreMissed) {
+      // The decision stands; only the copy onto the deal failed. It still gets
+      // an audit line — a human authorised this, the record now says so, and an
+      // early return that skipped the trail would leave the platform's own
+      // Human Authority gate unrecorded precisely when something went wrong.
+      await recordAuditEvent({
+        event_type: "lifecycle.triage_accepted",
+        event_category: "ai",
+        severity: "warn",
+        actor_id: userId,
+        actor_role: role,
+        resource_type: "opportunity",
+        resource_id: opportunityId,
+        summary: `Accepted the AI triage for "${opportunity.name}" but the score could not be applied to the deal`,
+        after_state: { decision, triage_result_id: triage.id, score, score_applied: false },
+      });
+      revalidateLifecycle(opportunityId);
+      return {
+        ok: false,
+        error: scoreMissed
+          ? "The decision was recorded, but this deal changed while you were looking at it, so the score was not applied. Reload and check it."
+          : friendlyError(scoreError, "The decision was recorded, but the score could not be applied."),
+      };
     }
   }
 
