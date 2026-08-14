@@ -894,6 +894,18 @@ async function syncInvoiceTotals(
     };
   }
 
+  // Nothing to write. An UPDATE here would still fire the updated_at trigger,
+  // and a financial record that reports having been touched when nobody changed
+  // anything is a false trail for whoever reads it later. Note the test is
+  // against the STORED figures, so a header that has drifted from its own lines
+  // is still repaired.
+  const alreadyCorrect =
+    Object.keys(extraPatch).length === 0 &&
+    subtotal === invoice.subtotal &&
+    total === invoice.total &&
+    taxAmount === invoice.tax_amount;
+  if (alreadyCorrect) return { ok: true, subtotal, total };
+
   const { data: updated, error } = await supabase
     .from("client_invoices")
     .update({ ...extraPatch, subtotal, total, tax_amount: taxAmount })

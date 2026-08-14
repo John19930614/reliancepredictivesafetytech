@@ -112,6 +112,12 @@ export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
     // captured from a typed proposal carries the stamp with it. Both scrub any
     // captured client identity out and layer this company's in.
     //
+    // A template captured BEFORE types existed carries no stamp, and that
+    // action refuses it rather than minting an untyped proposal. The refusal
+    // surfaces through setError below, which asks for a type — so the seller
+    // picks a built-in type instead. Failing closed is deliberate: an untyped
+    // proposal renders the platform-era fallback copy.
+    //
     // The third path — createProposal(), the untyped blank one — is no longer
     // reachable from this form. It is what produced the typeless proposals in
     // the first place, and it now refuses to create one without a type of its

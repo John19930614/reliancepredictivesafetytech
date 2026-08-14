@@ -73,6 +73,10 @@ textarea{min-height:78px;resize:vertical;line-height:1.5}
 .row5{display:grid;grid-template-columns:1.15fr .55fr .6fr .55fr 34px;gap:8px;align-items:end;margin:9px 0;padding-top:10px;border-top:1px dashed var(--line)}
 .row5:first-child{border-top:0;padding-top:2px}
 .row5 .btn-danger{height:38px;padding:0}
+/* Second line of a service row: billing basis and delivery mode. Spans the
+   whole grid rather than adding columns, so the row stays usable in the
+   embedded panel (body.embedded caps the whole app at 560px wide). */
+.row5 .rowfull{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
 :focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 .cardhint{font-size:11.5px;color:var(--muted);line-height:1.5;margin:0 0 8px}
 .section-card h3 .opt{margin-left:auto;font-family:var(--font-mono);font-size:9.5px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);background:#f1f5f9;border:1px solid var(--line);border-radius:999px;padding:2px 8px}
@@ -323,7 +327,7 @@ body.embedded .panel{position:static;max-height:none;overflow:visible}
   </div>
   <div class="section-card">
     <h3>6. Service Lines &amp; Add-Ons<span class="opt">sections 03 &amp; 05</span></h3>
-    <p class="cardhint">Platform modules, documents, training, audits, field support, and travel. Pick an item; its billing unit (person, session, day, mile…) shows on the Qty field.</p>
+    <p class="cardhint">Platform modules, documents, training, audits, field support, and travel. Pick an item; its billing unit (person, session, day, mile…) shows on the Qty field. Billing Basis decides what the quantity means and how the line is priced — per session, per attendee, per hour, or a flat fee the quantity does not scale. Training lines also carry a delivery mode.</p>
     <div id="services"></div>
     <button type="button" class="btn btn-secondary small" data-action="addService">+ Add Service Line</button>
   </div>
@@ -547,10 +551,76 @@ function addPhase(key='discovery',qty=1,price=null,desc=null){
  div.innerHTML=`<div><label>Phase</label><select class="phaseKey">${Object.keys(phaseOptions).map(k=>`<option value="${k}" ${k===key?'selected':''}>${esc(phaseOptions[k].name)}</option>`).join('')}</select></div><div><label>Qty</label><input class="phaseQty" type="number" step="any" value="${num(qty,1)}"></div><div><label>Unit Price</label><input class="phasePrice" type="number" step="any" value="${num(price===null?o.price:price,0)}"></div><div><label>Description</label><input class="phaseDesc" value="${esc(desc===null?o.desc:desc)}"></div><div><button type="button" class="btn btn-danger small" data-action="removeItem">X</button></div>`;
  wrap.appendChild(div); update(); return div;
 }
+/* ---------------------------------------------------------------------------
+   BILLING BASIS \u2014 mirrors lib/proposals/qty-basis.ts. Keep the two in step;
+   lib/proposals/catalog-parity.test.ts fails the build if they drift.
+
+   `unit` used to be a label with no arithmetic behind it, so a class sold for
+   the room and a course sold by the head were priced by the same
+   multiplication. A lockout/tagout class is $1,000 for the session whatever the
+   headcount \u2014 three booked and one cancelled bills two sessions, $2,000 \u2014
+   while bloodborne pathogens is quoted per attendee. The basis names which one
+   a row is, prints itself on the Qty field and in the fee table, and for `flat`
+   stops the quantity scaling the price at all.
+
+   BACKWARD COMPATIBILITY: a row with no stored basis derives one from its unit,
+   and UNIT_BASIS deliberately maps NO unit this catalog has ever shipped onto
+   `flat`. A row saved before any of this existed therefore keeps multiplying,
+   to the cent, exactly as it did the day it was sent.
+   --------------------------------------------------------------------------- */
+const QTY_BASES=['session','attendee','hour','flat'];
+const UNIT_BASIS={session:'session',sessions:'session',class:'session',classes:'session',course:'session',courses:'session',person:'attendee',persons:'attendee',people:'attendee',attendee:'attendee',attendees:'attendee',participant:'attendee',participants:'attendee',seat:'attendee',seats:'attendee',student:'attendee',students:'attendee',hour:'hour',hours:'hour',hr:'hour',hrs:'hour',flat:'flat','flat fee':'flat','fixed fee':'flat','lump sum':'flat'};
+const BASIS_NOUN={session:['session','sessions'],attendee:['attendee','attendees'],hour:['hour','hours']};
+const BASIS_FIELD_LABEL={session:'Sessions',attendee:'Attendees',hour:'Hours',flat:'Flat fee \u2014 qty not billed'};
+const BASIS_OPTION_LABEL={session:'Per session',attendee:'Per attendee',hour:'Per hour',flat:'Flat fee (qty not billed)'};
+const DELIVERY_MODES={in_person:"Instructor-led course \u2014 in person",virtual:"Instructor-led course \u2014 virtual"};
+function coerceBasis(v){const s=String(v==null?'':v).trim().toLowerCase(); return QTY_BASES.indexOf(s)>=0?s:null;}
+function unitBasis(u){const s=String(u==null?'':u).trim().toLowerCase(); return Object.prototype.hasOwnProperty.call(UNIT_BASIS,s)?UNIT_BASIS[s]:null;}
+function resolveBasis(stored,unit){return coerceBasis(stored)||unitBasis(unit);}
+function qtyFieldLabel(basis,unit){return basis?BASIS_FIELD_LABEL[basis]:(unit||'Unit');}
+function qtyCellLabel(basis,qty,unit){if(basis==='flat')return 'Flat fee'; if(basis){const n=BASIS_NOUN[basis]; return qty+' '+(qty===1?n[0]:n[1]);} return unit?qty+' '+unit:String(qty);}
+/* A flat line bills ONE, at any quantity including zero: it is removed by
+   deleting the row, not by typing a zero into a box the document never bills
+   from. Every other basis bills what was typed, floored at zero. */
+function billableQty(basis,qty){if(basis==='flat')return 1; const n=Number(qty); return isFinite(n)?Math.max(0,n):0;}
+/* Volume ladder: the highest threshold at or below the quantity reprices the
+   WHOLE quantity. No thresholds are defined in this file or in the platform \u2014
+   a line stays at its single rate until someone with pricing authority sets
+   them, and `qty_tiers` only ever arrives with a row pushed in from there. */
+function tierRate(price,qty,tiers){const base=isFinite(price)?Math.max(0,price):0; if(!Array.isArray(tiers)||!tiers.length)return base; let rate=base; const list=tiers.slice().sort((a,b)=>(a&&a.min_qty||0)-(b&&b.min_qty||0)); for(const t of list){if(!t||!isFinite(t.min_qty)||!isFinite(t.price))continue; if(qty>=Math.max(0,t.min_qty))rate=Math.max(0,t.price);} return rate;}
+function priceRow(x){const basis=coerceBasis(x.qty_basis); const q=billableQty(basis,x.qty); const p=isFinite(Number(x.price))?Math.max(0,Number(x.price)):0; const rate=basis==='flat'?p:tierRate(p,q,x.qty_tiers); return {qty:q,rate:rate,amount:q*rate};}
+function rowUnit(el,o){return el.dataset.customUnit||(o&&o.unit)||'';}
+/* dataset first, control second: the platform pushes a saved row's basis and
+   delivery mode in as datasets right after addService() builds it (the same
+   channel dataset.customUnit uses), and collectItems can run before update()
+   has folded them into the controls. */
+function rowBasis(el,unit){const pending=el.dataset.qtyBasis; const sel=el.querySelector('.svcBasis'); return resolveBasis(pending===undefined?(sel?sel.value:''):pending,unit);}
+function rowDelivery(el,o){if(o&&o.group&&o.group!=='Training Catalog')return null; const pending=el.dataset.deliveryMode; const sel=el.querySelector('.svcDelivery'); const v=pending===undefined?(sel?sel.value:''):pending; return Object.prototype.hasOwnProperty.call(DELIVERY_MODES,v)?v:null;}
+function rowTiers(el){const raw=el.dataset.qtyTiers; if(!raw)return null; try{const v=JSON.parse(raw); return Array.isArray(v)&&v.length?v:null;}catch(err){return null;}}
+/* Folds any pushed-in basis/delivery into the row's controls (once), then
+   relabels the Qty field and shows the delivery selector only where a delivery
+   is a real question \u2014 the taught courses. Idempotent; runs on every update(). */
+function syncServiceRows(){
+ Array.prototype.forEach.call(document.querySelectorAll('.service'),function(el){
+  const key=(el.querySelector('.svcKey')||{}).value, o=serviceOptions[key]||{};
+  const unit=rowUnit(el,o);
+  const bsel=el.querySelector('.svcBasis'), dsel=el.querySelector('.svcDelivery'), dwrap=el.querySelector('.svcDeliveryWrap');
+  if(el.dataset.qtyBasis!==undefined){ if(bsel) bsel.value=coerceBasis(el.dataset.qtyBasis)||''; delete el.dataset.qtyBasis; }
+  if(el.dataset.deliveryMode!==undefined){ if(dsel) dsel.value=Object.prototype.hasOwnProperty.call(DELIVERY_MODES,el.dataset.deliveryMode)?el.dataset.deliveryMode:''; delete el.dataset.deliveryMode; }
+  if(bsel){const d=bsel.querySelector('option[value=""]'); const implied=unitBasis(unit); if(d) d.textContent='Catalog default \u2014 '+(implied?BASIS_OPTION_LABEL[implied]:('per '+(unit||'unit').toLowerCase()));}
+  const basis=resolveBasis(bsel?bsel.value:'',unit);
+  const ql=el.querySelector('.qtyLabel'); if(ql) ql.textContent='Qty \u00b7 '+qtyFieldLabel(basis,unit);
+  const training=o.group==='Training Catalog';
+  if(dwrap) dwrap.style.display=training?'':'none';
+  if(dsel&&!training) dsel.value='';
+ });
+}
 function addService(key='document',qty=1,price=null,desc=null){
  const wrap=$('services'); const o=serviceOptions[key]||serviceOptions.document;
  const div=document.createElement('div'); div.className='row5 item service';
- div.innerHTML=`<div><label>Service / Add-On</label><select class="svcKey">${serviceSelectHTML(key)}</select></div><div><label class="qtyLabel">Qty \u00b7 ${esc(o.unit||'Unit')}</label><input class="svcQty" type="number" step="any" value="${num(qty,1)}"></div><div><label>Unit Price</label><input class="svcPrice" type="number" step="any" value="${num(price===null?o.price:price,0)}"></div><div><label>Description</label><input class="svcDesc" value="${esc(desc===null?o.desc:desc)}"></div><div><button type="button" class="btn btn-danger small" data-action="removeItem">X</button></div>`;
+ const basisOptions=['<option value="">Catalog default</option>'].concat(QTY_BASES.map(b=>`<option value="${b}">${esc(BASIS_OPTION_LABEL[b])}</option>`)).join('');
+ const deliveryOptions=['<option value="">Delivery not stated</option>'].concat(Object.keys(DELIVERY_MODES).map(m=>`<option value="${m}">${esc(DELIVERY_MODES[m])}</option>`)).join('');
+ div.innerHTML=`<div><label>Service / Add-On</label><select class="svcKey">${serviceSelectHTML(key)}</select></div><div><label class="qtyLabel">Qty \u00b7 ${esc(qtyFieldLabel(unitBasis(o.unit),o.unit))}</label><input class="svcQty" type="number" step="any" value="${num(qty,1)}"></div><div><label>Unit Price</label><input class="svcPrice" type="number" step="any" value="${num(price===null?o.price:price,0)}"></div><div><label>Description</label><input class="svcDesc" value="${esc(desc===null?o.desc:desc)}"></div><div><button type="button" class="btn btn-danger small" data-action="removeItem">X</button></div><div class="rowfull"><div><label>Billing Basis</label><select class="svcBasis">${basisOptions}</select></div><div class="svcDeliveryWrap"><label>Delivery</label><select class="svcDelivery">${deliveryOptions}</select></div></div>`;
  wrap.appendChild(div); update(); return div;
 }
 /* THE UNIT MUST TRAVEL WITH THE PRICE. `unit` used to be read straight off the
@@ -560,7 +630,13 @@ function addService(key='document',qty=1,price=null,desc=null){
    came back as "1 Person", and the next autosave wrote "Person" into form_data
    over the stored "Session", making the corruption permanent. dataset.customUnit
    carries the stored unit exactly as dataset.customName carries a stored name. */
-function collectItems(cls, type){const opts=type==='phase'?phaseOptions:serviceOptions; const prefix=type==='phase'?'phase':'svc'; return Array.from(document.querySelectorAll('.'+cls)).map(el=>{const key=el.querySelector('.'+prefix+'Key').value; const o=opts[key]||{}; return {type,key,name:el.dataset.customName||o.name||'',qty:Number(el.querySelector('.'+prefix+'Qty').value||0),price:Number(el.querySelector('.'+prefix+'Price').value||0),desc:el.querySelector('.'+prefix+'Desc').value||o.desc||'',unit:el.dataset.customUnit||o.unit||''};});}
+/* THE BASIS TRAVELS WITH THE PRICE, for the same reason the unit does — except
+   that a basis moves the TOTAL, not just the label. The resolved basis is
+   written onto every service row rather than left to be re-derived later, so a
+   catalog entry re-based from per-session to per-attendee cannot reach back
+   into a document already sent. Rows with no basis at all (Day, Mile, Project)
+   carry none, and price by plain multiplication exactly as they always have. */
+function collectItems(cls, type){const opts=type==='phase'?phaseOptions:serviceOptions; const prefix=type==='phase'?'phase':'svc'; return Array.from(document.querySelectorAll('.'+cls)).map(el=>{const key=el.querySelector('.'+prefix+'Key').value; const o=opts[key]||{}; const unit=el.dataset.customUnit||o.unit||''; const item={type,key,name:el.dataset.customName||o.name||'',qty:Number(el.querySelector('.'+prefix+'Qty').value||0),price:Number(el.querySelector('.'+prefix+'Price').value||0),desc:el.querySelector('.'+prefix+'Desc').value||o.desc||'',unit}; if(type==='service'){const basis=rowBasis(el,unit); if(basis) item.qty_basis=basis; const tiers=rowTiers(el); if(tiers) item.qty_tiers=tiers; const delivery=rowDelivery(el,o); if(delivery) item.delivery_mode=delivery;} return item;});}
 function computeDoc(){
  const pages=Math.max(0,Number(($('docPages')||{}).value||0));
  const complexity=($('docComplexity')||{}).value||'Medium', review=($('docReview')||{}).value||'Standard', custom=($('docCustom')||{}).value||'None', rush=($('docRush')||{}).checked;
@@ -667,10 +743,14 @@ function update(){
    $('pPackageIntro').innerHTML='<b>'+esc(p.name)+'</b> is the proposed base subscription'+(term.rangeLabel?' for the term '+esc(term.rangeLabel):'')+'. '+esc(p.desc)+' Included limits are '+_plural(p.users,'user')+' across '+_plural(p.sites,'jobsite')+(term.months?' for the full '+term.months+'-month term':'')+'.';
    $('pPackagePills').innerHTML=`<span class="pill">${isPilot?'Pilot Price':'Subscription Price'}: ${money0(p.price)}</span><span class="pill">Term: ${esc(term.rangeLabel||'\u2014')}</span><span class="pill">Included Users: ${p.users}</span><span class="pill">Included Jobsites: ${p.sites}</span><span class="pill">Billing: ${esc($('billingTerm').value)}</span>`;
  }
+ syncServiceRows();
  const phases=collectItems('phase','phase'), svcs=collectItems('service','service');
  const _stripOrd=n=>{const s=String(n||'').replace(/^\s*phase\s*\d+\s*(?:[\u2014\u2013-]|:)\s*/i,''); return s.trim()===''?n:s;};
  $('pPhaseScope').innerHTML=phases.map((x,i)=>`<h3>${i+1}. ${esc(_stripOrd(x.name))}</h3><p>${esc(x.desc)}</p>`).join('') || '<p>No implementation phases selected.</p>';
- $('pServiceScope').innerHTML=svcs.map((x,i)=>`<h3>Service Line ${i+1}: ${esc(x.name)}</h3><p>${esc(x.desc)}</p>`).join('') || '<p>No added service lines selected.</p>';
+ /* The delivery mode is stated in the scope paragraph, not the fee table: it is
+    part of what the client is buying ("in person" versus "virtual" is a real
+    difference to a crew that has to be in a room) but it never moves a price. */
+ $('pServiceScope').innerHTML=svcs.map((x,i)=>`<h3>Service Line ${i+1}: ${esc(x.name)}</h3><p>${esc(x.desc)}${Object.prototype.hasOwnProperty.call(DELIVERY_MODES,x.delivery_mode||'')?' '+esc(DELIVERY_MODES[x.delivery_mode])+'.':''}</p>`).join('') || '<p>No added service lines selected.</p>';
  // Standalone-copy preview only: the embedded editor hides this whole document
  // (body.embedded .proposal) and the platform renders <ProposalDocument>. Still
  // type-aware, because a training or fixed-price proposal printed from the
@@ -681,9 +761,15 @@ function update(){
  $('pDeliverables').innerHTML=deliverables.map(d=>'<li>'+esc(d)+'</li>').join('');
  const _covered=phases.map(x=>_stripOrd(x.name)).concat(svcs.map(x=>x.name));
  if($('pDeliverablesNote'))$('pDeliverablesNote').textContent=_covered.length?('A deliverable package is produced for each selected line: '+_covered.join(', ')+'. Section 03 states the scope of each.'):'';
- let rows=noPlatform?[]:[{name:p.name,desc:'Platform access for the '+(term.months?term.months+'-month ':'')+'term \u2014 includes '+p.users+' users and '+p.sites+' sites.',qty:1,price:p.price}]; phases.forEach(x=>rows.push({name:x.name,desc:x.desc,qty:x.qty,price:x.price})); svcs.forEach(x=>rows.push({name:x.name,desc:x.desc,qty:x.qty,price:x.price}));
- const subtotal=rows.reduce((a,x)=>a+x.qty*x.price,0); const discount=subtotal*(Number($('discountPct').value||0)/100); const taxable=subtotal-discount; const tax=taxable*(Number($('taxPct').value||0)/100); const total=taxable+tax; const deposit=total*(Number($('depositPct').value||0)/100);
- $('pFeeTable').querySelector('tbody').innerHTML=rows.map(x=>`<tr><td><b>${esc(x.name)}</b></td><td>${esc(x.desc)}</td><td class="right">${x.qty}</td><td class="right">${money0(x.price)}</td><td class="right">${money0(x.qty*x.price)}</td></tr>`).join('');
+ /* Each row is priced through its billing basis, not by blanket multiplication:
+    a flat line bills once whatever its quantity says, and a tiered rate steps
+    with the quantity. The Qty column prints what it counted \u2014 "2 sessions",
+    "10 attendees", "Flat fee" \u2014 so a number can never be read against the wrong
+    thing. Mirrors buildItemLine() in lib/proposals/pricing.ts. */
+ let rows=noPlatform?[]:[{name:p.name,desc:'Platform access for the '+(term.months?term.months+'-month ':'')+'term \u2014 includes '+p.users+' users and '+p.sites+' sites.',qty:1,price:p.price,unit:''}]; phases.forEach(x=>rows.push({name:x.name,desc:x.desc,qty:x.qty,price:x.price,unit:x.unit})); svcs.forEach(x=>rows.push({name:x.name,desc:x.desc,qty:x.qty,price:x.price,unit:x.unit,qty_basis:x.qty_basis,qty_tiers:x.qty_tiers,delivery_mode:x.delivery_mode}));
+ const priced=rows.map(x=>{const r=priceRow(x); return {name:x.name,desc:x.desc,unit:x.unit,basis:coerceBasis(x.qty_basis),qty:r.qty,rate:r.rate,amount:r.amount};});
+ const subtotal=priced.reduce((a,x)=>a+x.amount,0); const discount=subtotal*(Number($('discountPct').value||0)/100); const taxable=subtotal-discount; const tax=taxable*(Number($('taxPct').value||0)/100); const total=taxable+tax; const deposit=total*(Number($('depositPct').value||0)/100);
+ $('pFeeTable').querySelector('tbody').innerHTML=priced.map(x=>`<tr><td><b>${esc(x.name)}</b></td><td>${esc(x.desc)}</td><td class="right">${esc(qtyCellLabel(x.basis,x.qty,x.unit))}</td><td class="right">${money0(x.rate)}</td><td class="right">${money0(x.amount)}</td></tr>`).join('');
  $('pFeeTable').querySelector('tfoot').innerHTML=`<tr><td colspan="4" class="right">Subtotal</td><td class="right">${money(subtotal)}</td></tr><tr><td colspan="4" class="right">Discount</td><td class="right">-${money(discount)}</td></tr><tr><td colspan="4" class="right">Tax</td><td class="right">${money(tax)}</td></tr><tr><td colspan="4" class="right">Total</td><td class="right">${money0(total)}</td></tr><tr><td colspan="4" class="right">Deposit Due at Acceptance</td><td class="right">${money(deposit)}</td></tr>`;
  $('pSchedule').textContent='The schedule is coordinated after acceptance. Unless otherwise agreed, implementation follows the order shown in the scope.'+(term.rangeLabel?' The engagement term runs '+term.rangeLabel+'.':'')+' Billing follows the selected term ('+$('billingTerm').value+'), with '+$('paymentTerms').value+'.';
  $('pExclusions').textContent=$('customExclusions').value;
@@ -732,13 +818,77 @@ function packageChange(){
  }
  update();
 }
-function optionChange(e){const sel=e.target; if(sel.classList.contains('phaseKey')){const o=phaseOptions[sel.value]; const row=sel.closest('.phase'); row.querySelector('.phasePrice').value=o.price; row.querySelector('.phaseDesc').value=o.desc;} if(sel.classList.contains('svcKey')){const o=serviceOptions[sel.value]; const row=sel.closest('.service'); row.querySelector('.svcPrice').value=o.price; row.querySelector('.svcDesc').value=o.desc; if(row.dataset.customName) delete row.dataset.customName; const ql=row.querySelector('.qtyLabel'); if(ql) ql.textContent='Qty \u00b7 '+(o.unit||'Unit');} update();}
+/* Choosing a DIFFERENT service replaces the row's identity, so everything the
+   old service brought with it goes: its custom name, its stored unit, its
+   billing basis and its delivery mode. Keeping any of them is how a hotel line
+   ends up labelled "Attendees" \u2014 or priced as a flat fee \u2014 because the row used
+   to be a training course. The new service's own unit and basis apply, and
+   syncServiceRows() (via update()) repaints the labels. */
+function optionChange(e){const sel=e.target; if(sel.classList.contains('phaseKey')){const o=phaseOptions[sel.value]; const row=sel.closest('.phase'); row.querySelector('.phasePrice').value=o.price; row.querySelector('.phaseDesc').value=o.desc;} if(sel.classList.contains('svcKey')){const o=serviceOptions[sel.value]; const row=sel.closest('.service'); row.querySelector('.svcPrice').value=o.price; row.querySelector('.svcDesc').value=o.desc; if(row.dataset.customName) delete row.dataset.customName; if(row.dataset.customUnit) delete row.dataset.customUnit; if(row.dataset.qtyTiers) delete row.dataset.qtyTiers; const bsel=row.querySelector('.svcBasis'); if(bsel) bsel.value=''; const dsel=row.querySelector('.svcDelivery'); if(dsel) dsel.value=''; const ql=row.querySelector('.qtyLabel'); if(ql) ql.textContent='Qty \u00b7 '+qtyFieldLabel(unitBasis(o.unit),o.unit);} update();}
 function save(){if(isEmbedded()){setStatus('Drafts are saved on the platform, not in this browser.');return;} const data={}; document.querySelectorAll('input,select,textarea').forEach((el,i)=>{if(!el.className.includes('phase')&&!el.className.includes('svc')) data[el.id||('field'+i)]=el.value;}); localStorage.setItem('proposalGeneratorV4',JSON.stringify(data)); setStatus('Saved in this browser.');}
 function load(){if(isEmbedded()){setStatus('This proposal is loaded from the platform.');return;} const data=JSON.parse(localStorage.getItem('proposalGeneratorV4')||'{}'); Object.entries(data).forEach(([k,v])=>{if($(k)) $(k).value=v}); update(); setStatus('Loaded saved data.');}
 function download(){if(isEmbedded()){setStatus('Use Print / Save PDF to produce the client copy.');return;} update(); var html='<!DOCTYPE html>\n'+document.documentElement.outerHTML; var fname=($('clientCompany').value||'proposal').replace(/[^a-z0-9]+/gi,'_')+'_pilot_proposal.html'; try{ var blob=new Blob([html],{type:'text/html'}); if(window.navigator&&window.navigator.msSaveOrOpenBlob){window.navigator.msSaveOrOpenBlob(blob,fname);setStatus('Download started.');return;} var url=URL.createObjectURL(blob); var a=document.createElement('a'); a.href=url; a.download=fname; a.style.display='none'; document.body.appendChild(a); a.click(); setTimeout(function(){a.remove();URL.revokeObjectURL(url);},1500); setStatus('If nothing downloaded, this preview is blocking it \u2014 open the file in Chrome/Edge/Safari, then click Download.'); }catch(e){ try{ var w=window.open('','_blank'); w.document.write(html); w.document.close(); setStatus('Opened a copy in a new tab \u2014 use File > Save As to keep it.'); }catch(e2){ setStatus('Download is blocked in this preview. Open this file in Chrome/Edge/Safari, then click Download.'); } } }
 document.addEventListener('click',e=>{const a=e.target.closest('[data-action]'); if(!a)return; const act=a.dataset.action; if(act==='print'){update(); setTimeout(()=>window.print(),50)} if(act==='refresh'){update(); setStatus('Preview refreshed.')} if(act==='download')download(); if(act==='save')save(); if(act==='load')load(); if(act==='addPhase')addPhase(); if(act==='addService')addService(); if(act==='addDoc')addDoc(); if(act==='removeItem'){a.closest('.item').remove(); update();}});
 document.addEventListener('input',e=>{update(); if(e.target&&e.target.closest&&e.target.closest('#docCalc')) computeDoc();}); document.addEventListener('change',e=>{if(e.target.id==='packageSelect'){packageChange();return;} if(e.target.closest&&e.target.closest('#docCalc')){computeDoc();return;} optionChange(e);});
 window.addEventListener('DOMContentLoaded',()=>{const today=new Date(); $('proposalDate').value=today.toISOString().slice(0,10); addPhase('discovery',1,0,'Kickoff, platform access setup, and configuration of the pilot jobsites and user accounts \u2014 included in the pilot.'); addPhase('build',1,0,'Configure modules, templates, dashboards, and workflows for pilot use \u2014 included in the pilot.'); addPhase('launch',1,0,'User training, launch support, and check-ins across the pilot term \u2014 included in the pilot.'); packageChange(); computeDoc(); update();});
+/* ---------------------------------------------------------------------------
+   RESTORING THE BILLING FIELDS THE BRIDGE DOES NOT CARRY.
+
+   The platform pushes a saved proposal in as `proposal:load`, and the injected
+   bridge rebuilds each row with addService(key, qty, price, desc) — four
+   arguments, then dataset.customName and dataset.customUnit. Anything else a
+   row stored is not passed, and the next autosave writes the loss back: the
+   corruption is permanent after one open-and-save.
+
+   `session`, `attendee` and `hour` survive that on their own, because they are
+   re-derived from the unit the bridge does restore. `flat` does NOT — nothing
+   in the unit vocabulary implies it — so a $2,500 flat fee saved with qty 4
+   came back as 4 × $2,500 = $10,000. A tier ladder and a delivery mode
+   disappear the same way.
+
+   So the load is mirrored here, by index: applyFullState() clears the list and
+   appends one row per saved service in order, so row i is service i. This
+   listener is registered before the bridge's (the bridge is injected at the
+   anchor below, after this), stashes the state, and folds the extras in on the
+   next task — by which time the bridge has finished rebuilding the rows. It is
+   inert in the standalone file, which never receives the message.
+
+   scripts/build-proposal-generator.mjs SHOULD also carry these three lines
+   beside its dataset.customUnit line, which would make this a redundant second
+   line of defence rather than the only one:
+       if (s.qty_basis) div.dataset.qtyBasis = s.qty_basis;
+       if (s.delivery_mode) div.dataset.deliveryMode = s.delivery_mode;
+       if (s.qty_tiers) div.dataset.qtyTiers = JSON.stringify(s.qty_tiers);
+   --------------------------------------------------------------------------- */
+let pendingItemExtras=null;
+function applyPendingItemExtras(){
+ const saved=pendingItemExtras; pendingItemExtras=null;
+ if(!Array.isArray(saved)) return;
+ const rows=document.querySelectorAll('.service');
+ if(rows.length!==saved.length) return; // shapes disagree: leave the rows alone rather than guess
+ let touched=false;
+ saved.forEach(function(s,i){
+  if(!s||typeof s!=='object') return;
+  const el=rows[i];
+  if(coerceBasis(s.qty_basis)){el.dataset.qtyBasis=coerceBasis(s.qty_basis); touched=true;}
+  if(Object.prototype.hasOwnProperty.call(DELIVERY_MODES,s.delivery_mode||'')){el.dataset.deliveryMode=s.delivery_mode; touched=true;}
+  if(Array.isArray(s.qty_tiers)&&s.qty_tiers.length){try{el.dataset.qtyTiers=JSON.stringify(s.qty_tiers); touched=true;}catch(err){/* unserializable: no ladder */}}
+ });
+ if(!touched) return;
+ update();
+ // Let the bridge's debounced preview push pick the corrected rows up; the
+ // parent renders the document from the state it is sent, so a preview taken
+ // before this ran would show the pre-restore numbers.
+ const host=$('services'); if(host) host.dispatchEvent(new Event('input',{bubbles:true}));
+}
+window.addEventListener('message',function(e){
+ if(e.origin!==window.location.origin) return;
+ const msg=e.data;
+ if(!msg||typeof msg!=='object'||msg.type!=='proposal:load') return;
+ const state=msg.state;
+ pendingItemExtras=state&&Array.isArray(state.services)?state.services.slice():null;
+ setTimeout(applyPendingItemExtras,0);
+});
 /* Anchor below: scripts/build-proposal-generator.mjs replaces that exact one-line comment with the platform postMessage bridge. Keep it verbatim, keep exactly one of it, and keep it inside this IIFE so the bridge can reach $, collectItems, addPhase, addService, update and setStatus. */
 /* BRIDGE_INJECTION_POINT */
 })();

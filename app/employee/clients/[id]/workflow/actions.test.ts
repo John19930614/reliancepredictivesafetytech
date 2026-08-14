@@ -866,3 +866,580 @@ describe("settleInvoice", () => {
     expect(auditMock).not.toHaveBeenCalled();
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* Editing a draft invoice                                                    */
+/* -------------------------------------------------------------------------- */
+
+const LINE_ID = "55555555-5555-4555-8555-555555555555";
+const OTHER_LINE_ID = "66666666-6666-4666-8666-666666666666";
+
+interface StoredLine {
+  id: string;
+  description: string;
+  quantity: number;
+  unit_amount: number;
+  unit: string;
+  qty_basis: string;
+  service_date: string | null;
+  line_total: number;
+  sort_order: number;
+}
+
+/** The twelve-seat class the punch list is about. */
+function seatLine(over: Partial<StoredLine> = {}): StoredLine {
+  return {
+    id: LINE_ID,
+    description: "Confined Space Entry — classroom",
+    quantity: 12,
+    unit_amount: 105,
+    unit: "Seat",
+    qty_basis: "attendee",
+    service_date: "2026-08-20",
+    line_total: 1260,
+    sort_order: 10,
+    ...over,
+  };
+}
+
+/**
+ * A Supabase stand-in that behaves like the tables do: the line update writes
+ * through to the rows the next select reads back, so the "recompute the total
+ * from the STORED lines" step is exercised rather than assumed.
+ */
+function createInvoiceEditMock(options: {
+  invoice?: Record<string, unknown>;
+  lines?: StoredLine[];
+  lineUpdateError?: unknown;
+  lineUpdateMatchesNothing?: boolean;
+  lineSelectError?: unknown;
+  invoiceSelectError?: unknown;
+}) {
+  const invoice: Record<string, unknown> = {
+    id: INVOICE_ID,
+    client_id: CLIENT_ID,
+    invoice_number: "RPS-INV-2026-0001",
+    status: "draft",
+    currency: "USD",
+    subtotal: 1260,
+    total: 1260,
+    tax_amount: 0,
+    ...options.invoice,
+  };
+  const lines = (options.lines ?? [seatLine()]).map((line) => ({ ...line }));
+
+  return createSupabaseMock({
+    "client_invoices:select": () =>
+      options.invoiceSelectError ? { error: options.invoiceSelectError } : { data: { ...invoice } },
+    "client_invoices:update": (query) => {
+      // Compare-and-set: the header write names status='draft', and a document
+      // that has since been issued must match nothing rather than be rewritten.
+      const wants = query.filters.find(([column]) => column === "status")?.[1];
+      if (wants !== undefined && wants !== invoice.status) return { data: [] };
+      Object.assign(invoice, query.payload as Record<string, unknown>);
+      return { data: [{ id: INVOICE_ID }] };
+    },
+    "client_invoice_line_items:select": () =>
+      options.lineSelectError ? { error: options.lineSelectError } : { data: lines.map((line) => ({ ...line })) },
+    "client_invoice_line_items:update": (query) => {
+      if (options.lineUpdateError) return { error: options.lineUpdateError };
+      if (options.lineUpdateMatchesNothing) return { data: [] };
+      const id = query.filters.find(([column]) => column === "id")?.[1];
+      const row = lines.find((line) => line.id === id);
+      if (!row) return { data: [] };
+      Object.assign(row, query.payload as Record<string, unknown>);
+      return { data: [{ id }] };
+    },
+  });
+}
+
+describe("updateDraftInvoiceLines — RBAC", () => {
+  it("refuses when signed out, and never queries", async () => {
+    const supabase = createSupabaseMock({});
+    signOut();
+
+    expect(await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, quantity: 10 }])).toEqual({
+      ok: false,
+      error: "You must be signed in.",
+    });
+    expect(supabase.calls).toHaveLength(0);
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  /*
+   * ADMIN ONLY, and the reason is the database rather than ceremony:
+   * client_invoices carries a single UPDATE policy ("Admins can settle
+   * invoices"). A non-admin let in here would edit the LINES — RLS allows that
+   * while the parent is a draft — and then be refused the header write, leaving
+   * an invoice whose total contradicts its own body. Refusing up front is the
+   * only outcome that cannot half-happen.
+   */
+  it("refuses an in-whitelist non-admin, and never queries", async () => {
+    for (const role of ["employee", "marketing", "internal_reviewer"]) {
+      const supabase = createSupabaseMock({});
+      signIn(role, supabase);
+
+      const result = await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, quantity: 10 }]);
+
+      expect(result.ok, role).toBe(false);
+      expect(result.error).toContain("Admin role required");
+      expect(supabase.calls, role).toHaveLength(0);
+      expect(auditMock).not.toHaveBeenCalled();
+    }
+  });
+
+  it("refuses a role outside the is_company_portal_employee() whitelist", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("client_user", supabase);
+
+    expect((await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, quantity: 10 }])).ok).toBe(false);
+    expect((await updateInvoiceDetails(INVOICE_ID, { jobName: "Tower 3" })).ok).toBe(false);
+    expect((await loadInvoiceLines(INVOICE_ID)).ok).toBe(false);
+    expect(supabase.calls).toHaveLength(0);
+  });
+
+  it("rejects malformed references before any query", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("admin", supabase);
+
+    expect((await updateDraftInvoiceLines("not-a-uuid", [{ id: LINE_ID, quantity: 1 }])).ok).toBe(false);
+    expect((await updateDraftInvoiceLines(INVOICE_ID, [{ id: "not-a-uuid", quantity: 1 }])).ok).toBe(false);
+    expect(supabase.calls).toHaveLength(0);
+  });
+});
+
+describe("updateDraftInvoiceLines", () => {
+  /*
+   * THE CASE FROM THE MEETING. A class was quoted at 12 seats x $105 = $1,260.
+   * Ten people attended, so the invoice has to say $1,050 — reached by editing
+   * a quantity on the draft, NOT by voiding a numbered document and rebuilding
+   * it from a proposal that still says twelve.
+   */
+  it("drops a 12-seat class to the 10 who attended, without rebuilding the document", async () => {
+    const supabase = createInvoiceEditMock({});
+    signIn("admin", supabase);
+
+    const result = await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, quantity: 10 }]);
+
+    expect(result.ok).toBe(true);
+    expect(result.subtotal).toBe(1050);
+    expect(result.total).toBe(1050);
+
+    // The line total is COMPUTED here — 10 x 105 — not taken from anything the
+    // browser sent.
+    const lineUpdate = findCall(supabase, "client_invoice_line_items", "update");
+    expect(lineUpdate?.payload).toMatchObject({ quantity: 10, unit_amount: 105, line_total: 1050 });
+    expect(lineUpdate?.filters).toContainEqual(["invoice_id", INVOICE_ID]);
+
+    // The header is re-derived from the stored lines, so it cannot disagree
+    // with the body.
+    const header = findCall(supabase, "client_invoices", "update");
+    expect(header?.payload).toMatchObject({ subtotal: 1050, total: 1050 });
+
+    // No new invoice, no void, no new number: the document is the same document.
+    expect(findCall(supabase, "client_invoices", "insert")).toBeUndefined();
+    expect(findCall(supabase, "client_invoices", "delete")).toBeUndefined();
+    expect(header?.payload).not.toHaveProperty("status");
+    expect(header?.payload).not.toHaveProperty("invoice_number");
+  });
+
+  // A retainer must not double because somebody typed 2 into a box that does
+  // not price anything.
+  it("leaves a flat fee at its unit amount whatever the quantity says", async () => {
+    const supabase = createInvoiceEditMock({
+      invoice: { subtotal: 2500, total: 2500 },
+      lines: [seatLine({ description: "Monthly retainer", quantity: 1, unit_amount: 2500, qty_basis: "flat", line_total: 2500 })],
+    });
+    signIn("admin", supabase);
+
+    const result = await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, quantity: 4 }]);
+
+    expect(result.ok).toBe(true);
+    expect(findCall(supabase, "client_invoice_line_items", "update")?.payload).toMatchObject({
+      quantity: 4,
+      line_total: 2500,
+    });
+    expect(result.total).toBe(2500);
+  });
+
+  // Switching the basis is the honest way to make a fixed line scale.
+  it("recomputes when the basis changes rather than the quantity", async () => {
+    const supabase = createInvoiceEditMock({
+      invoice: { subtotal: 105, total: 105 },
+      lines: [seatLine({ quantity: 10, qty_basis: "flat", line_total: 105 })],
+    });
+    signIn("admin", supabase);
+
+    const result = await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, qtyBasis: "attendee" }]);
+
+    expect(result.total).toBe(1050);
+  });
+
+  // THIS IS MONEY. The browser proposes quantities; the server decides amounts.
+  it("ignores a total posted by the caller and recomputes it", async () => {
+    const supabase = createInvoiceEditMock({});
+    signIn("admin", supabase);
+
+    const result = await updateDraftInvoiceLines(INVOICE_ID, [
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      { id: LINE_ID, quantity: 10, lineTotal: 1, line_total: 1, total: 1 } as any,
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect(findCall(supabase, "client_invoice_line_items", "update")?.payload).toMatchObject({ line_total: 1050 });
+    expect(findCall(supabase, "client_invoices", "update")?.payload).toMatchObject({ total: 1050 });
+  });
+
+  it("keeps total = subtotal + tax_amount across several lines", async () => {
+    const supabase = createInvoiceEditMock({
+      invoice: { subtotal: 1510, total: 1634.8, tax_amount: 124.8 },
+      lines: [seatLine(), seatLine({ id: OTHER_LINE_ID, description: "Materials", quantity: 1, unit_amount: 250, qty_basis: "flat", line_total: 250, sort_order: 20 })],
+    });
+    signIn("admin", supabase);
+
+    const result = await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, quantity: 10 }]);
+
+    expect(result.subtotal).toBe(1300);
+    expect(result.total).toBe(1424.8);
+    expect(findCall(supabase, "client_invoices", "update")?.payload).toMatchObject({
+      subtotal: 1300,
+      total: 1424.8,
+      tax_amount: 124.8,
+    });
+  });
+
+  it("edits the unit, the service date and the description alongside the quantity", async () => {
+    const supabase = createInvoiceEditMock({});
+    signIn("admin", supabase);
+
+    await updateDraftInvoiceLines(INVOICE_ID, [
+      { id: LINE_ID, quantity: 10, unit: " Attendee ", serviceDate: "2026-09-02", description: " Confined Space " },
+    ]);
+
+    expect(findCall(supabase, "client_invoice_line_items", "update")?.payload).toMatchObject({
+      unit: "Attendee",
+      service_date: "2026-09-02",
+      description: "Confined Space",
+    });
+  });
+
+  /* --- the draft-only guard ---------------------------------------------- */
+
+  // An issued invoice has been seen by the client. Changing what it says after
+  // that is a credit note, not an edit — and the RLS policy on the line table
+  // refuses the write anyway, so an action that tried would fail halfway.
+  it("refuses to touch an invoice that is not a draft, and writes nothing", async () => {
+    for (const status of ["issued", "paid", "void"]) {
+      vi.clearAllMocks();
+      const supabase = createInvoiceEditMock({ invoice: { status } });
+      signIn("admin", supabase);
+
+      const result = await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, quantity: 10 }]);
+
+      expect(result.ok, status).toBe(false);
+      expect(result.error, status).toContain("Only a draft invoice can be edited");
+      expect(result.error, status).toContain(status);
+      expect(findCall(supabase, "client_invoice_line_items", "update"), status).toBeUndefined();
+      expect(findCall(supabase, "client_invoices", "update"), status).toBeUndefined();
+      expect(auditMock).not.toHaveBeenCalled();
+    }
+  });
+
+  // RLS refuses a line write once the parent leaves draft, and PostgREST reports
+  // no error for an update that matched nothing.
+  it("treats a zero-row line update as a concurrent issue, not a success", async () => {
+    const supabase = createInvoiceEditMock({ lineUpdateMatchesNothing: true });
+    signIn("admin", supabase);
+
+    const result = await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, quantity: 10 }]);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("changed while you were looking at it");
+  });
+
+  /* --- refusals ----------------------------------------------------------- */
+
+  it("refuses a line that belongs to a different invoice", async () => {
+    const supabase = createInvoiceEditMock({});
+    signIn("admin", supabase);
+
+    const result = await updateDraftInvoiceLines(INVOICE_ID, [{ id: OTHER_LINE_ID, quantity: 10 }]);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("not on this invoice");
+    expect(findCall(supabase, "client_invoice_line_items", "update")).toBeUndefined();
+    expect(findCall(supabase, "client_invoices", "update")).toBeUndefined();
+  });
+
+  it("refuses an empty batch and one that names the same line twice", async () => {
+    const supabase = createInvoiceEditMock({});
+    signIn("admin", supabase);
+
+    expect((await updateDraftInvoiceLines(INVOICE_ID, [])).ok).toBe(false);
+    const duplicated = await updateDraftInvoiceLines(INVOICE_ID, [
+      { id: LINE_ID, quantity: 10 },
+      { id: LINE_ID, quantity: 2 },
+    ]);
+    expect(duplicated.ok).toBe(false);
+    expect(duplicated.error).toContain("sent twice");
+    expect(supabase.calls).toHaveLength(0);
+  });
+
+  // Validate the whole batch before writing any of it: a half-applied batch
+  // leaves an invoice nobody meant to raise.
+  it("refuses the whole batch when one line is invalid, and writes nothing", async () => {
+    const supabase = createInvoiceEditMock({
+      lines: [seatLine(), seatLine({ id: OTHER_LINE_ID, sort_order: 20 })],
+    });
+    signIn("admin", supabase);
+
+    const result = await updateDraftInvoiceLines(INVOICE_ID, [
+      { id: LINE_ID, quantity: 10 },
+      { id: OTHER_LINE_ID, quantity: 0 },
+    ]);
+
+    expect(result.ok).toBe(false);
+    expect(result.fieldErrors?.[OTHER_LINE_ID]).toContain("more than zero");
+    expect(findCall(supabase, "client_invoice_line_items", "update")).toBeUndefined();
+    expect(findCall(supabase, "client_invoices", "update")).toBeUndefined();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a database that is behind the code as something an operator can fix", async () => {
+    const supabase = createInvoiceEditMock({
+      invoiceSelectError: { code: "42703", message: 'column client_invoices.tax_amount does not exist' },
+    });
+    signIn("admin", supabase);
+
+    const result = await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, quantity: 10 }]);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("migrations");
+  });
+
+  /* --- audit and revalidation --------------------------------------------- */
+
+  it("audits the reprice as billing, with the before and after totals", async () => {
+    const supabase = createInvoiceEditMock({});
+    signIn("admin", supabase);
+
+    await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, quantity: 10 }]);
+
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    const event = auditMock.mock.calls[0][0];
+    expect(event.event_category).toBe("billing");
+    expect(event.resource_type).toBe("client_invoice");
+    expect(event.actor_role).toBe("admin");
+    expect(event.summary).toContain("RPS-INV-2026-0001");
+    expect(event.before_state).toMatchObject({ total: 1260 });
+    expect(event.after_state).toMatchObject({ total: 1050 });
+  });
+
+  // A financial record that reports having been touched when nobody changed
+  // anything is a false trail for whoever reads it later — and the updated_at
+  // trigger fires on any UPDATE, no-op or not.
+  it("writes nothing at all for a save that changed nothing", async () => {
+    const supabase = createInvoiceEditMock({});
+    signIn("admin", supabase);
+
+    const result = await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, quantity: 12 }]);
+
+    expect(result.ok).toBe(true);
+    expect(result.total).toBe(1260);
+    expect(findCall(supabase, "client_invoice_line_items", "update")).toBeUndefined();
+    expect(findCall(supabase, "client_invoices", "update")).toBeUndefined();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  // …but a header that has drifted from its own lines is still repaired, which
+  // is the case that guard must not swallow.
+  it("repairs a header whose total no longer matches its lines", async () => {
+    const supabase = createInvoiceEditMock({ invoice: { subtotal: 999, total: 999 } });
+    signIn("admin", supabase);
+
+    const result = await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, quantity: 12 }]);
+
+    expect(result.ok).toBe(true);
+    expect(findCall(supabase, "client_invoices", "update")?.payload).toMatchObject({ subtotal: 1260, total: 1260 });
+  });
+
+  it("revalidates every surface that renders an invoice total", async () => {
+    const supabase = createInvoiceEditMock({});
+    signIn("admin", supabase);
+
+    await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, quantity: 10 }]);
+
+    for (const path of [
+      `/employee/clients/${CLIENT_ID}/workflow`,
+      `/employee/clients/${CLIENT_ID}`,
+      "/employee/finance",
+    ]) {
+      expect(revalidateMock).toHaveBeenCalledWith(path);
+    }
+  });
+
+  // buildDraftInvoice folds a proposal-level discount into the total and
+  // explains it only in the notes, because there is no discount column. Once
+  // the lines are the source of truth that adjustment is gone — say so rather
+  // than let an operator find out on the client's copy.
+  it("warns when re-totalling drops an adjustment that was not a line", async () => {
+    const supabase = createInvoiceEditMock({
+      invoice: { subtotal: 1260, total: 1134, tax_amount: 0 },
+    });
+    signIn("admin", supabase);
+
+    const result = await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, quantity: 10 }]);
+
+    expect(result.ok).toBe(true);
+    expect(result.notice).toContain("126.00");
+    expect(result.notice).toContain("no longer applied");
+  });
+
+  it("says nothing extra when the total was simply the line sum", async () => {
+    const supabase = createInvoiceEditMock({});
+    signIn("admin", supabase);
+
+    expect((await updateDraftInvoiceLines(INVOICE_ID, [{ id: LINE_ID, quantity: 10 }])).notice).toBeUndefined();
+  });
+});
+
+describe("updateInvoiceDetails", () => {
+  it("writes the document fields and re-derives the total from the lines plus tax", async () => {
+    const supabase = createInvoiceEditMock({});
+    signIn("admin", supabase);
+
+    const result = await updateInvoiceDetails(INVOICE_ID, {
+      consultantName: "  Dana Reyes  ",
+      jobName: "Tower 3 Fit-Out",
+      paymentTerms: "Net 30 from invoice date",
+      clientAgreementRef: "PO-88421",
+      preparedBy: "Dana Reyes",
+      taxAmount: 103.95,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(findCall(supabase, "client_invoices", "update")?.payload).toMatchObject({
+      consultant_name: "Dana Reyes",
+      job_name: "Tower 3 Fit-Out",
+      payment_terms: "Net 30 from invoice date",
+      // The CLIENT's number, never ours.
+      client_agreement_ref: "PO-88421",
+      prepared_by: "Dana Reyes",
+      tax_amount: 103.95,
+      subtotal: 1260,
+      total: 1363.95,
+    });
+    expect(auditMock.mock.calls[0][0].event_category).toBe("billing");
+  });
+
+  // Nullable columns so a renderer can tell "not recorded" from "recorded blank".
+  it("clears an emptied field to null rather than storing an empty string", async () => {
+    const supabase = createInvoiceEditMock({});
+    signIn("admin", supabase);
+
+    await updateInvoiceDetails(INVOICE_ID, { jobName: "   ", consultantName: null });
+
+    expect(findCall(supabase, "client_invoices", "update")?.payload).toMatchObject({
+      job_name: null,
+      consultant_name: null,
+    });
+  });
+
+  it("leaves a field alone when the edit does not mention it", async () => {
+    const supabase = createInvoiceEditMock({});
+    signIn("admin", supabase);
+
+    await updateInvoiceDetails(INVOICE_ID, { jobName: "Tower 3" });
+
+    const payload = findCall(supabase, "client_invoices", "update")?.payload as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("consultant_name");
+    expect(payload).not.toHaveProperty("client_agreement_ref");
+  });
+
+  it("refuses a non-admin, a non-draft invoice, and a negative tax", async () => {
+    const denied = createSupabaseMock({});
+    signIn("employee", denied);
+    expect((await updateInvoiceDetails(INVOICE_ID, { jobName: "Tower 3" })).ok).toBe(false);
+    expect(denied.calls).toHaveLength(0);
+
+    const issued = createInvoiceEditMock({ invoice: { status: "issued" } });
+    signIn("admin", issued);
+    const afterIssue = await updateInvoiceDetails(INVOICE_ID, { jobName: "Tower 3" });
+    expect(afterIssue.ok).toBe(false);
+    expect(afterIssue.error).toContain("Only a draft invoice can be edited");
+    expect(findCall(issued, "client_invoices", "update")).toBeUndefined();
+
+    const negative = createInvoiceEditMock({});
+    signIn("admin", negative);
+    const refused = await updateInvoiceDetails(INVOICE_ID, { taxAmount: -1 });
+    expect(refused.ok).toBe(false);
+    expect(refused.fieldErrors?.taxAmount).toBeTruthy();
+    expect(findCall(negative, "client_invoices", "update")).toBeUndefined();
+  });
+
+  it("refuses a value past the column CHECK rather than letting it fail as a 23514", async () => {
+    const supabase = createInvoiceEditMock({});
+    signIn("admin", supabase);
+
+    const result = await updateInvoiceDetails(INVOICE_ID, { clientAgreementRef: "P".repeat(121) });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("120 characters");
+    expect(supabase.calls).toHaveLength(0);
+  });
+});
+
+describe("loadInvoiceLines", () => {
+  it("returns the lines and the header figures for an employee who may read them", async () => {
+    const supabase = createInvoiceEditMock({ invoice: { tax_amount: 60 } });
+    signIn("marketing", supabase);
+
+    const result = await loadInvoiceLines(INVOICE_ID);
+
+    expect(result.ok).toBe(true);
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines?.[0]).toMatchObject({ quantity: 12, unitAmount: 105, unit: "Seat", qtyBasis: "attendee" });
+    expect(result.taxAmount).toBe(60);
+    // Reading is not editing: this role cannot write client_invoices.
+    expect(result.editable).toBe(false);
+  });
+
+  it("reports a draft as editable only for an admin", async () => {
+    const draft = createInvoiceEditMock({});
+    signIn("admin", draft);
+    expect((await loadInvoiceLines(INVOICE_ID)).editable).toBe(true);
+
+    const issued = createInvoiceEditMock({ invoice: { status: "issued" } });
+    signIn("admin", issued);
+    expect((await loadInvoiceLines(INVOICE_ID)).editable).toBe(false);
+  });
+
+  // A row written before the migration reads as flat, which is the basis that
+  // cannot re-price anything on its own.
+  it("reads a pre-migration line as a flat fee rather than guessing", async () => {
+    const supabase = createInvoiceEditMock({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      lines: [{ id: LINE_ID, description: "Legacy line", quantity: 3, unit_amount: 100, line_total: 300, sort_order: 10 } as any],
+    });
+    signIn("admin", supabase);
+
+    const result = await loadInvoiceLines(INVOICE_ID);
+
+    expect(result.lines?.[0]).toMatchObject({ qtyBasis: "flat", unit: "", serviceDate: null });
+  });
+
+  // PostgREST hands numeric columns back as strings often enough that reading
+  // them as numbers without coercion is a silent NaN in a money total.
+  it("coerces numeric columns that arrive as strings", async () => {
+    const supabase = createInvoiceEditMock({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      lines: [seatLine({ quantity: "12.00", unit_amount: "105.00", line_total: "1260.00" } as any)],
+    });
+    signIn("admin", supabase);
+
+    const result = await loadInvoiceLines(INVOICE_ID);
+
+    expect(result.lines?.[0].quantity).toBe(12);
+    expect(result.lines?.[0].unitAmount).toBe(105);
+  });
+});

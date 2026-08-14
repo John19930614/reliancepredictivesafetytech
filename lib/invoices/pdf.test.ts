@@ -292,6 +292,31 @@ describe("renderInvoicePdf", () => {
     expect(text).toContain("--");
   });
 
+  it("keeps the header labels on one line each and wraps an over-long value", async () => {
+    // The reference stack draws the label leftwards and the value rightwards in
+    // the same strip. A label that wraps reads as two fields, and a long value
+    // drawn as a single right-aligned run grows straight through its own label —
+    // so the label column is sized for the longest label the document has, and
+    // the value is wrapped inside its own column rather than allowed to bleed.
+    const text = (
+      await drawnPages(
+        await renderInvoicePdf({
+          model: modelFor({ referenceProposalNumber: "WONDFOUSA-NORTHERN-DIVISION-2026-001-REV-C" }),
+        }),
+      )
+    ).join("\n");
+
+    // Each label survives as one contiguous drawn run.
+    for (const label of ["INVOICE #", "DATE", "REFERENCE PROPOSAL NUMBER"]) {
+      expect(text).toContain(label);
+    }
+    // The long value was broken up rather than drawn as one overflowing run.
+    // It carries no spaces, so wrapText hard-splits it — which is the branch
+    // that keeps it inside its column.
+    expect(text).toContain("WONDFOUSA");
+    expect(text).not.toContain("WONDFOUSA-NORTHERN-DIVISION-2026-001-REV-C");
+  });
+
   it("does not throw on characters pdf-lib's standard fonts cannot encode", async () => {
     // The character-folding guard, exercised through the real renderer rather
     // than only through toPdfText: an unfolded character reaches drawText and

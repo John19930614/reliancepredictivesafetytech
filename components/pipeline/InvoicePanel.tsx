@@ -35,7 +35,13 @@ import {
   updateInvoiceDetails,
   type InvoiceLineView,
 } from "@/app/employee/clients/[id]/workflow/actions";
-import { isQuantityBasis, lineTotalFor, quantityBases, type QuantityBasis } from "@/lib/invoices/draft";
+import {
+  isQuantityBasis,
+  lineTotalFor,
+  quantityBases,
+  type InvoiceLineEdit,
+  type QuantityBasis,
+} from "@/lib/invoices/draft";
 
 export interface InvoiceView {
   id: string;
@@ -232,7 +238,9 @@ export function InvoicePanel({
     const entry = loaded[invoice.id];
     if (!entry) return;
 
-    const edits = [];
+    // Only the fields this form actually offers. An omitted field is left as
+    // stored, so a form with no price box cannot blank a price.
+    const edits: InvoiceLineEdit[] = [];
     for (const line of entry.lines) {
       const draft = lineDrafts[line.id];
       if (!draft) continue;
@@ -361,7 +369,10 @@ export function InvoicePanel({
                 </div>
 
                 {isOpen ? (
-                  <div className="wf-invoice-lines">
+                  // .wf-invoice-form is the existing "panel section" rule — a
+                  // grid with a rule above it. Reused rather than adding a class
+                  // to globals.css for one container.
+                  <div className="wf-invoice-form">
                     {!entry && loadingLines ? <p className="wf-step-note">Reading the lines…</p> : null}
 
                     {entry && entry.lines.length === 0 ? (

@@ -268,28 +268,49 @@ function drawMasthead(layout: Layout, model: InvoiceDocumentModel, seal: Awaited
   if (seal) {
     layout.page.drawImage(seal, { x: MARGIN_X, y: top - sealSize, width: sealSize, height: sealSize });
   }
+  // The identity column is width-limited so a long firm name can never run into
+  // the reference stack on its right; it wraps instead, and a third line still
+  // clears the stack horizontally.
   const textX = seal ? MARGIN_X + sealSize + 12 : MARGIN_X;
-  for (const [index, line] of wrapText(model.wordmark, layout.fonts.bold, 14, 230).slice(0, 2).entries()) {
-    layout.page.drawText(line, { x: textX, y: top - 14 - index * 16, size: 14, font: layout.fonts.bold, color: NAVY });
+  const stackLabelX = PAGE_WIDTH - MARGIN_X - 258;
+  const wordmarkWidth = stackLabelX - textX - 12;
+  for (const [index, line] of wrapText(model.wordmark, layout.fonts.bold, 12.5, wordmarkWidth).slice(0, 3).entries()) {
+    layout.page.drawText(line, { x: textX, y: top - 13 - index * 14, size: 12.5, font: layout.fonts.bold, color: NAVY });
   }
 
   // The word INVOICE, right-aligned above the reference rows.
   layout.rightText(model.stamp, top - 16, { font: layout.fonts.bold, size: 20, color: NAVY });
 
-  // Right-hand stack. Labels start at a fixed left edge so the three of them
-  // line up; values are flush right, which is where the eye looks for a number.
-  const labelX = PAGE_WIDTH - MARGIN_X - 250;
+  // The reference stack: label left, value flush right, which is where a reader
+  // looks for a number. BOTH sides are wrapped inside their own column rather
+  // than drawn as single runs — a long client PO or a 40-character proposal
+  // number, right-aligned, would otherwise grow leftwards straight through its
+  // own label.
+  // "REFERENCE PROPOSAL NUMBER" is the longest label the document has, and it
+  // measures 103.6pt at 6.2 — the column is sized to hold it on ONE line, since
+  // a wrapped label reads as two fields. The value column then holds a
+  // 21-character invoice number (106.3pt at 8.4) with room to spare.
+  const labelSize = 6.2;
+  const labelWidth = 116;
+  const valueWidth = 258 - labelWidth - 10;
+  const rowLine = 9.6;
   let rowY = top - 36;
   for (const row of model.headerRows) {
-    layout.page.drawText(toPdfText(row.label), {
-      x: labelX,
-      y: rowY,
-      size: 6.8,
-      font: layout.fonts.bold,
-      color: MUTED,
+    const labelLines = wrapText(row.label, layout.fonts.bold, labelSize, labelWidth);
+    const valueLines = wrapText(row.value, layout.fonts.bold, 8.4, valueWidth);
+    labelLines.forEach((line, index) => {
+      layout.page.drawText(line, {
+        x: stackLabelX,
+        y: rowY - index * rowLine,
+        size: labelSize,
+        font: layout.fonts.bold,
+        color: MUTED,
+      });
     });
-    layout.rightText(row.value, rowY, { font: layout.fonts.bold, size: 8.4, color: INK });
-    rowY -= 12;
+    valueLines.forEach((line, index) => {
+      layout.rightText(line, rowY - index * rowLine, { font: layout.fonts.bold, size: 8.4, color: INK });
+    });
+    rowY -= Math.max(labelLines.length, valueLines.length, 1) * rowLine + 2.4;
   }
 
   layout.y = Math.min(top - sealSize - 10, rowY - 6);
@@ -298,19 +319,43 @@ function drawMasthead(layout: Layout, model: InvoiceDocumentModel, seal: Awaited
   layout.space(14);
 }
 
-/** The letterhead block and the TO block, side by side on one row. */
+/**
+ * The letterhead block and the TO block, side by side on one row.
+ *
+ * Measured before anything is drawn, so the pair is placed as a unit rather than
+ * running off the bottom of the sheet: the two columns advance their own cursors
+ * independently, which means neither of them passes through Layout.ensure() on
+ * the way down.
+ */
 function drawParties(layout: Layout, model: InvoiceDocumentModel): void {
   const columnWidth = (CONTENT_WIDTH - 24) / 2;
   const size = 8;
   const lineHeight = size * 1.34;
+
+  const measure = (block: InvoiceDocumentModel["firm"]) => {
+    const nameLines = wrapText(block.name, layout.fonts.bold, size + 0.6, columnWidth);
+    const bodyLines = block.lines.flatMap((entry) => wrapText(entry, layout.fonts.regular, size, columnWidth));
+    return {
+      nameLines,
+      bodyLines,
+      height: (block.heading ? 12 : 0) + (nameLines.length + bodyLines.length) * lineHeight,
+    };
+  };
+
+  const blocks = [
+    { block: model.firm, x: MARGIN_X, ...measure(model.firm) },
+    { block: model.billTo, x: MARGIN_X + columnWidth + 24, ...measure(model.billTo) },
+  ];
+
+  layout.ensure(Math.max(...blocks.map((entry) => entry.height)) + 12);
   const top = layout.y;
 
-  const drawBlock = (block: InvoiceDocumentModel["firm"], x: number): number => {
+  for (const entry of blocks) {
     let y = top;
-    if (block.heading) {
+    if (entry.block.heading) {
       y -= 8;
-      layout.page.drawText(toPdfText(block.heading), {
-        x,
+      layout.page.drawText(toPdfText(entry.block.heading), {
+        x: entry.x,
         y,
         size: 7,
         font: layout.fonts.bold,
@@ -318,23 +363,17 @@ function drawParties(layout: Layout, model: InvoiceDocumentModel): void {
       });
       y -= 4;
     }
-    for (const line of wrapText(block.name, layout.fonts.bold, size + 0.6, columnWidth)) {
+    for (const line of entry.nameLines) {
       y -= lineHeight;
-      layout.page.drawText(line, { x, y, size: size + 0.6, font: layout.fonts.bold, color: NAVY });
+      layout.page.drawText(line, { x: entry.x, y, size: size + 0.6, font: layout.fonts.bold, color: NAVY });
     }
-    for (const entry of block.lines) {
-      for (const line of wrapText(entry, layout.fonts.regular, size, columnWidth)) {
-        y -= lineHeight;
-        layout.page.drawText(line, { x, y, size, font: layout.fonts.regular, color: INK });
-      }
+    for (const line of entry.bodyLines) {
+      y -= lineHeight;
+      layout.page.drawText(line, { x: entry.x, y, size, font: layout.fonts.regular, color: INK });
     }
-    return y;
-  };
+  }
 
-  const firmBottom = drawBlock(model.firm, MARGIN_X);
-  const billToBottom = drawBlock(model.billTo, MARGIN_X + columnWidth + 24);
-
-  layout.y = Math.min(firmBottom, billToBottom);
+  layout.y = top - Math.max(...blocks.map((entry) => entry.height));
   layout.space(12);
 }
 
