@@ -10,7 +10,18 @@
 // Steps 4–11 fall back to the generic step content until their own panels are
 // built, so the lifecycle is walkable end to end rather than eight blank pages.
 
-import { AlertTriangle, Inbox, ScanSearch, UserCheck } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, FileSearch, Inbox, PenLine, Receipt, ScanSearch, Scale, UserCheck } from "lucide-react";
+import {
+  acceptedProposal,
+  billedInvoices,
+  leadProposal,
+  openLegalIssues,
+  signatureState,
+  type DealContext,
+  type DealProposal,
+} from "@/lib/lifecycle/deal-context";
+import { ProposalLink } from "@/components/lifecycle/ProposalLink";
 import type { LeadContext } from "@/lib/lifecycle/lead-context";
 import { scoreBand } from "@/lib/lifecycle/lead-context";
 import type { OpportunityRow } from "@/lib/lifecycle/types";
@@ -498,4 +509,359 @@ function toDraft(row: QualificationRow | null): QualificationDraft {
     hasNeed: row?.has_need ?? false,
     hasTimeline: row?.has_timeline ?? false,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Steps 7-10 — the proposal, the review, the paperwork, the money            */
+/* -------------------------------------------------------------------------- */
+
+function money(amount: number | null, currency = "USD"): string {
+  if (amount === null || !Number.isFinite(amount)) return "—";
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(amount);
+  } catch {
+    return `${currency} ${amount.toFixed(0)}`;
+  }
+}
+
+const proposalTone: Record<string, string> = {
+  draft: "neutral",
+  in_review: "warn",
+  sent: "warn",
+  accepted: "good",
+  declined: "bad",
+  archived: "neutral",
+};
+
+function proposalLabel(proposal: DealProposal): string {
+  return [proposal.proposal_number, proposal.title].filter(Boolean).join(" — ") || "Proposal";
+}
+
+/** Step 7 — Solution & Proposal. */
+export function SolutionProposalPanels({
+  opportunity,
+  deal,
+  clients,
+  canManage,
+}: {
+  opportunity: OpportunityRow;
+  deal: DealContext;
+  clients: Array<{ id: string; name: string }>;
+  canManage: boolean;
+}) {
+  if (deal.linkUnavailable) {
+    return (
+      <LifecyclePanel title="Solution &amp; Proposal">
+        <p className="lc-empty">
+          <AlertTriangle aria-hidden="true" size={14} /> Proposal linking is not set up in Supabase yet. Apply the
+          latest database migrations and try again.
+        </p>
+      </LifecyclePanel>
+    );
+  }
+
+  const lead = leadProposal(deal.proposals);
+
+  return (
+    <>
+      <LifecyclePanel
+        aside={
+          deal.proposals.length > 0 ? (
+            <span className="lc-pill lc-pill-good">{deal.proposals.length} linked</span>
+          ) : (
+            <span className="lc-pill lc-pill-warn">None yet</span>
+          )
+        }
+        title="Proposal for this deal"
+      >
+        <ProposalLink
+          canManage={canManage}
+          clientId={opportunity.client_id}
+          clients={clients}
+          linkable={deal.linkable.map((proposal) => ({ id: proposal.id, label: proposalLabel(proposal) }))}
+          linked={deal.proposals.map((proposal) => ({ id: proposal.id, label: proposalLabel(proposal) }))}
+          opportunityId={opportunity.id}
+        />
+      </LifecyclePanel>
+
+      {lead ? (
+        <LifecyclePanel
+          aside={<span className={`lc-pill lc-pill-${proposalTone[lead.status] ?? "neutral"}`}>{lead.status}</span>}
+          title="Pricing"
+        >
+          <LifecycleFacts
+            rows={[
+              { label: "Proposal", value: proposalLabel(lead) },
+              { label: "Value", value: money(lead.proposal_value) },
+              { label: "Revision", value: `v${lead.current_revision}` },
+              { label: "Valid until", value: lead.valid_until ? formatDate(lead.valid_until) : "—" },
+            ]}
+          />
+          {/* The deal record and the document can disagree; saying so beats
+              silently showing two numbers on two screens. */}
+          {lead.proposal_value !== null && Number(lead.proposal_value) !== Number(opportunity.value) ? (
+            <p className="lc-meta">
+              The opportunity is recorded at {money(opportunity.value, opportunity.currency)}, which does not match the
+              proposal. Update whichever is stale.
+            </p>
+          ) : null}
+        </LifecyclePanel>
+      ) : null}
+    </>
+  );
+}
+
+/** Step 8 — Proposal Review. */
+export function ProposalReviewPanels({ deal }: { deal: DealContext }) {
+  const lead = leadProposal(deal.proposals);
+
+  if (!lead) {
+    return (
+      <LifecyclePanel title="Proposal Review">
+        <p className="lc-empty">
+          <FileSearch aria-hidden="true" size={14} /> No proposal is linked to this deal, so there is nothing to review.
+          Link one on the Solution &amp; Proposal step.
+        </p>
+      </LifecyclePanel>
+    );
+  }
+
+  const decisions = deal.approvals.filter((approval) => approval.proposal_id === lead.id);
+  const links = deal.shareLinks.filter((link) => link.proposal_id === lead.id);
+  const views = links.reduce((sum, link) => sum + (link.view_count ?? 0), 0);
+  const lastViewed = links
+    .map((link) => link.last_viewed_at)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1);
+
+  return (
+    <>
+      <LifecyclePanel
+        aside={<span className={`lc-pill lc-pill-${proposalTone[lead.status] ?? "neutral"}`}>{lead.status}</span>}
+        title="Proposal Status"
+      >
+        <LifecycleFacts
+          rows={[
+            { label: "Proposal", value: proposalLabel(lead) },
+            { label: "Revision", value: `v${lead.current_revision}` },
+            { label: "Value", value: money(lead.proposal_value) },
+            { label: "Accepted", value: lead.accepted_at ? formatDate(lead.accepted_at) : "—" },
+            { label: "Declined", value: lead.declined_at ? formatDate(lead.declined_at) : "—" },
+          ]}
+        />
+        {lead.decline_reason ? <p className="lc-meta">Reason given: {lead.decline_reason}</p> : null}
+      </LifecyclePanel>
+
+      <LifecyclePanel
+        aside={
+          views > 0 ? (
+            <span className="lc-pill lc-pill-good">{views} views</span>
+          ) : (
+            <span className="lc-pill lc-pill-warn">Unopened</span>
+          )
+        }
+        title="Client Engagement"
+      >
+        {links.length === 0 ? (
+          <p className="lc-empty">No share link has been issued, so the client has not seen this document yet.</p>
+        ) : (
+          <LifecycleFacts
+            rows={[
+              { label: "Share links", value: String(links.length) },
+              { label: "Total views", value: String(views) },
+              { label: "Last opened", value: lastViewed ? formatDate(lastViewed) : "Never opened" },
+              {
+                label: "Live links",
+                value: String(links.filter((link) => !link.revoked_at && new Date(link.expires_at) > new Date()).length),
+              },
+            ]}
+          />
+        )}
+      </LifecyclePanel>
+
+      <LifecyclePanel
+        aside={<span className="lc-pill lc-pill-neutral">{decisions.length}</span>}
+        title="Internal Approvals"
+        wide
+      >
+        {decisions.length === 0 ? (
+          <p className="lc-empty">
+            No approval decision recorded. A proposal reaches the client only after an approver has reviewed the exact
+            revision being sent — that gate lives in the Proposals module.
+          </p>
+        ) : (
+          <ol className="lc-history">
+            {decisions.map((decision) => (
+              <li
+                className={`lc-history-row lc-history-${decision.decision === "approved" ? "advance" : "skip"}`}
+                key={decision.id}
+              >
+                <strong>
+                  {decision.decision === "approved" ? "Approved" : "Changes requested"} · v{decision.revision_number}
+                </strong>
+                <span className="lc-history-meta">{formatDate(decision.decided_at)}</span>
+                {decision.note ? <p className="lc-history-reason">{decision.note}</p> : null}
+              </li>
+            ))}
+          </ol>
+        )}
+        {decisions.length > 0 && decisions[0].revision_number !== lead.current_revision ? (
+          <p className="lc-meta">
+            The newest decision covers v{decisions[0].revision_number}, but the proposal is now on v
+            {lead.current_revision}. It needs re-approving before it can be sent again.
+          </p>
+        ) : null}
+      </LifecyclePanel>
+    </>
+  );
+}
+
+/** Step 9 — Negotiation / Approval. */
+export function NegotiationPanels({ deal }: { deal: DealContext }) {
+  const open = openLegalIssues(deal.legalIssues);
+  const lead = leadProposal(deal.proposals);
+
+  return (
+    <>
+      <LifecyclePanel
+        aside={
+          open.length > 0 ? (
+            <span className="lc-pill lc-pill-warn">{open.length} open</span>
+          ) : (
+            <span className="lc-pill lc-pill-good">Clear</span>
+          )
+        }
+        title="Legal / Security / Insurance"
+      >
+        {deal.legalIssues.length === 0 ? (
+          <p className="lc-empty">
+            <Scale aria-hidden="true" size={14} /> No legal issues are logged against this company.
+          </p>
+        ) : (
+          <ul className="lc-capacity">
+            {deal.legalIssues.slice(0, 8).map((issue) => (
+              <li className="lc-capacity-row" key={issue.id}>
+                <span className="lc-capacity-name">{issue.title}</span>
+                <span className="lc-capacity-meta">
+                  {issue.severity} · {issue.status}
+                  {issue.due_date ? ` · due ${issue.due_date}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="lc-meta">
+          <Link href="/employee/legal-issues">Open the legal register</Link>
+        </p>
+      </LifecyclePanel>
+
+      <LifecyclePanel title="Terms on the table">
+        {lead ? (
+          <LifecycleFacts
+            rows={[
+              { label: "Proposal", value: proposalLabel(lead) },
+              { label: "Value", value: money(lead.proposal_value) },
+              { label: "Revision", value: `v${lead.current_revision}` },
+              { label: "Valid until", value: lead.valid_until ? formatDate(lead.valid_until) : "—" },
+            ]}
+          />
+        ) : (
+          <p className="lc-empty">No proposal is linked, so there are no terms to negotiate yet.</p>
+        )}
+      </LifecyclePanel>
+    </>
+  );
+}
+
+/** Step 10 — Commit / Contract. */
+export function CommitContractPanels({ opportunity, deal }: { opportunity: OpportunityRow; deal: DealContext }) {
+  const signature = signatureState(deal.envelopes);
+  const accepted = acceptedProposal(deal.proposals);
+  const billed = billedInvoices(deal.invoices);
+
+  return (
+    <>
+      <LifecyclePanel
+        aside={
+          signature.completed ? (
+            <span className="lc-pill lc-pill-good">Signed</span>
+          ) : signature.stalled ? (
+            <span className="lc-pill lc-pill-bad">{signature.latest?.status}</span>
+          ) : signature.sent ? (
+            <span className="lc-pill lc-pill-warn">Out for signature</span>
+          ) : (
+            <span className="lc-pill lc-pill-neutral">Not sent</span>
+          )
+        }
+        title="Signature"
+      >
+        {signature.latest ? (
+          <LifecycleFacts
+            rows={[
+              { label: "Recipient", value: signature.latest.recipient_name || signature.latest.recipient_email || "—" },
+              { label: "Sent", value: signature.latest.sent_at ? formatDate(signature.latest.sent_at) : "—" },
+              { label: "Completed", value: signature.latest.completed_at ? formatDate(signature.latest.completed_at) : "—" },
+              { label: "Signed copy", value: signature.latest.completed_file_id ? "Filed in File Center" : "—" },
+            ]}
+          />
+        ) : accepted ? (
+          <p className="lc-body">
+            The client accepted this proposal on {formatDate(accepted.accepted_at)} through its share link. No DocuSign
+            envelope was used, so acceptance itself is the record of commitment.
+          </p>
+        ) : (
+          <p className="lc-empty">
+            <PenLine aria-hidden="true" size={14} /> Nothing has gone out for signature yet.
+          </p>
+        )}
+      </LifecyclePanel>
+
+      <LifecyclePanel
+        aside={
+          billed.length > 0 ? (
+            <span className="lc-pill lc-pill-good">{billed.length} issued</span>
+          ) : (
+            <span className="lc-pill lc-pill-warn">Not billed</span>
+          )
+        }
+        title="Deposit / PO"
+      >
+        {deal.invoices.length === 0 ? (
+          <p className="lc-empty">
+            <Receipt aria-hidden="true" size={14} /> No invoice has been raised against this deal&apos;s proposal.
+          </p>
+        ) : (
+          <ul className="lc-capacity">
+            {deal.invoices.slice(0, 6).map((invoice) => (
+              <li className="lc-capacity-row" key={invoice.id}>
+                <span className="lc-capacity-name">
+                  {invoice.invoice_number} · {invoice.kind}
+                </span>
+                <span className="lc-capacity-meta">
+                  {invoice.status} · {money(invoice.total, invoice.currency)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {opportunity.client_id ? (
+          <p className="lc-meta">
+            <Link href={`/employee/clients/${opportunity.client_id}/workflow`}>Raise or issue an invoice</Link>
+          </p>
+        ) : null}
+      </LifecyclePanel>
+
+      <LifecyclePanel title="Commitment">
+        <LifecycleFacts
+          rows={[
+            { label: "Accepted proposal", value: accepted ? proposalLabel(accepted) : "—" },
+            { label: "Accepted on", value: accepted?.accepted_at ? formatDate(accepted.accepted_at) : "—" },
+            { label: "Contract value", value: money(accepted?.proposal_value ?? null) },
+            { label: "Deal value", value: money(opportunity.value, opportunity.currency) },
+          ]}
+        />
+      </LifecyclePanel>
+    </>
+  );
 }

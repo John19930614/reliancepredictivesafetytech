@@ -16,6 +16,8 @@ import {
   applyTriageDecision,
   createOpportunity,
   exitOpportunity,
+  linkOpportunityToClient,
+  linkProposalToOpportunity,
   markOpportunityQualified,
   reopenOpportunity,
   saveOpportunityQualification,
@@ -925,5 +927,265 @@ describe("markOpportunityQualified", () => {
     signIn("employee", supabase);
 
     expect((await markOpportunityQualified(OPP_ID, false)).ok).toBe(false);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Steps 7-10 — linking a proposal to the deal it prices                      */
+/* -------------------------------------------------------------------------- */
+
+const PROPOSAL_ID = "44444444-4444-4444-8444-444444444444";
+const OTHER_OPP_ID = "55555555-5555-4555-8555-555555555555";
+const OTHER_CLIENT_ID = "66666666-6666-4666-8666-666666666666";
+
+function proposalRow(over: Record<string, unknown> = {}) {
+  return {
+    id: PROPOSAL_ID,
+    title: "Predictive Maintenance — Year One",
+    client_id: CLIENT_ID,
+    opportunity_id: null,
+    ...over,
+  };
+}
+
+describe("linkOpportunityToClient", () => {
+  it("attaches a company to a deal that has none, and says so in the audit trail", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ client_id: null }) },
+      "company_clients:select": { data: { id: CLIENT_ID, name: "Northbridge Rail" } },
+      "opportunities:update": { data: [{ id: OPP_ID }] },
+    });
+    signIn("employee", supabase);
+
+    expect(await linkOpportunityToClient(OPP_ID, CLIENT_ID)).toEqual({ ok: true });
+
+    const write = findCall(supabase, "opportunities", "update");
+    expect(write?.payload).toEqual({ client_id: CLIENT_ID });
+    // Compare-and-set on the column being written: a concurrent attach must
+    // lose rather than be overwritten.
+    expect(write?.filters).toContainEqual(["is:client_id", null]);
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(revalidateMock).toHaveBeenCalled();
+  });
+
+  // Re-pointing a live deal would strand its proposals and invoices on the old
+  // account without a word.
+  it("refuses to move a deal that already belongs to another company", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ client_id: OTHER_CLIENT_ID }) },
+      "company_clients:select": { data: { id: CLIENT_ID, name: "Northbridge Rail" } },
+    });
+    signIn("employee", supabase);
+
+    const result = await linkOpportunityToClient(OPP_ID, CLIENT_ID);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("already belongs");
+    expect(findCall(supabase, "opportunities", "update")).toBeUndefined();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("is idempotent when the company is already the one asked for", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ client_id: CLIENT_ID }) },
+      "company_clients:select": { data: { id: CLIENT_ID, name: "Northbridge Rail" } },
+    });
+    signIn("employee", supabase);
+
+    expect(await linkOpportunityToClient(OPP_ID, CLIENT_ID)).toEqual({ ok: true });
+    expect(findCall(supabase, "opportunities", "update")).toBeUndefined();
+    // Nothing changed, so nothing is worth an audit row.
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("reports the race rather than reporting success when the write matches no row", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ client_id: null }) },
+      "company_clients:select": { data: { id: CLIENT_ID, name: "Northbridge Rail" } },
+      // PostgREST returns no error for an UPDATE that matched nothing.
+      "opportunities:update": { data: [] },
+    });
+    signIn("employee", supabase);
+
+    const result = await linkOpportunityToClient(OPP_ID, CLIENT_ID);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Reload");
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a company that does not exist, and a deal that has left the lifecycle", async () => {
+    const noClient = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ client_id: null }) },
+      "company_clients:select": { data: null },
+    });
+    signIn("employee", noClient);
+    expect((await linkOpportunityToClient(OPP_ID, CLIENT_ID)).ok).toBe(false);
+
+    const closed = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ client_id: null, status: "closed_lost" }) },
+      "company_clients:select": { data: { id: CLIENT_ID, name: "Northbridge Rail" } },
+    });
+    signIn("employee", closed);
+    expect((await linkOpportunityToClient(OPP_ID, CLIENT_ID)).ok).toBe(false);
+
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses malformed references without querying", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("employee", supabase);
+
+    expect((await linkOpportunityToClient("not-a-uuid", CLIENT_ID)).ok).toBe(false);
+    expect((await linkOpportunityToClient(OPP_ID, "not-a-uuid")).ok).toBe(false);
+    expect(supabase.calls).toHaveLength(0);
+  });
+
+  it("refuses a signed-out caller and a reader-only role", async () => {
+    const supabase = createSupabaseMock({});
+    signOut();
+    expect((await linkOpportunityToClient(OPP_ID, CLIENT_ID)).ok).toBe(false);
+    expect(supabase.calls).toHaveLength(0);
+  });
+});
+
+describe("linkProposalToOpportunity", () => {
+  it("links a proposal for the same company", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity() },
+      "client_proposals:select": { data: proposalRow() },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("employee", supabase);
+
+    expect(await linkProposalToOpportunity(OPP_ID, PROPOSAL_ID, true)).toEqual({ ok: true });
+
+    const write = findCall(supabase, "client_proposals", "update");
+    expect(write?.payload).toEqual({ opportunity_id: OPP_ID });
+    // `.is` rather than `.eq`: PostgREST renders eq.null as a comparison
+    // against the literal, which matches nothing.
+    expect(write?.filters).toContainEqual(["is:opportunity_id", null]);
+    expect(auditMock).toHaveBeenCalledTimes(1);
+  });
+
+  // A deal quietly priced by another account's contract is both wrong and hard
+  // to notice from either screen.
+  it("refuses a proposal that belongs to a different company", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ client_id: CLIENT_ID }) },
+      "client_proposals:select": { data: proposalRow({ client_id: OTHER_CLIENT_ID }) },
+    });
+    signIn("employee", supabase);
+
+    const result = await linkProposalToOpportunity(OPP_ID, PROPOSAL_ID, true);
+
+    expect(result).toEqual({ ok: false, error: "That proposal belongs to a different company." });
+    expect(findCall(supabase, "client_proposals", "update")).toBeUndefined();
+  });
+
+  it("refuses a proposal already linked to another opportunity", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity() },
+      "client_proposals:select": { data: proposalRow({ opportunity_id: OTHER_OPP_ID }) },
+    });
+    signIn("employee", supabase);
+
+    const result = await linkProposalToOpportunity(OPP_ID, PROPOSAL_ID, true);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("already linked");
+    expect(findCall(supabase, "client_proposals", "update")).toBeUndefined();
+  });
+
+  it("is idempotent when the proposal is already linked to this deal", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity() },
+      "client_proposals:select": { data: proposalRow({ opportunity_id: OPP_ID }) },
+    });
+    signIn("employee", supabase);
+
+    expect(await linkProposalToOpportunity(OPP_ID, PROPOSAL_ID, true)).toEqual({ ok: true });
+    expect(findCall(supabase, "client_proposals", "update")).toBeUndefined();
+  });
+
+  it("requires a company on the deal before a proposal can be linked", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ client_id: null }) },
+      "client_proposals:select": { data: proposalRow() },
+    });
+    signIn("employee", supabase);
+
+    const result = await linkProposalToOpportunity(OPP_ID, PROPOSAL_ID, true);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Attach this opportunity to a company");
+  });
+
+  it("unlinks, comparing against this opportunity so another deal's link survives", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity() },
+      "client_proposals:select": { data: proposalRow({ opportunity_id: OPP_ID }) },
+      "client_proposals:update": { data: [{ id: PROPOSAL_ID }] },
+    });
+    signIn("employee", supabase);
+
+    expect(await linkProposalToOpportunity(OPP_ID, PROPOSAL_ID, false)).toEqual({ ok: true });
+
+    const write = findCall(supabase, "client_proposals", "update");
+    expect(write?.payload).toEqual({ opportunity_id: null });
+    expect(write?.filters).toContainEqual(["opportunity_id", OPP_ID]);
+  });
+
+  it("refuses to unlink a proposal that is not linked to this deal", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity() },
+      "client_proposals:select": { data: proposalRow({ opportunity_id: OTHER_OPP_ID }) },
+    });
+    signIn("employee", supabase);
+
+    const result = await linkProposalToOpportunity(OPP_ID, PROPOSAL_ID, false);
+
+    expect(result.ok).toBe(false);
+    expect(findCall(supabase, "client_proposals", "update")).toBeUndefined();
+  });
+
+  it("reports the race rather than success when the write matches no row", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity() },
+      "client_proposals:select": { data: proposalRow() },
+      "client_proposals:update": { data: [] },
+    });
+    signIn("employee", supabase);
+
+    const result = await linkProposalToOpportunity(OPP_ID, PROPOSAL_ID, true);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Reload");
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses on a deal that has left the lifecycle, and on a missing proposal", async () => {
+    const closed = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ status: "disqualified" }) },
+      "client_proposals:select": { data: proposalRow() },
+    });
+    signIn("employee", closed);
+    expect((await linkProposalToOpportunity(OPP_ID, PROPOSAL_ID, true)).ok).toBe(false);
+
+    const missing = createSupabaseMock({
+      "opportunities:select": { data: opportunity() },
+      "client_proposals:select": { data: null },
+    });
+    signIn("employee", missing);
+    expect((await linkProposalToOpportunity(OPP_ID, PROPOSAL_ID, true)).ok).toBe(false);
+
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a signed-out caller without querying", async () => {
+    const supabase = createSupabaseMock({});
+    signOut();
+    expect((await linkProposalToOpportunity(OPP_ID, PROPOSAL_ID, true)).ok).toBe(false);
+    expect(supabase.calls).toHaveLength(0);
   });
 });

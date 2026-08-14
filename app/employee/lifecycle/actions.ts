@@ -846,6 +846,170 @@ export async function markOpportunityQualified(
   return { ok: true };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Steps 7-10 — the proposal that prices this deal                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Attaches a company to an opportunity.
+ *
+ * Steps 1-3 happen before anyone has decided a lead is worth a company record,
+ * so client_id is nullable — but a proposal cannot be written without one, which
+ * makes this the gate into step 7.
+ *
+ * Attaching only, never re-pointing: once a deal belongs to a company, moving it
+ * to another one would strand its proposals, its invoices and its legal review
+ * on the old account without a word. Detaching and re-attaching is not a gap to
+ * fill here either — that is a different, louder decision than this screen makes.
+ */
+export async function linkOpportunityToClient(
+  opportunityId: string,
+  clientId: string,
+): Promise<LifecycleActionResult> {
+  const { supabase, userId, role, canManage } = await getLifecycleAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
+  if (!canManage) return { ok: false, error: "You do not have permission to edit opportunities." };
+  if (!UUID.test(opportunityId) || !UUID.test(clientId)) return { ok: false, error: "Malformed reference." };
+
+  const [{ data: opportunityRow }, { data: clientRow }] = await Promise.all([
+    supabase.from("opportunities").select("id, name, status, client_id").eq("id", opportunityId).maybeSingle(),
+    supabase.from("company_clients").select("id, name").eq("id", clientId).maybeSingle(),
+  ]);
+
+  if (!opportunityRow) return { ok: false, error: NOT_FOUND };
+  if (!clientRow) return { ok: false, error: "That company was not found." };
+
+  const existing = opportunityRow as { name: string; status: string; client_id: string | null };
+  if (isClosed(existing.status)) {
+    return { ok: false, error: "This opportunity has left the lifecycle." };
+  }
+  if (existing.client_id === clientId) return { ok: true };
+  if (existing.client_id) {
+    return { ok: false, error: "This opportunity already belongs to another company." };
+  }
+
+  const { data: updated, error } = await supabase
+    .from("opportunities")
+    .update({ client_id: clientId })
+    .eq("id", opportunityId)
+    // Compare-and-set on the column being written: a concurrent attach wins and
+    // this one is told, rather than overwriting it.
+    .is("client_id", null)
+    .select("id");
+
+  if (error) return { ok: false, error: friendlyError(error, "Could not attach the company.") };
+  if (!Array.isArray(updated) || updated.length === 0) {
+    return { ok: false, error: "This opportunity was attached to a company while you were looking at it. Reload and try again." };
+  }
+
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "update",
+      "opportunity",
+      opportunityId,
+      userId,
+      `Attached "${existing.name}" to ${(clientRow as { name: string }).name}`,
+      { client_id: null },
+      { client_id: clientId },
+    ),
+    actor_role: role,
+  });
+
+  revalidateLifecycle(opportunityId);
+  return { ok: true };
+}
+
+/**
+ * Links a proposal to this deal, or unlinks it.
+ *
+ * A proposal may only be linked to an opportunity for the SAME company — the
+ * alternative is a deal quietly priced by another account's contract, which is
+ * both wrong and hard to notice.
+ *
+ * Nothing here writes proposal content. The proposal module owns drafting,
+ * review, sending and acceptance, including its maker-checker gate; this only
+ * records which deal a proposal belongs to.
+ */
+export async function linkProposalToOpportunity(
+  opportunityId: string,
+  proposalId: string,
+  link: boolean,
+): Promise<LifecycleActionResult> {
+  const { supabase, userId, role, canManage } = await getLifecycleAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
+  if (!canManage) return { ok: false, error: "You do not have permission to edit opportunities." };
+  if (!UUID.test(opportunityId) || !UUID.test(proposalId)) return { ok: false, error: "Malformed reference." };
+
+  const [{ data: opportunityRow }, { data: proposalRow }] = await Promise.all([
+    supabase.from("opportunities").select("id, name, status, client_id").eq("id", opportunityId).maybeSingle(),
+    supabase.from("client_proposals").select("id, title, client_id, opportunity_id").eq("id", proposalId).maybeSingle(),
+  ]);
+
+  if (!opportunityRow) return { ok: false, error: NOT_FOUND };
+  if (!proposalRow) return { ok: false, error: "Proposal not found." };
+
+  const opportunity = opportunityRow as { id: string; name: string; status: string; client_id: string | null };
+  const proposal = proposalRow as { id: string; title: string; client_id: string | null; opportunity_id: string | null };
+
+  if (isClosed(opportunity.status)) {
+    return { ok: false, error: "This opportunity has left the lifecycle." };
+  }
+
+  if (link) {
+    if (!opportunity.client_id) {
+      return { ok: false, error: "Attach this opportunity to a company before linking a proposal." };
+    }
+    if (proposal.client_id !== opportunity.client_id) {
+      return { ok: false, error: "That proposal belongs to a different company." };
+    }
+    if (proposal.opportunity_id === opportunityId) return { ok: true };
+    if (proposal.opportunity_id) {
+      return { ok: false, error: "That proposal is already linked to another opportunity." };
+    }
+  } else if (proposal.opportunity_id !== opportunityId) {
+    return { ok: false, error: "That proposal is not linked to this opportunity." };
+  }
+
+  // Compare-and-set on opportunity_id itself — the column being written — so a
+  // concurrent link from another deal loses instead of being overwritten. It
+  // has to be `.is(null)` rather than `.eq(null)`: PostgREST renders eq.null as
+  // a comparison against the literal, which matches nothing.
+  const write = supabase
+    .from("client_proposals")
+    .update({ opportunity_id: link ? opportunityId : null })
+    .eq("id", proposalId);
+
+  const { data: updated, error } = await (link
+    ? write.is("opportunity_id", null)
+    : write.eq("opportunity_id", opportunityId)
+  ).select("id");
+
+  if (error) return { ok: false, error: friendlyError(error, "Could not link the proposal.") };
+  if (!Array.isArray(updated) || updated.length === 0) {
+    return { ok: false, error: "That proposal changed while you were looking at it. Reload and try again." };
+  }
+
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "update",
+      "client_proposal",
+      proposalId,
+      userId,
+      link
+        ? `Linked proposal "${proposal.title}" to opportunity "${opportunity.name}"`
+        : `Unlinked proposal "${proposal.title}" from opportunity "${opportunity.name}"`,
+      { opportunity_id: proposal.opportunity_id },
+      { opportunity_id: link ? opportunityId : null },
+    ),
+    actor_role: role,
+  });
+
+  revalidateLifecycle(opportunityId);
+  revalidatePath("/employee/proposals");
+  revalidatePath(`/employee/proposals/${proposalId}`);
+  return { ok: true };
+}
+
 /** The columns a lifecycle read asks for. Re-exported so the page and the
  *  actions cannot drift; `"use server"` files may only export async functions,
  *  hence the wrapper rather than a bare const. */

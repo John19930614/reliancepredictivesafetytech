@@ -45,11 +45,16 @@ import { LifecycleStepActions } from "@/components/lifecycle/LifecycleStepAction
 import {
   AiTriagePanels,
   AssignOwnerPanels,
+  CommitContractPanels,
   DiscoveryPanels,
   LeadCapturedPanels,
+  NegotiationPanels,
+  ProposalReviewPanels,
   QualifiedPanels,
   SalesReviewPanels,
+  SolutionProposalPanels,
 } from "@/components/lifecycle/StepPanels";
+import { emptyDealContext, loadDealContext } from "@/lib/lifecycle/deal-context";
 import { findOwner, loadOwnerOptions } from "@/lib/lifecycle/owners";
 import type { QualificationRow } from "@/lib/lifecycle/qualification";
 import {
@@ -70,6 +75,10 @@ export const metadata: Metadata = {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const historyLimit = 12;
+const clientPickerLimit = 200;
+
+/** Steps whose panels run on proposals, paperwork and invoices. */
+const dealSteps = new Set(["solution_proposal", "proposal_review", "negotiation_approval", "commit_contract"]);
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -146,32 +155,46 @@ export default async function LifecycleRecordPage({ params }: PageProps) {
   const closed = isClosed(opportunity.status);
   const exit = lifecycleExit(opportunity.status);
 
-  const [clientResult, historyResult, leadContext, owners, qualificationResult] = await Promise.all([
-    opportunity.client_id
-      ? supabase.from("company_clients").select("id, name").eq("id", opportunity.client_id).maybeSingle()
-      : Promise.resolve({ data: null }),
-    supabase
-      .from("opportunity_stage_events")
-      .select("id, from_step, to_step, from_status, to_status, kind, reason, steps_skipped, changed_by, changed_at")
-      .eq("opportunity_id", id)
-      .order("changed_at", { ascending: false })
-      .limit(historyLimit),
-    loadLeadContext(supabase, opportunity.demo_request_id),
-    // Only read where the screen uses it: the roster is a service-role read, and
-    // steps that do not assign an owner should not pay for it.
-    step?.key === "assign_owner" && canManage ? loadOwnerOptions() : Promise.resolve([]),
-    supabase
-      .from("opportunity_qualification")
-      .select(
-        "opportunity_id, discovery_call_at, primary_need, pain_points, decision_makers, budget_range, timeline, has_budget, has_authority, has_need, has_timeline, competition, qualified_at, qualified_by, updated_at",
-      )
-      .eq("opportunity_id", id)
-      .maybeSingle(),
-  ]);
+  const onDealStep = dealSteps.has(opportunity.step);
+
+  const [clientResult, historyResult, leadContext, owners, qualificationResult, deal, clientsResult] =
+    await Promise.all([
+      opportunity.client_id
+        ? supabase.from("company_clients").select("id, name").eq("id", opportunity.client_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+      supabase
+        .from("opportunity_stage_events")
+        .select("id, from_step, to_step, from_status, to_status, kind, reason, steps_skipped, changed_by, changed_at")
+        .eq("opportunity_id", id)
+        .order("changed_at", { ascending: false })
+        .limit(historyLimit),
+      loadLeadContext(supabase, opportunity.demo_request_id),
+      // Only read where the screen uses it: the roster is a service-role read, and
+      // steps that do not assign an owner should not pay for it.
+      step?.key === "assign_owner" && canManage ? loadOwnerOptions() : Promise.resolve([]),
+      supabase
+        .from("opportunity_qualification")
+        .select(
+          "opportunity_id, discovery_call_at, primary_need, pain_points, decision_makers, budget_range, timeline, has_budget, has_authority, has_need, has_timeline, competition, qualified_at, qualified_by, updated_at",
+        )
+        .eq("opportunity_id", id)
+        .maybeSingle(),
+      // Six reads back the deal panels, so the other seven steps do not pay for
+      // them.
+      onDealStep ? loadDealContext(supabase, id, opportunity.client_id) : Promise.resolve(emptyDealContext),
+      // Only step 7 offers a company picker, and only for a deal that has no
+      // company yet — which is the one case where a proposal cannot be written.
+      step?.key === "solution_proposal" && canManage && !opportunity.client_id
+        ? supabase.from("company_clients").select("id, name").order("name", { ascending: true }).limit(clientPickerLimit)
+        : Promise.resolve({ data: [] }),
+    ]);
 
   const client = (clientResult?.data ?? null) as { id: string; name: string } | null;
   const history: OpportunityStageEventRow[] = Array.isArray(historyResult?.data)
     ? (historyResult.data as OpportunityStageEventRow[])
+    : [];
+  const clients: Array<{ id: string; name: string }> = Array.isArray(clientsResult?.data)
+    ? (clientsResult.data as Array<{ id: string; name: string }>)
     : [];
 
   // A missing qualification row is ordinary — most deals reach step 5 before
@@ -341,6 +364,12 @@ export default async function LifecycleRecordPage({ params }: PageProps) {
         {step?.key === "opportunity_qualified" ? (
           <QualifiedPanels canManage={canManage} opportunity={opportunity} qualification={qualification} />
         ) : null}
+        {step?.key === "solution_proposal" ? (
+          <SolutionProposalPanels canManage={canManage} clients={clients} deal={deal} opportunity={opportunity} />
+        ) : null}
+        {step?.key === "proposal_review" ? <ProposalReviewPanels deal={deal} /> : null}
+        {step?.key === "negotiation_approval" ? <NegotiationPanels deal={deal} /> : null}
+        {step?.key === "commit_contract" ? <CommitContractPanels deal={deal} opportunity={opportunity} /> : null}
 
         <LifecyclePanel
           aside={<Link href="/employee/lifecycle">All opportunities</Link>}
