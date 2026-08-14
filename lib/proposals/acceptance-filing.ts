@@ -37,8 +37,14 @@ type LooseClient = any;
  * area (or the company area for a proposal with no client assigned). Matched
  * case-insensitively, so a hand-made "proposals" folder is reused, not
  * duplicated — the sibling-name unique index is case-insensitive too.
+ *
+ * Declared in a pure sibling module and re-exported here: the client folder
+ * template seeds this same folder at creation, and it cannot import from a
+ * "server-only" module to learn the name.
  */
-export const acceptedProposalsFolderName = "Proposals";
+import { acceptedProposalsFolderName } from "@/lib/proposals/acceptance-filing-names";
+
+export { acceptedProposalsFolderName };
 
 /**
  * `<number> <title> (accepted vN).pdf`, capped to the File Center's 200-char

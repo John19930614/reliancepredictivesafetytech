@@ -3,9 +3,13 @@
 // Server actions for the Client Lifecycle.
 //
 // Every move an opportunity makes goes through here: Next Step, Skip to Step,
-// the three Exit Paths, and reopening. Nothing writes company_clients or
-// lifecycle_stage — the existing sales board is untouched and keeps running
-// beside this on its own field.
+// the three Exit Paths, and reopening.
+//
+// Opening a lead CREATES its company (see createOpportunity), because a lead is
+// a company as far as the rest of the platform is concerned and a deal with
+// none can hold no proposal, invoice or file. Nothing here writes
+// company_clients.lifecycle_stage, though — the sales board keeps that field to
+// itself, so the two systems never fight over which stage a company is on.
 //
 // EVERY WRITE IS COMPARE-AND-SET on the (step, status) the caller read.
 // PostgREST reports no error for an UPDATE that matched zero rows, so each
@@ -20,6 +24,7 @@ import { revalidatePath } from "next/cache";
 import { buildDataAuditEvent, recordAuditEvent } from "@/lib/audit/events";
 import { friendlyError } from "@/lib/friendly-error";
 import { getLifecycleAccess } from "@/lib/lifecycle/access";
+import { provisionClient, provisionWarning } from "@/lib/clients/provision";
 import { checkExitInput, isClosed, lifecycleExit } from "@/lib/lifecycle/exits";
 import {
   finalStepKey,
@@ -177,7 +182,7 @@ export interface CreateOpportunityInput {
  */
 export async function createOpportunity(
   input: CreateOpportunityInput,
-): Promise<LifecycleActionResult & { opportunityId?: string }> {
+): Promise<LifecycleActionResult & { opportunityId?: string; warning?: string }> {
   const { supabase, userId, role, canManage } = await getLifecycleAccess();
   if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
   if (!canManage) return { ok: false, error: "You do not have permission to open opportunities." };
@@ -202,11 +207,38 @@ export async function createOpportunity(
       ? input.expectedCloseDate
       : null;
 
+  // A lead IS a company, as far as the rest of the platform is concerned — the
+  // sales board has always created a company_clients row at stage Lead. The
+  // lifecycle was the outlier in allowing a deal with nothing behind it, and a
+  // deal with no company cannot hold a proposal, an invoice or a file.
+  //
+  // So a lead with no company named gets one, along with its checklist, its
+  // File Center folders and an empty profile for the estimator to fill.
+  let clientId = input.clientId || null;
+  let provisionNote: string | null = null;
+
+  if (!clientId) {
+    const provisioned = await provisionClient(supabase, userId, {
+      name,
+      source: input.source ?? null,
+      notes: input.notes ?? null,
+      companyType: input.industry ?? null,
+    });
+
+    if (!provisioned.ok) {
+      return { ok: false, error: provisioned.error ?? "Could not create the company for this lead." };
+    }
+    clientId = provisioned.clientId ?? null;
+    // Best-effort pieces report rather than fail: the deal and its company both
+    // exist, and a missing folder is a ten-second fix for whoever is told.
+    provisionNote = provisionWarning(provisioned);
+  }
+
   const { data: created, error } = await supabase
     .from("opportunities")
     .insert({
       name,
-      client_id: input.clientId || null,
+      client_id: clientId,
       demo_request_id: input.demoRequestId || null,
       step: firstStepKey,
       status: "open",
@@ -226,7 +258,10 @@ export async function createOpportunity(
 
   await recordAuditEvent({
     ...buildDataAuditEvent("create", "opportunity", created.id, userId, `Opened opportunity "${name}"`, null, {
-      client_id: input.clientId || null,
+      client_id: clientId,
+      // Distinguishes a deal opened against an existing account from one that
+      // brought its company into existence.
+      company_provisioned: !input.clientId,
       demo_request_id: input.demoRequestId || null,
       value,
     }),
@@ -234,7 +269,8 @@ export async function createOpportunity(
   });
 
   revalidateLifecycle(created.id);
-  return { ok: true, opportunityId: created.id };
+  if (clientId) revalidatePath(`/employee/clients/${clientId}`);
+  return { ok: true, opportunityId: created.id, warning: provisionNote ?? undefined };
 }
 
 /* -------------------------------------------------------------------------- */
