@@ -442,6 +442,20 @@ describe("computeProposalTotals — billing basis", () => {
     expect(delivered.total).toBe(2000);
   });
 
+  it("keeps a legacy line's wording while still inferring a basis for the maths", () => {
+    // No qty_basis stored: this row was written before the feature existed and
+    // may already be in a client's hands. The basis is inferred so the
+    // arithmetic is right, but the LABEL must stay exactly as it was sent —
+    // "3 Person", not "3 attendees".
+    const totals = services([{ key: "bbp", qty: 3, price: 105, unit: "Person" }]);
+    expect(totals.lineItems[0]).toMatchObject({
+      qtyBasis: "attendee",
+      qty: 3,
+      qtyLabel: "3 Person",
+      amount: 315,
+    });
+  });
+
   it("bills bloodborne pathogens by the head: 10 attendees at $105 is $1,050", () => {
     const totals = services([{ key: "bbp", qty: 10, price: 105, unit: "Person", qty_basis: "attendee" }]);
     expect(totals.lineItems[0]).toMatchObject({
@@ -478,8 +492,14 @@ describe("computeProposalTotals — billing basis", () => {
     expect(totals.lineItems[0]).toMatchObject({ qtyBasis: "hour", qtyLabel: "8 hours", amount: 1200 });
   });
 
-  it("derives the basis from the row's unit when the row stored none", () => {
-    // Which is what makes the label correct on the proposals already saved.
+  it("derives the basis from the row's unit for the maths, but keeps the sent wording", () => {
+    // The derived basis is what the arithmetic uses. The LABEL is not derived:
+    // these rows stored no basis, so they may already be in a client's hands,
+    // and "25 Person" has to keep reading "25 Person". This is the same
+    // guarantee the stored `unit` carries (see the note above buildItemLine): a
+    // proposal that has been sent does not get re-worded by a later feature.
+    // Touch the line in the editor and it stores a basis, and then it may say
+    // "25 attendees".
     const totals = services([
       { key: "genTraining", qty: 2, price: 750, unit: "Session" },
       { key: "osha10", qty: 25, price: 210, unit: "Person" },
@@ -487,9 +507,9 @@ describe("computeProposalTotals — billing basis", () => {
       { key: "mileage", qty: 120, price: 0.7, unit: "Mile" },
     ]);
     expect(totals.lineItems.map((row) => [row.qtyBasis, row.qtyLabel, row.amount])).toEqual([
-      ["session", "2 sessions", 1500],
-      ["attendee", "25 attendees", 5250],
-      ["hour", "6 hours", 1350],
+      ["session", "2 Session", 1500],
+      ["attendee", "25 Person", 5250],
+      ["hour", "6 Hour", 1350],
       [null, "120 Mile", 84],
     ]);
   });

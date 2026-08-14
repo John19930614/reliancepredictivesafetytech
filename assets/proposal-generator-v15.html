@@ -552,13 +552,13 @@ function addPhase(key='discovery',qty=1,price=null,desc=null){
  wrap.appendChild(div); update(); return div;
 }
 /* ---------------------------------------------------------------------------
-   BILLING BASIS \u2014 mirrors lib/proposals/qty-basis.ts. Keep the two in step;
+   BILLING BASIS. Mirrors lib/proposals/qty-basis.ts; keep the two in step,
    lib/proposals/catalog-parity.test.ts fails the build if they drift.
 
    `unit` used to be a label with no arithmetic behind it, so a class sold for
    the room and a course sold by the head were priced by the same
    multiplication. A lockout/tagout class is $1,000 for the session whatever the
-   headcount \u2014 three booked and one cancelled bills two sessions, $2,000 \u2014
+   headcount (three booked and one cancelled bills two sessions, $2,000),
    while bloodborne pathogens is quoted per attendee. The basis names which one
    a row is, prints itself on the Qty field and in the fee table, and for `flat`
    stops the quantity scaling the price at all.
@@ -584,7 +584,7 @@ function qtyCellLabel(basis,qty,unit){if(basis==='flat')return 'Flat fee'; if(ba
    from. Every other basis bills what was typed, floored at zero. */
 function billableQty(basis,qty){if(basis==='flat')return 1; const n=Number(qty); return isFinite(n)?Math.max(0,n):0;}
 /* Volume ladder: the highest threshold at or below the quantity reprices the
-   WHOLE quantity. No thresholds are defined in this file or in the platform \u2014
+   WHOLE quantity. No thresholds are defined in this file or in the platform:
    a line stays at its single rate until someone with pricing authority sets
    them, and `qty_tiers` only ever arrives with a row pushed in from there. */
 function tierRate(price,qty,tiers){const base=isFinite(price)?Math.max(0,price):0; if(!Array.isArray(tiers)||!tiers.length)return base; let rate=base; const list=tiers.slice().sort((a,b)=>(a&&a.min_qty||0)-(b&&b.min_qty||0)); for(const t of list){if(!t||!isFinite(t.min_qty)||!isFinite(t.price))continue; if(qty>=Math.max(0,t.min_qty))rate=Math.max(0,t.price);} return rate;}
@@ -599,7 +599,7 @@ function rowDelivery(el,o){if(o&&o.group&&o.group!=='Training Catalog')return nu
 function rowTiers(el){const raw=el.dataset.qtyTiers; if(!raw)return null; try{const v=JSON.parse(raw); return Array.isArray(v)&&v.length?v:null;}catch(err){return null;}}
 /* Folds any pushed-in basis/delivery into the row's controls (once), then
    relabels the Qty field and shows the delivery selector only where a delivery
-   is a real question \u2014 the taught courses. Idempotent; runs on every update(). */
+   is a real question: the taught courses. Idempotent; runs on every update(). */
 function syncServiceRows(){
  Array.prototype.forEach.call(document.querySelectorAll('.service'),function(el){
   const key=(el.querySelector('.svcKey')||{}).value, o=serviceOptions[key]||{};
@@ -763,8 +763,8 @@ function update(){
  if($('pDeliverablesNote'))$('pDeliverablesNote').textContent=_covered.length?('A deliverable package is produced for each selected line: '+_covered.join(', ')+'. Section 03 states the scope of each.'):'';
  /* Each row is priced through its billing basis, not by blanket multiplication:
     a flat line bills once whatever its quantity says, and a tiered rate steps
-    with the quantity. The Qty column prints what it counted \u2014 "2 sessions",
-    "10 attendees", "Flat fee" \u2014 so a number can never be read against the wrong
+    with the quantity. The Qty column prints what it counted ("2 sessions",
+    "10 attendees", "Flat fee"), so a number can never be read against the wrong
     thing. Mirrors buildItemLine() in lib/proposals/pricing.ts. */
  let rows=noPlatform?[]:[{name:p.name,desc:'Platform access for the '+(term.months?term.months+'-month ':'')+'term \u2014 includes '+p.users+' users and '+p.sites+' sites.',qty:1,price:p.price,unit:''}]; phases.forEach(x=>rows.push({name:x.name,desc:x.desc,qty:x.qty,price:x.price,unit:x.unit})); svcs.forEach(x=>rows.push({name:x.name,desc:x.desc,qty:x.qty,price:x.price,unit:x.unit,qty_basis:x.qty_basis,qty_tiers:x.qty_tiers,delivery_mode:x.delivery_mode}));
  const priced=rows.map(x=>{const r=priceRow(x); return {name:x.name,desc:x.desc,unit:x.unit,basis:coerceBasis(x.qty_basis),qty:r.qty,rate:r.rate,amount:r.amount};});
@@ -821,7 +821,7 @@ function packageChange(){
 /* Choosing a DIFFERENT service replaces the row's identity, so everything the
    old service brought with it goes: its custom name, its stored unit, its
    billing basis and its delivery mode. Keeping any of them is how a hotel line
-   ends up labelled "Attendees" \u2014 or priced as a flat fee \u2014 because the row used
+   ends up labelled "Attendees", or priced as a flat fee, because the row used
    to be a training course. The new service's own unit and basis apply, and
    syncServiceRows() (via update()) repaints the labels. */
 function optionChange(e){const sel=e.target; if(sel.classList.contains('phaseKey')){const o=phaseOptions[sel.value]; const row=sel.closest('.phase'); row.querySelector('.phasePrice').value=o.price; row.querySelector('.phaseDesc').value=o.desc;} if(sel.classList.contains('svcKey')){const o=serviceOptions[sel.value]; const row=sel.closest('.service'); row.querySelector('.svcPrice').value=o.price; row.querySelector('.svcDesc').value=o.desc; if(row.dataset.customName) delete row.dataset.customName; if(row.dataset.customUnit) delete row.dataset.customUnit; if(row.dataset.qtyTiers) delete row.dataset.qtyTiers; const bsel=row.querySelector('.svcBasis'); if(bsel) bsel.value=''; const dsel=row.querySelector('.svcDelivery'); if(dsel) dsel.value=''; const ql=row.querySelector('.qtyLabel'); if(ql) ql.textContent='Qty \u00b7 '+qtyFieldLabel(unitBasis(o.unit),o.unit);} update();}

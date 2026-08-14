@@ -671,6 +671,13 @@ describe("generator asset — the form follows the deal", () => {
 
     expect((row.querySelector(".svcPrice") as HTMLInputElement).value).toBe(String(serviceOptions.firstAid.price));
     expect((row.querySelector(".svcDesc") as HTMLInputElement).value).toBe(serviceOptions.firstAid.desc);
-    expect((row.querySelector(".qtyLabel") as HTMLElement).textContent).toContain(serviceOptions.firstAid.unit);
+    // The EDITOR caption names the billing basis, not the raw catalog unit:
+    // firstAid is priced per head, so "Attendees" tells the seller the quantity
+    // multiplies before they type one. This deliberately differs from the
+    // rendered document, which keeps a legacy line's original wording ("Person")
+    // because that document may already have been sent — see the qtyLabel note
+    // in lib/proposals/pricing.ts. Picking a service here stores a basis, after
+    // which the two agree.
+    expect((row.querySelector(".qtyLabel") as HTMLElement).textContent).toContain("Attendees");
   });
 });

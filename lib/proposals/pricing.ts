@@ -25,6 +25,7 @@ import {
 import { parseProposalTerm } from "./term";
 import {
   coerceDeliveryMode,
+  coerceQtyBasis,
   coerceQtyTiers,
   deliveryModeLabel,
   formatQtyLabel,
@@ -498,6 +499,17 @@ function buildItemLine(item: GeneratorItem, source: Exclude<ProposalLineSource, 
   // coerces. An unrecognized basis, a tier ladder made of strings, a delivery
   // mode of `{}` — each degrades to absent, which is legacy behaviour, rather
   // than throwing or inverting a total.
+  // STORED vs DERIVED matters, and only for the label.
+  //
+  // A line that names its own basis was written by someone who chose it, so it
+  // may say "12 attendees". A legacy line has no basis and we infer one from its
+  // unit — useful for arithmetic, but it must NOT rewrite the words on a
+  // document already in a client's hands: a sent proposal reading "12 Person"
+  // has to keep reading "12 Person". Same rule the type-profile copy follows.
+  //
+  // The inferred basis can never be `flat` (see unitToQtyBasis), so inferring
+  // one can never stop a legacy line multiplying.
+  const storedBasis = coerceQtyBasis(item.qty_basis);
   const qtyBasis = resolveQtyBasis(item.qty_basis, unit);
   const tiers = coerceQtyTiers(item.qty_tiers);
   const { qty, rate, amount } = priceQty(qtyBasis, storedQty, listPrice, tiers);
@@ -511,7 +523,7 @@ function buildItemLine(item: GeneratorItem, source: Exclude<ProposalLineSource, 
     unit,
     qtyBasis,
     qty,
-    qtyLabel: formatQtyLabel(qtyBasis, qty, unit),
+    qtyLabel: formatQtyLabel(storedBasis, qty, unit),
     price: rate,
     listPrice,
     deliveryMode,

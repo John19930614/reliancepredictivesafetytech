@@ -597,7 +597,12 @@ function toFeeRow(row: ProposalLineItem): DocumentFeeRow {
   return {
     ...row,
     unit,
-    qtyLabel: unit ? `${row.qty} ${unit}` : String(row.qty),
+    // qtyLabel arrives on the row from pricing, already aware of the quantity
+    // basis — "2 sessions", "10 attendees", "Flat fee". Recomputing it here as
+    // `${qty} ${unit}` is what it used to do, and that is wrong for a flat fee:
+    // a $2,500 retainer stored with a quantity of 4 would print "4 Site" beside
+    // an amount that never multiplied. Taking the spread's value gives the
+    // document, the PDF and the DOCX the same label from one place.
     priceLabel: formatLineAmount(row.price),
     amountLabel: formatLineAmount(row.amount),
   };
