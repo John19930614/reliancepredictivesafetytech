@@ -297,7 +297,12 @@ comment on function public.allocate_client_invoice_number() is
 -- Replaced with the new scheme rather than dropped: renumbering a DRAFT is
 -- legitimate and useful (nobody has seen it), and removing it would leave a
 -- client's first proposals stranded on the house series forever.
-create or replace function public.renumber_client_draft_proposals(p_client_id uuid)
+-- The parameter keeps its original name. CREATE OR REPLACE cannot rename an
+-- input parameter (42P13), so calling it p_client_id here would have made the
+-- whole migration fail to apply — caught by rehearsing it rather than reading
+-- it. Dropping the function first would work too, but it is reachable by RPC
+-- and a drop leaves a window where the app's assign-code path 404s.
+create or replace function public.renumber_client_draft_proposals(p_client uuid)
 returns integer
 language plpgsql
 security definer
@@ -310,7 +315,7 @@ declare
   v_year    integer;
   v_seq     integer;
 begin
-  select client_code into v_code from public.company_clients where id = p_client_id;
+  select client_code into v_code from public.company_clients where id = p_client;
   if v_code is null or btrim(v_code) = '' then
     return 0;
   end if;
@@ -321,12 +326,12 @@ begin
   for v_row in
     select id, coalesce(created_at, now()) as created_at
       from public.client_proposals
-     where client_id = p_client_id
+     where client_id = p_client
        and status = 'draft'
      order by created_at
   loop
     v_year := extract(year from v_row.created_at)::integer;
-    v_seq  := public.next_client_document_seq(p_client_id, v_year, 'proposal');
+    v_seq  := public.next_client_document_seq(p_client, v_year, 'proposal');
 
     update public.client_proposals
        set proposal_number = v_code || '-' || v_year::text || '-'
