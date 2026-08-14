@@ -9030,6 +9030,13 @@ a.platform-card:hover {
   border: 1px solid #e0e4e8;
   border-radius: 8px;
   background: #fff;
+  /* body sets color: var(--white) against the dark shell, so a panel that
+     paints itself white MUST re-set the text colour — without this, every
+     child that does not name its own colour renders white on white. That was
+     the invoice number and the invoice total: the two things the panel exists
+     to show. The muted meta line, the badges and the buttons all survived
+     because each sets a colour of its own, which is what made it easy to miss. */
+  color: #111;
   box-shadow: 0 16px 42px rgba(15, 23, 42, 0.07);
 }
 
@@ -10175,4 +10182,36 @@ a.platform-card:hover {
 
 .lc-estimate-drivers span {
   color: var(--portal-muted);
+}
+
+/* A provisioning failure holds the New Opportunity form rather than scrolling
+   past — the deal exists, but something it needs does not, and the operator
+   has to see which before moving on. */
+.lc-provision-warning {
+  margin: 0 0 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(180, 35, 24, 0.4);
+  border-radius: 10px;
+  background: rgba(180, 35, 24, 0.08);
+  color: var(--white);
+}
+
+.lc-provision-warning p {
+  margin: 0 0 0.7rem;
+  line-height: 1.5;
+}
+
+/* The "this company is not fully set up" panel on a client record.
+   A gold left edge rather than the red of .lc-provision-warning: nothing has
+   gone wrong, the record is simply older than the provisioning that would have
+   filled it in, and the button beside this fixes it in one press. */
+.lc-setup-banner {
+  border-left: 3px solid var(--portal-gold);
+}
+
+.lc-setup-banner .lc-panel-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--portal-gold);
 }

@@ -25,7 +25,7 @@ import {
   type CompanyActionResult,
 } from "@/app/employee/clients/[id]/actions";
 import { formatAddressLines } from "@/lib/proposals/client-contacts";
-import { clientCodeRule, formatClientProposalNumber, suggestClientCode } from "@/lib/proposals/client-codes";
+import { clientCodeRule, formatClientDocumentNumber, formatClientInvoiceNumber, suggestClientCode } from "@/lib/proposals/client-codes";
 
 export interface CompanyContactRow {
   id: string;
@@ -62,11 +62,14 @@ export function CompanyAddressAndContacts({
   address: CompanyAddressFields;
   contacts: CompanyContactRow[];
 }) {
+  // Only ever used in example copy — the real number takes the year the
+  // document is issued in, allocated by the database.
+  const exampleYear = new Date().getUTCFullYear();
   const [isPending, startTransition] = useTransition();
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  const [savedCode, setSavedCode] = useState((clientCode ?? "").trim().toUpperCase());
+  const [savedCode, setSavedCode] = useState((clientCode ?? "").trim());
   const [codeDraft, setCodeDraft] = useState(() => savedCode || suggestClientCode(clientName));
 
   const [addressDraft, setAddressDraft] = useState({
@@ -117,8 +120,9 @@ export function CompanyAddressAndContacts({
       </h3>
       {savedCode ? (
         <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem", marginTop: 6 }}>
-          Proposals for this company are numbered <strong>{formatClientProposalNumber(savedCode, 1)}</strong>,{" "}
-          {formatClientProposalNumber(savedCode, 2)}, … The code stays fixed once documents are numbered under it.
+          Documents for this company are numbered <strong>{formatClientDocumentNumber(savedCode, exampleYear, 1)}</strong>{" "}
+          for proposals and <strong>{formatClientInvoiceNumber(savedCode, exampleYear, 1)}</strong> for invoices. The
+          sequence restarts each January; the code stays fixed once documents are numbered under it.
         </p>
       ) : (
         <form
@@ -127,14 +131,15 @@ export function CompanyAddressAndContacts({
             const attempted = codeDraft;
             run(
               () => assignClientCode(clientId, attempted),
-              `Code ${attempted.trim().toUpperCase()} assigned — this company's draft proposals now number from ${formatClientProposalNumber(attempted, 1)}.`,
-              () => setSavedCode(attempted.trim().toUpperCase()),
+              `Code ${attempted.trim()} assigned — this company's draft proposals now number from ${formatClientDocumentNumber(attempted, exampleYear, 1)}.`,
+              () => setSavedCode(attempted.trim()),
             );
           }}
         >
           <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem", marginTop: 6 }}>
             No code yet. Whoever writes this company&apos;s first proposal assigns it — {clientCodeRule} Numbers then run{" "}
-            {formatClientProposalNumber(codeDraft || "SE", 1)}, {formatClientProposalNumber(codeDraft || "SE", 2)}, … per
+            {formatClientDocumentNumber(codeDraft || "Wondfo", exampleYear, 1)},{" "}
+            {formatClientInvoiceNumber(codeDraft || "Wondfo", exampleYear, 1)}, … per
             company.
           </p>
           <div className="form-grid" style={{ gridTemplateColumns: "minmax(120px, 200px) auto", alignItems: "end" }}>
@@ -143,12 +148,12 @@ export function CompanyAddressAndContacts({
               <input
                 id="company-client-code"
                 value={codeDraft}
-                onChange={(event) => setCodeDraft(event.target.value.toUpperCase())}
-                maxLength={3}
-                pattern="[A-Za-z]{2,3}"
+                onChange={(event) => setCodeDraft(event.target.value)}
+                maxLength={24}
+                pattern="[A-Za-z][A-Za-z0-9]{1,23}"
                 title={clientCodeRule}
-                placeholder="e.g. HUN"
-                style={{ textTransform: "uppercase", letterSpacing: "0.12em" }}
+                placeholder="e.g. Wondfo"
+                style={{ letterSpacing: "0.02em" }}
                 required
               />
             </div>

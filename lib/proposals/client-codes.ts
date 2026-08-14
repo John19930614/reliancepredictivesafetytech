@@ -1,4 +1,4 @@
-// The client-code moniker behind per-client proposal numbers (HUN-01).
+// The client-code moniker behind per-client document numbers (Wondfo-2026-001).
 //
 // Pure functions only — no Supabase, no I/O — importable from both the client
 // forms and the server actions. The database side is
@@ -9,16 +9,44 @@
 // company name, assigned by whoever writes the client's first proposal, unique
 // across clients; on an initials collision the code is extended (Staff Electric
 // Company Incorporated → SEC), and the state initial is never used. Proposal
-// numbers are then CODE-NN with a per-client sequence.
+// numbers were then CODE-NN with a per-client sequence.
+//
+// SUPERSEDED 2026-08-14: the code is now the readable company moniker rather
+// than initials (Wondfo, not WFU), and a document number carries its YEAR with
+// a sequence that restarts each January — Wondfo-2026-001. Two consequences
+// worth stating:
+//
+//   - The code is no longer uppercased. "Wondfo" must survive round-tripping,
+//     so normalizeClientCode trims and nothing else. Uniqueness is still
+//     enforced, case-insensitively, by the index in the migration.
+//   - EXISTING NUMBERS ARE NOT REWRITTEN. WFU-01, SE-04 and the rest keep the
+//     numbers they were issued under; a reference a client already holds must
+//     not change underneath them. Both allocators only fire on a null number,
+//     so old rows are untouched by design rather than by luck.
 
-/** Mirrors company_clients_client_code_format in the migration. */
-export const clientCodePattern = /^[A-Z]{2,3}$/;
+/**
+ * Mirrors company_clients_client_code_format in the migration.
+ *
+ * Starts with a letter, then letters or digits, 2–24 characters. No spaces,
+ * punctuation or accents: this string is embedded in a document reference that
+ * gets typed into emails, spreadsheets and bank memos, and anything needing
+ * escaping there causes trouble somewhere downstream.
+ */
+export const clientCodePattern = /^[A-Za-z][A-Za-z0-9]{1,23}$/;
 
-export const clientCodeRule = "2–3 capital letters from the company name, e.g. HUN for Hunzinger.";
+export const clientCodeRule =
+  "2–24 letters or digits from the company name, e.g. Wondfo for Wondfo USA. No spaces or punctuation.";
 
-/** Uppercases and trims; returns "" for non-strings. Does NOT validate. */
+/**
+ * Trims. Does NOT uppercase and does NOT validate.
+ *
+ * Case is preserved deliberately — "Wondfo" is the point, and upper-casing it
+ * to WONDFO would make every document reference shout. Uniqueness across
+ * clients is enforced case-insensitively by the database index, so "wondfo"
+ * still cannot coexist with "Wondfo".
+ */
 export function normalizeClientCode(value: unknown): string {
-  return typeof value === "string" ? value.trim().toUpperCase() : "";
+  return typeof value === "string" ? value.trim() : "";
 }
 
 export function isValidClientCode(value: unknown): boolean {
@@ -26,15 +54,29 @@ export function isValidClientCode(value: unknown): boolean {
 }
 
 /**
- * CODE-NN, zero-padded to two digits.
+ * CODE-YYYY-NNN, the sequence zero-padded to three digits.
  *
- * greatest(2, …) in SQL and this guard are the same rule: past sequence 99 the
- * number simply grows (HUN-100) — a bare two-char pad would TRUNCATE and mint a
- * duplicate reference.
+ * padStart never truncates, and the SQL side uses greatest(3, length(...)) for
+ * the same reason: past sequence 999 the number simply grows to four digits.
+ * A fixed-width pad that CUT the string would mint a duplicate reference, which
+ * on a financial document is the worst failure available.
  */
-export function formatClientProposalNumber(code: string, seq: number): string {
+export function formatClientDocumentNumber(code: string, year: number, seq: number): string {
   const n = Math.max(1, Math.trunc(seq));
-  return `${normalizeClientCode(code)}-${String(n).padStart(2, "0")}`;
+  return `${normalizeClientCode(code)}-${Math.trunc(year)}-${String(n).padStart(3, "0")}`;
+}
+
+/**
+ * The same shape with an INV marker: Wondfo-INV-2026-001.
+ *
+ * Proposals and invoices carry separate sequences, so without a marker the same
+ * string could name both a quote and a demand for payment — and an accountant
+ * holding "Wondfo-2026-001" would have no way to tell which. The marker costs
+ * four characters and removes the ambiguity entirely.
+ */
+export function formatClientInvoiceNumber(code: string, year: number, seq: number): string {
+  const n = Math.max(1, Math.trunc(seq));
+  return `${normalizeClientCode(code)}-INV-${Math.trunc(year)}-${String(n).padStart(3, "0")}`;
 }
 
 function nameWords(name: string): string[] {
@@ -60,23 +102,26 @@ export function suggestClientCode(name: unknown, taken: Iterable<string> = []): 
   const words = nameWords(name);
   if (words.length === 0) return "";
 
+  // Case-insensitive: the database index is, so a suggestion that only differs
+  // in case from a taken code would be rejected on save.
   const takenSet = new Set<string>();
-  for (const code of taken) takenSet.add(normalizeClientCode(code));
+  for (const code of taken) takenSet.add(normalizeClientCode(code).toLowerCase());
 
-  const candidates: string[] = [];
+  const titled = (word: string) => word[0] + word.slice(1).toLowerCase();
+
+  // Readable monikers first — the first word is what people actually call the
+  // company ("Wondfo USA" is Wondfo). Initials are kept as a late fallback for
+  // names whose first word is shared or meaningless.
+  const candidates: string[] = [titled(words[0])];
   if (words.length >= 2) {
+    candidates.push(titled(words[0]) + titled(words[1]));
     candidates.push(words[0][0] + words[1][0]);
     if (words.length >= 3) candidates.push(words[0][0] + words[1][0] + words[2][0]);
-    candidates.push(words[0][0] + words[1].slice(0, 2));
   }
-  if (words.length === 1) {
-    candidates.push(words[0].slice(0, 3), words[0].slice(0, 2));
-  } else {
-    candidates.push(words[0].slice(0, 2), words[0].slice(0, 3));
-  }
+  candidates.push(titled(words[0]).slice(0, 3));
 
   for (const candidate of candidates) {
-    if (clientCodePattern.test(candidate) && !takenSet.has(candidate)) return candidate;
+    if (clientCodePattern.test(candidate) && !takenSet.has(candidate.toLowerCase())) return candidate;
   }
   return "";
 }

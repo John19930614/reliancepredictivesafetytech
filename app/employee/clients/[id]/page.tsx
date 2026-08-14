@@ -19,7 +19,9 @@ import {
   type ClientTrainingEventRow,
 } from "@/components/clients/ClientRelatedPanels";
 import { CompanyProfileForm, emptyProfileDraft } from "@/components/clients/CompanyProfileForm";
+import { ClientSetupBanner } from "@/components/clients/ClientSetupBanner";
 import type { ClientMeetingRow, ClientProposalRow } from "@/lib/clients/related";
+import { clientSetupStatus } from "@/lib/clients/setup-status";
 import { createClient } from "@/lib/supabase/server";
 
 type ClientDetailPageProps = {
@@ -45,7 +47,7 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
 
   const [
     { data: activities },
-    { data: items },
+    itemsResult,
     { data: documents },
     { data: legalIssues },
     { data: requirements },
@@ -56,6 +58,7 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
     { data: meetings },
     { data: trainingEvents },
     profileResult,
+    folderResult,
   ] = await Promise.all([
       supabase.from("company_sales_activities").select("*").eq("client_id", id).order("created_at", { ascending: false }),
       supabase.from("client_onboarding_items").select("*").eq("client_id", id).order("sort_order"),
@@ -111,6 +114,16 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
         )
         .eq("client_id", id)
         .maybeSingle(),
+      // Top-level folder names only, to work out which of the standard set this
+      // company is missing. Read as a result rather than destructured because a
+      // failure here must not be mistaken for "no folders exist" — the same
+      // untyped handle as company_files, for the same reason.
+      (supabase as LooseClient)
+        .from("company_file_folders")
+        .select("name")
+        .eq("scope", "client")
+        .eq("client_id", id)
+        .is("parent_id", null),
     ]);
 
   // A blank field means "not known", so null must render as an empty box rather
@@ -120,7 +133,18 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
   const profileMissing = Boolean(
     profileResult?.error && ["42P01", "PGRST205"].includes((profileResult.error as { code?: string }).code ?? ""),
   );
+  const items = itemsResult.data;
   const str = (value: unknown) => (value === null || value === undefined ? "" : String(value));
+
+  // What this company is missing, for the setup banner. The rule that a failed
+  // read is never reported as "missing" lives in the pure module, where it is
+  // tested — profileMissing distinguishes an absent TABLE from an absent row.
+  const setup = clientSetupStatus({
+    checklist: itemsResult,
+    folders: folderResult as { data?: Array<{ name?: unknown }> | null; error?: unknown },
+    profile: profileResult,
+    profileTableMissing: profileMissing,
+  });
   const profileDraft = profileRow
     ? {
         ...emptyProfileDraft,
@@ -154,6 +178,16 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
           Back to pipeline
         </Link>
       </div>
+      {/* First, because a company missing its checklist cannot move at all and
+          every other panel below is describing a record that is stuck. Renders
+          nothing when there is nothing missing. */}
+      <ClientSetupBanner
+        clientId={id}
+        needsChecklist={setup.needsChecklist}
+        needsFolders={setup.needsFolders}
+        needsProfile={setup.needsProfile}
+      />
+
       {/* Above the rest of the record: this is what every proposal for this
           company pulls its Prepared For block from, and it was the one thing
           the company record could not hold. */}
