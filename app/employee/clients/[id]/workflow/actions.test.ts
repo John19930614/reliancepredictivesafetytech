@@ -672,44 +672,70 @@ describe("createInvoiceFromProposal", () => {
     expect(findCall(supabase, "client_invoices", "insert")?.payload).toMatchObject({ kind: "full" });
   });
 
-  // "full" bills the whole contract INCLUDING the deposit, so deposit + full is
-  // 200% of the deal across two valid numbered documents.
-  it("refuses a second invoice of the same kind", async () => {
+  // The ceiling moved from the COUNT of invoices to the MONEY. A task-based
+  // proposal bills 6-9+ times, so "one live invoice per kind" no longer
+  // describes the work — but billing the same contract twice must still be
+  // refused. These three pin the replacement.
+  it("lets one proposal carry many invoices while they stay inside the contract", async () => {
     const supabase = createSupabaseMock({
-      "client_proposals:select": { data: proposalRow() },
-      "client_invoices:select": { data: [{ kind: "full", invoice_number: "RPS-INV-2026-0001" }] },
+      "client_proposals:select": { data: proposalRow({ proposal_value: 3000, form_data: generatorStateWithDeposit }) },
+      "client_invoices:select": {
+        data: [
+          { invoice_number: "WONDFOUSA-2026-001-01", total: 900 },
+          { invoice_number: "WONDFOUSA-2026-001-02", total: 900 },
+        ],
+      },
+      "client_invoices:insert": { data: { id: INVOICE_ID, invoice_number: "WONDFOUSA-2026-001-03" } },
+      "client_invoice_line_items:insert": {},
     });
     signIn("employee", supabase);
 
+    // 900 + 900 already billed, this one is 900: 2,700 of a 3,000 contract.
+    const result = await createInvoiceFromProposal(CLIENT_ID, PROPOSAL_ID, "deposit");
+
+    expect(result.ok).toBe(true);
+    expect(findCall(supabase, "client_invoices", "insert")).toBeDefined();
+  });
+
+  it("refuses an invoice that would bill above the contract value", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposalRow({ proposal_value: 3000 }) },
+      "client_invoices:select": { data: [{ invoice_number: "WONDFOUSA-2026-001-01", total: 3000 }] },
+    });
+    signIn("employee", supabase);
+
+    // The contract is fully billed; another 3,000 would be 200% of the deal.
     const result = await createInvoiceFromProposal(CLIENT_ID, PROPOSAL_ID, "full");
 
     expect(result.ok).toBe(false);
-    expect(result.error).toContain("RPS-INV-2026-0001");
+    expect(result.error).toContain("WONDFOUSA-2026-001-01");
     expect(findCall(supabase, "client_invoices", "insert")).toBeUndefined();
   });
 
-  it("points at the balance when a deposit has already been billed", async () => {
+  it("refuses a deposit that would tip an almost-fully-billed proposal over", async () => {
     const supabase = createSupabaseMock({
-      "client_proposals:select": { data: proposalRow() },
-      "client_invoices:select": { data: [{ kind: "deposit", invoice_number: "RPS-INV-2026-0002" }] },
+      "client_proposals:select": { data: proposalRow({ proposal_value: 3000, form_data: generatorStateWithDeposit }) },
+      "client_invoices:select": { data: [{ invoice_number: "WONDFOUSA-2026-001-01", total: 2500 }] },
     });
     signIn("employee", supabase);
 
-    const result = await createInvoiceFromProposal(CLIENT_ID, PROPOSAL_ID, "full");
-
-    expect(result.ok).toBe(false);
-    expect(result.error).toContain("balance");
-    expect(findCall(supabase, "client_invoices", "insert")).toBeUndefined();
-  });
-
-  it("refuses a deposit once the full contract has been billed", async () => {
-    const supabase = createSupabaseMock({
-      "client_proposals:select": { data: proposalRow() },
-      "client_invoices:select": { data: [{ kind: "full", invoice_number: "RPS-INV-2026-0003" }] },
-    });
-    signIn("employee", supabase);
-
+    // 2,500 billed + a 900 deposit is 3,400 against a 3,000 contract.
     expect((await createInvoiceFromProposal(CLIENT_ID, PROPOSAL_ID, "deposit")).ok).toBe(false);
+  });
+
+  it("allows the raise when the proposal has no value recorded to bound it", async () => {
+    // Deliberate: refusing every invoice on a proposal whose value was never
+    // filled in is a worse failure than the one being prevented. The database
+    // trigger takes the same position.
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposalRow({ proposal_value: null }) },
+      "client_invoices:select": { data: [{ invoice_number: "WONDFOUSA-2026-001-01", total: 9999 }] },
+      "client_invoices:insert": { data: { id: INVOICE_ID, invoice_number: "WONDFOUSA-2026-001-02" } },
+      "client_invoice_line_items:insert": {},
+    });
+    signIn("employee", supabase);
+
+    expect((await createInvoiceFromProposal(CLIENT_ID, PROPOSAL_ID, "full")).ok).toBe(true);
   });
 
   // The guard reads only non-void invoices, so a mistake can be re-raised.
