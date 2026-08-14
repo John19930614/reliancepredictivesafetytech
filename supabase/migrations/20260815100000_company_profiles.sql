@@ -76,9 +76,17 @@ create table if not exists public.company_profiles (
   created_at             timestamptz not null default now(),
   updated_at             timestamptz not null default now(),
 
-  -- A profile that claims it was verified has to say who did it.
-  constraint company_profiles_verified_has_actor
-    check (verified_at is null or verified_by is not null),
+  -- NO "verified_at implies verified_by" CHECK, deliberately.
+  --
+  -- verified_by is ON DELETE SET NULL, and that FK action runs an UPDATE which
+  -- is itself subject to CHECK constraints. Pairing the two makes the parent
+  -- DELETE fail with 23514: once somebody verifies a profile, that user can
+  -- never be removed from the portal. opportunity_qualification already carries
+  -- this exact pair (qualified_at / qualified_by) and already has the bug.
+  --
+  -- verified_at alone is the claim. Somebody verified these numbers on that
+  -- date; if they have since left the company, the verification still happened
+  -- and the audit trail still names them.
 
   -- Lost-time incidents are a subset of recordables. A row claiming more of the
   -- former than the latter is a data-entry error, and it would skew any rate
@@ -97,10 +105,9 @@ comment on table public.company_profiles is
 comment on column public.company_profiles.emr is
   'Experience Modification Rate. 1.00 = industry average; higher means a worse loss history.';
 
--- The estimator reads by client; nothing lists profiles on their own.
-create index if not exists company_profiles_hazard_idx
-  on public.company_profiles (hazard_class)
-  where hazard_class is not null;
+-- No secondary index. The estimator reads by client, which is the primary key,
+-- and nothing lists profiles on their own — an index on hazard_class would be
+-- write amplification for a lookup nothing performs.
 
 drop trigger if exists set_company_profiles_updated_at on public.company_profiles;
 create trigger set_company_profiles_updated_at
@@ -120,16 +127,30 @@ create policy "Employees can read company profiles"
   on public.company_profiles for select to authenticated
   using (public.is_company_portal_employee());
 
+-- A profile arrives unverified. Verification is a claim about provenance — it
+-- is what separates a real number from a guess — so it cannot be smuggled in on
+-- the insert that creates the row.
 drop policy if exists "Employees can create company profiles" on public.company_profiles;
 create policy "Employees can create company profiles"
   on public.company_profiles for insert to authenticated
-  with check (public.is_company_portal_employee());
+  with check (
+    public.is_company_portal_employee()
+    and verified_at is null
+    and verified_by is null
+  );
 
+-- verified_by is pinned to the caller, so a verification cannot be attributed
+-- to a colleague. Same rule as opportunity_stage_events.changed_by and
+-- client_invoices.created_by; without it any employee could stamp the CFO's id
+-- onto numbers they made up.
 drop policy if exists "Employees can update company profiles" on public.company_profiles;
 create policy "Employees can update company profiles"
   on public.company_profiles for update to authenticated
   using (public.is_company_portal_employee())
-  with check (public.is_company_portal_employee());
+  with check (
+    public.is_company_portal_employee()
+    and (verified_by is null or verified_by = (select auth.uid()))
+  );
 
 -- Deleting a profile discards a client's loss history. Voiding the numbers by
 -- editing them is the supported route; removal is an admin act.
