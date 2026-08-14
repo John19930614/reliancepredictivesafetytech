@@ -58,9 +58,20 @@ alter table public.company_clients
 
 alter table public.company_clients
   drop constraint if exists company_clients_company_slug_format;
+-- 'RPS' is RESERVED, and the reason is not cosmetic. The fallback allocator
+-- next_client_proposal_number() mints 'RPS-YYYY-NNNN' off a global sequence that
+-- never resets. Below 1000 those numbers carry a leading zero (RPS-2026-0007)
+-- and are distinguishable from this scheme; at 1000 it emits RPS-2026-1000,
+-- which is shape-identical to a proposal for a client slugged 'RPS'. The
+-- sequence currently sits around 7, so this is a trap laid years out — which is
+-- exactly the kind that gets sprung after everyone who understood it has stopped
+-- looking. Closing it costs one word.
 alter table public.company_clients
   add constraint company_clients_company_slug_format
-  check (company_slug is null or company_slug ~ '^[A-Z0-9]{2,40}$');
+  check (
+    company_slug is null
+    or (company_slug ~ '^[A-Z0-9]{2,40}$' and company_slug <> 'RPS')
+  );
 
 -- Partial unique index, not a UNIQUE constraint: most clients sit at NULL until
 -- someone writes their first proposal. Same shape as company_clients_client_code_key.
@@ -189,6 +200,11 @@ begin
 
       -- greatest() guard: lpad TRUNCATES a longer string, so a bare lpad(...,3)
       -- would turn sequence 1000 into "100" and mint a duplicate identifier.
+      --
+      -- DO NOT "tidy" this to a plain lpad(...,3). The pad width is also what
+      -- lets lib/proposals/company-slug.ts tell this scheme apart from the
+      -- legacy ones: its parser accepts exactly-three-digits, or wider with no
+      -- leading zero. Widen the pad and every number minted here stops parsing.
       new.proposal_number := v_slug || '-' || v_year::text || '-'
         || lpad(v_seq::text, greatest(3, length(v_seq::text)), '0');
       return new;
@@ -228,6 +244,13 @@ begin
        and proposal_number is not null
     returning proposal_number, invoice_seq into v_parent, v_seq;
 
+    -- The parent's number is used VERBATIM, whatever scheme it belongs to. A
+    -- sent or countersigned proposal keeps its legacy number forever (see
+    -- section 6), so RPS-2026-0007-01 and HUN-01-02 are real numbers this mints
+    -- and they are correct: the invoice names its actual parent rather than a
+    -- tidier one that does not exist. Anything deriving the parent from an
+    -- invoice number must fall back to proposal_id — parseInvoiceNumber() in
+    -- lib/proposals/company-slug.ts deliberately returns null for these.
     if v_parent is not null then
       new.invoice_number := v_parent || '-'
         || lpad(v_seq::text, greatest(2, length(v_seq::text)), '0');
