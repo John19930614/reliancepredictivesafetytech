@@ -3,9 +3,13 @@
 // Server actions for the Client Lifecycle.
 //
 // Every move an opportunity makes goes through here: Next Step, Skip to Step,
-// the three Exit Paths, and reopening. Nothing writes company_clients or
-// lifecycle_stage — the existing sales board is untouched and keeps running
-// beside this on its own field.
+// the three Exit Paths, and reopening.
+//
+// Opening a lead CREATES its company (see createOpportunity), because a lead is
+// a company as far as the rest of the platform is concerned and a deal with
+// none can hold no proposal, invoice or file. Nothing here writes
+// company_clients.lifecycle_stage, though — the sales board keeps that field to
+// itself, so the two systems never fight over which stage a company is on.
 //
 // EVERY WRITE IS COMPARE-AND-SET on the (step, status) the caller read.
 // PostgREST reports no error for an UPDATE that matched zero rows, so each
@@ -20,6 +24,7 @@ import { revalidatePath } from "next/cache";
 import { buildDataAuditEvent, recordAuditEvent } from "@/lib/audit/events";
 import { friendlyError } from "@/lib/friendly-error";
 import { getLifecycleAccess } from "@/lib/lifecycle/access";
+import { provisionClient, provisionWarning } from "@/lib/clients/provision";
 import { checkExitInput, isClosed, lifecycleExit } from "@/lib/lifecycle/exits";
 import {
   finalStepKey,
@@ -177,7 +182,7 @@ export interface CreateOpportunityInput {
  */
 export async function createOpportunity(
   input: CreateOpportunityInput,
-): Promise<LifecycleActionResult & { opportunityId?: string }> {
+): Promise<LifecycleActionResult & { opportunityId?: string; warning?: string }> {
   const { supabase, userId, role, canManage } = await getLifecycleAccess();
   if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
   if (!canManage) return { ok: false, error: "You do not have permission to open opportunities." };
@@ -202,11 +207,38 @@ export async function createOpportunity(
       ? input.expectedCloseDate
       : null;
 
+  // A lead IS a company, as far as the rest of the platform is concerned — the
+  // sales board has always created a company_clients row at stage Lead. The
+  // lifecycle was the outlier in allowing a deal with nothing behind it, and a
+  // deal with no company cannot hold a proposal, an invoice or a file.
+  //
+  // So a lead with no company named gets one, along with its checklist, its
+  // File Center folders and an empty profile for the estimator to fill.
+  let clientId = input.clientId || null;
+  let provisionNote: string | null = null;
+
+  if (!clientId) {
+    const provisioned = await provisionClient(supabase, userId, {
+      name,
+      source: input.source ?? null,
+      notes: input.notes ?? null,
+      companyType: input.industry ?? null,
+    });
+
+    if (!provisioned.ok) {
+      return { ok: false, error: provisioned.error ?? "Could not create the company for this lead." };
+    }
+    clientId = provisioned.clientId ?? null;
+    // Best-effort pieces report rather than fail: the deal and its company both
+    // exist, and a missing folder is a ten-second fix for whoever is told.
+    provisionNote = provisionWarning(provisioned);
+  }
+
   const { data: created, error } = await supabase
     .from("opportunities")
     .insert({
       name,
-      client_id: input.clientId || null,
+      client_id: clientId,
       demo_request_id: input.demoRequestId || null,
       step: firstStepKey,
       status: "open",
@@ -226,7 +258,10 @@ export async function createOpportunity(
 
   await recordAuditEvent({
     ...buildDataAuditEvent("create", "opportunity", created.id, userId, `Opened opportunity "${name}"`, null, {
-      client_id: input.clientId || null,
+      client_id: clientId,
+      // Distinguishes a deal opened against an existing account from one that
+      // brought its company into existence.
+      company_provisioned: !input.clientId,
       demo_request_id: input.demoRequestId || null,
       value,
     }),
@@ -234,7 +269,8 @@ export async function createOpportunity(
   });
 
   revalidateLifecycle(created.id);
-  return { ok: true, opportunityId: created.id };
+  if (clientId) revalidatePath(`/employee/clients/${clientId}`);
+  return { ok: true, opportunityId: created.id, warning: provisionNote ?? undefined };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -664,11 +700,23 @@ export async function applyTriageDecision(
     return { ok: false, error: "Someone else acted on this suggestion. Reload and try again." };
   }
 
+  // lead_triage_results.priority_score is numeric(5,2) and the model routinely
+  // returns a fraction; opportunities.ai_score is an integer. Postgres refuses
+  // 82.50 for an integer column outright (22P02), and because the decision above
+  // is already committed, the retry path is closed — the deal would sit
+  // permanently unscored under a triage row saying a human accepted it. Round at
+  // the boundary rather than widening the column: a score is a rank, and its
+  // second decimal place was never meaningful.
+  const score =
+    typeof triage.priority_score === "number" && Number.isFinite(triage.priority_score)
+      ? Math.round(triage.priority_score)
+      : null;
+
   if (decision === "accepted") {
-    const { error: scoreError } = await supabase
+    const { data: scored, error: scoreError } = await supabase
       .from("opportunities")
       .update({
-        ai_score: triage.priority_score,
+        ai_score: score,
         ai_confidence: triage.confidence,
         ai_recommendation: [triage.segment, triage.next_step, triage.rationale].filter(Boolean).join(" — "),
         ai_scored_at: new Date().toISOString(),
@@ -676,9 +724,36 @@ export async function applyTriageDecision(
       .eq("id", opportunityId)
       .select("id");
 
-    if (scoreError) {
-      // The decision stands; only the copy onto the deal failed.
-      return { ok: false, error: friendlyError(scoreError, "The decision was recorded, but the score could not be applied.") };
+    // The row count was asked for; it has to be read. RLS filters an exited deal
+    // out of the employee UPDATE policy, and PostgREST reports that as 200 with
+    // an empty array — so without this check the action returns ok, audits
+    // "applied a score of 82", and leaves ai_score null with the suggestion
+    // already marked accepted and therefore unretryable.
+    const scoreMissed = !scoreError && (!Array.isArray(scored) || scored.length === 0);
+
+    if (scoreError || scoreMissed) {
+      // The decision stands; only the copy onto the deal failed. It still gets
+      // an audit line — a human authorised this, the record now says so, and an
+      // early return that skipped the trail would leave the platform's own
+      // Human Authority gate unrecorded precisely when something went wrong.
+      await recordAuditEvent({
+        event_type: "lifecycle.triage_accepted",
+        event_category: "ai",
+        severity: "warn",
+        actor_id: userId,
+        actor_role: role,
+        resource_type: "opportunity",
+        resource_id: opportunityId,
+        summary: `Accepted the AI triage for "${opportunity.name}" but the score could not be applied to the deal`,
+        after_state: { decision, triage_result_id: triage.id, score, score_applied: false },
+      });
+      revalidateLifecycle(opportunityId);
+      return {
+        ok: false,
+        error: scoreMissed
+          ? "The decision was recorded, but this deal changed while you were looking at it, so the score was not applied. Reload and check it."
+          : friendlyError(scoreError, "The decision was recorded, but the score could not be applied."),
+      };
     }
   }
 

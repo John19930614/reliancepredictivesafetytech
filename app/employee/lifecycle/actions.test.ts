@@ -256,10 +256,22 @@ describe("lifecycle action RBAC", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("createOpportunity", () => {
+  /** Routes for a lead that has to bring its own company into existence. */
+  function provisioningRoutes(over: Record<string, Route> = {}) {
+    return {
+      "opportunities:insert": { data: { id: OPP_ID } },
+      "company_clients:insert": { data: { id: CLIENT_ID } },
+      "client_onboarding_items:insert": { data: [{ id: "i1" }] },
+      "company_file_folders:insert": { data: [{ id: "f1" }] },
+      "company_profiles:insert": { data: null },
+      ...over,
+    };
+  }
+
   // The RLS insert policy enforces the same thing — a deal cannot be conjured
   // straight into Commit / Contract.
   it("always opens at step 1, open, in the creator's name", async () => {
-    const supabase = createSupabaseMock({ "opportunities:insert": { data: { id: OPP_ID } } });
+    const supabase = createSupabaseMock(provisioningRoutes());
     signIn("employee", supabase);
 
     const result = await createOpportunity({ name: "  Northbridge  ", value: 250000, source: "Website" });
@@ -286,7 +298,7 @@ describe("createOpportunity", () => {
   });
 
   it("treats a missing or negative value as zero rather than refusing", async () => {
-    const supabase = createSupabaseMock({ "opportunities:insert": { data: { id: OPP_ID } } });
+    const supabase = createSupabaseMock(provisioningRoutes());
     signIn("employee", supabase);
 
     await createOpportunity({ name: "Northbridge", value: -5 });
@@ -295,12 +307,96 @@ describe("createOpportunity", () => {
   });
 
   it("ignores a malformed close date rather than writing it", async () => {
-    const supabase = createSupabaseMock({ "opportunities:insert": { data: { id: OPP_ID } } });
+    const supabase = createSupabaseMock(provisioningRoutes());
     signIn("employee", supabase);
 
     await createOpportunity({ name: "Northbridge", expectedCloseDate: "next March" });
 
     expect(findCall(supabase, "opportunities", "insert")?.payload).toMatchObject({ expected_close_date: null });
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* A lead brings its company with it                                   */
+  /* ------------------------------------------------------------------ */
+
+  // A lead IS a company as far as the rest of the platform is concerned — the
+  // sales board has always created one at stage Lead. A deal with none can hold
+  // no proposal, no invoice and no file.
+  it("creates the company, its checklist, its folders and its profile", async () => {
+    const supabase = createSupabaseMock(provisioningRoutes());
+    signIn("employee", supabase);
+
+    const result = await createOpportunity({ name: "Northbridge", source: "Website" });
+
+    expect(result.ok).toBe(true);
+    expect(findCall(supabase, "company_clients", "insert")?.payload).toMatchObject({
+      name: "Northbridge",
+      lifecycle_stage: "Lead",
+    });
+    expect(findCall(supabase, "client_onboarding_items", "insert")).toBeDefined();
+    expect(findCall(supabase, "company_file_folders", "insert")).toBeDefined();
+    expect(findCall(supabase, "company_profiles", "insert")).toBeDefined();
+    // The deal points at the company that was just created for it.
+    expect(findCall(supabase, "opportunities", "insert")?.payload).toMatchObject({ client_id: CLIENT_ID });
+  });
+
+  it("links an existing company instead of creating a second one", async () => {
+    const supabase = createSupabaseMock(provisioningRoutes());
+    signIn("employee", supabase);
+
+    const result = await createOpportunity({ name: "Northbridge", clientId: CLIENT_ID });
+
+    expect(result.ok).toBe(true);
+    expect(findCall(supabase, "company_clients", "insert")).toBeUndefined();
+    expect(findCall(supabase, "opportunities", "insert")?.payload).toMatchObject({ client_id: CLIENT_ID });
+  });
+
+  it("refuses the whole thing when the company cannot be created", async () => {
+    const supabase = createSupabaseMock(
+      provisioningRoutes({ "company_clients:insert": { error: { message: "permission denied" } } }),
+    );
+    signIn("employee", supabase);
+
+    const result = await createOpportunity({ name: "Northbridge" });
+
+    expect(result.ok).toBe(false);
+    // No orphan deal pointing at a company that does not exist.
+    expect(findCall(supabase, "opportunities", "insert")).toBeUndefined();
+  });
+
+  // Best-effort pieces report rather than fail. The old seedOnboarding never
+  // read its own result, so a client could end up with no checklist — and
+  // therefore unable to clear a single gate — with nothing saying why.
+  it("still opens the deal when a dependent piece fails, but says which", async () => {
+    const supabase = createSupabaseMock(
+      provisioningRoutes({ "company_file_folders:insert": { error: { message: "nope" } } }),
+    );
+    signIn("employee", supabase);
+
+    const result = await createOpportunity({ name: "Northbridge" });
+
+    expect(result.ok).toBe(true);
+    expect(result.warning).toContain("File Center folders");
+  });
+
+  it("says nothing when every piece landed", async () => {
+    const supabase = createSupabaseMock(provisioningRoutes());
+    signIn("employee", supabase);
+
+    expect((await createOpportunity({ name: "Northbridge" })).warning).toBeUndefined();
+  });
+
+  it("records in the audit trail whether the company was created or linked", async () => {
+    const provisioned = createSupabaseMock(provisioningRoutes());
+    signIn("employee", provisioned);
+    await createOpportunity({ name: "Northbridge" });
+    expect(auditMock.mock.calls[0][0]).toMatchObject({ after_state: { company_provisioned: true } });
+
+    auditMock.mockClear();
+    const linked = createSupabaseMock(provisioningRoutes());
+    signIn("employee", linked);
+    await createOpportunity({ name: "Northbridge", clientId: CLIENT_ID });
+    expect(auditMock.mock.calls[0][0]).toMatchObject({ after_state: { company_provisioned: false } });
   });
 });
 

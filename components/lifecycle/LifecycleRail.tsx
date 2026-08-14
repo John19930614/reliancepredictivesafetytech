@@ -11,7 +11,7 @@
 
 import { Check, Trophy } from "lucide-react";
 import { lifecycleSteps, stepPosition, type StepPosition } from "@/lib/lifecycle/steps";
-import { isClosed } from "@/lib/lifecycle/exits";
+import { isLifecycleExitStatus } from "@/lib/lifecycle/exits";
 
 interface LifecycleRailProps {
   /** The step key the opportunity is on. */
@@ -29,7 +29,9 @@ const positionWord: Record<StepPosition, string> = {
 };
 
 export function LifecycleRail({ currentKey, status, hrefFor }: LifecycleRailProps) {
-  const closed = isClosed(status);
+  // Only an EXIT parks the rail. A won deal reached the end of it, and
+  // greying the final node contradicts the green "Won" beside it.
+  const closed = isLifecycleExitStatus(status);
 
   return (
     <nav aria-label="Client lifecycle" className="lc-rail-wrap">

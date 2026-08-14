@@ -18,6 +18,7 @@ import {
   type ClientFileRow,
   type ClientTrainingEventRow,
 } from "@/components/clients/ClientRelatedPanels";
+import { CompanyProfileForm, emptyProfileDraft } from "@/components/clients/CompanyProfileForm";
 import type { ClientMeetingRow, ClientProposalRow } from "@/lib/clients/related";
 import { createClient } from "@/lib/supabase/server";
 
@@ -54,6 +55,7 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
     { data: files, count: fileCount },
     { data: meetings },
     { data: trainingEvents },
+    profileResult,
   ] = await Promise.all([
       supabase.from("company_sales_activities").select("*").eq("client_id", id).order("created_at", { ascending: false }),
       supabase.from("client_onboarding_items").select("*").eq("client_id", id).order("sort_order"),
@@ -100,7 +102,45 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
         .eq("client_id", id)
         .order("scheduled_start_at", { ascending: false })
         .limit(6),
+      // Newer than the last types regen, same untyped handle as company_files
+      // above. A missing table degrades the panel rather than the page.
+      (supabase as LooseClient)
+        .from("company_profiles")
+        .select(
+          "client_id, employee_count, site_count, annual_revenue, primary_state, states_operated, naics_code, hazard_class, emr, trir, recordables_12mo, lost_time_12mo, osha_citations_3yr, contractor_share_pct, union_workforce, notes",
+        )
+        .eq("client_id", id)
+        .maybeSingle(),
     ]);
+
+  // A blank field means "not known", so null must render as an empty box rather
+  // than a 0 — the estimator treats a stored 0 for headcount, sites or EMR as
+  // missing precisely because 0 is a value somebody chose to type.
+  const profileRow = (profileResult?.data ?? null) as Record<string, unknown> | null;
+  const profileMissing = Boolean(
+    profileResult?.error && ["42P01", "PGRST205"].includes((profileResult.error as { code?: string }).code ?? ""),
+  );
+  const str = (value: unknown) => (value === null || value === undefined ? "" : String(value));
+  const profileDraft = profileRow
+    ? {
+        ...emptyProfileDraft,
+        employee_count: str(profileRow.employee_count),
+        site_count: str(profileRow.site_count),
+        annual_revenue: str(profileRow.annual_revenue),
+        primary_state: str(profileRow.primary_state),
+        states_operated: str(profileRow.states_operated),
+        naics_code: str(profileRow.naics_code),
+        hazard_class: str(profileRow.hazard_class),
+        emr: str(profileRow.emr),
+        trir: str(profileRow.trir),
+        recordables_12mo: str(profileRow.recordables_12mo),
+        lost_time_12mo: str(profileRow.lost_time_12mo),
+        osha_citations_3yr: str(profileRow.osha_citations_3yr),
+        contractor_share_pct: str(profileRow.contractor_share_pct),
+        union_workforce: profileRow.union_workforce === true,
+        notes: str(profileRow.notes),
+      }
+    : emptyProfileDraft;
 
   return (
     <>
@@ -132,6 +172,11 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
         }}
         contacts={(contacts ?? []) as CompanyContactRow[]}
       />
+
+      {/* What a safety contract is actually scoped and priced on. Every deal
+          screen shows a value; this is the only place the numbers behind it
+          are entered. */}
+      <CompanyProfileForm canManage clientId={id} initial={profileDraft} unavailable={profileMissing} />
 
       <ClientDetailManager
         activities={(activities ?? []) as CompanySalesActivity[]}

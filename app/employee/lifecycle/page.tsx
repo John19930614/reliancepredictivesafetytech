@@ -20,7 +20,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { AlertTriangle, CircleDollarSign, Layers, UserPlus } from "lucide-react";
 import { getLifecycleAccess } from "@/lib/lifecycle/access";
-import { isClosed, lifecycleExit } from "@/lib/lifecycle/exits";
+import { isLifecycleExitStatus, lifecycleExit } from "@/lib/lifecycle/exits";
 import { lifecycleSteps, lifecycleStep } from "@/lib/lifecycle/steps";
 import { opportunitySelect, type OpportunityRow } from "@/lib/lifecycle/types";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
@@ -89,7 +89,7 @@ export default async function LifecycleIndexPage() {
     ? (clientResult.data as Array<{ id: string; name: string }>)
     : [];
 
-  const open = opportunities.filter((row) => !isClosed(row.status));
+  const open = opportunities.filter((row) => row.status === "open");
   const pipelineValue = open.reduce((sum, row) => sum + Number(row.value ?? 0), 0);
   const weighted = open.reduce((sum, row) => sum + (Number(row.value ?? 0) * Number(row.probability ?? 0)) / 100, 0);
   const unassigned = open.filter((row) => !row.owner_user_id).length;
@@ -133,7 +133,8 @@ export default async function LifecycleIndexPage() {
     byStep.set(row.step, list);
   }
 
-  const closedRows = opportunities.filter((row) => isClosed(row.status));
+  const wonRows = opportunities.filter((row) => row.status === "won");
+  const closedRows = opportunities.filter((row) => isLifecycleExitStatus(row.status));
 
   return (
     <>
