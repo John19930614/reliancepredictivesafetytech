@@ -28,6 +28,12 @@ import {
   nextStepKey,
   stepDistance,
 } from "@/lib/lifecycle/steps";
+import {
+  checkQualificationInput,
+  qualificationState,
+  suggestedProbability,
+  type QualificationInput,
+} from "@/lib/lifecycle/qualification";
 import { opportunitySelect, type StageEventKind } from "@/lib/lifecycle/types";
 
 export interface LifecycleActionResult {
@@ -697,6 +703,146 @@ export async function applyTriageDecision(
 
   revalidateLifecycle(opportunityId);
   revalidatePath("/employee/inbox");
+  return { ok: true };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Steps 5 & 6 — Discovery and Qualification                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Saves discovery notes and the BANT boxes.
+ *
+ * Upserted on opportunity_id, which is the primary key: most opportunities
+ * reach step 5 with no qualification record at all, and making the caller know
+ * whether to insert or update is how half of them end up with neither.
+ *
+ * Only the supplied keys are written, so saving the BANT boxes cannot blank a
+ * discovery note the caller never saw.
+ */
+export async function saveOpportunityQualification(
+  opportunityId: string,
+  input: QualificationInput,
+): Promise<LifecycleActionResult> {
+  const { supabase, userId, role, canManage } = await getLifecycleAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
+  if (!canManage) return { ok: false, error: "You do not have permission to edit opportunities." };
+  if (!UUID.test(opportunityId)) return { ok: false, error: "Malformed opportunity reference." };
+
+  const checked = checkQualificationInput(input);
+  if (!checked.ok || !checked.patch) {
+    return { ok: false, error: checked.error, fieldErrors: checked.fieldErrors };
+  }
+
+  const { data: opportunityRow } = await supabase
+    .from("opportunities")
+    .select("id, name, status")
+    .eq("id", opportunityId)
+    .maybeSingle();
+
+  if (!opportunityRow) return { ok: false, error: NOT_FOUND };
+  if (isClosed((opportunityRow as { status: string }).status)) {
+    // The RLS policy says the same thing; refusing here gives a message rather
+    // than a silent zero-row write.
+    return { ok: false, error: "This opportunity has left the lifecycle, so its qualification is now history." };
+  }
+
+  const { error } = await supabase
+    .from("opportunity_qualification")
+    .upsert({ opportunity_id: opportunityId, ...checked.patch, updated_by: userId }, { onConflict: "opportunity_id" });
+
+  if (error) return { ok: false, error: friendlyError(error, "Could not save the qualification.") };
+
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "update",
+      "opportunity_qualification",
+      opportunityId,
+      userId,
+      `Updated ${Object.keys(checked.patch).join(", ")} on "${(opportunityRow as { name: string }).name}"`,
+      null,
+      checked.patch,
+    ),
+    actor_role: role,
+  });
+
+  revalidateLifecycle(opportunityId);
+  return { ok: true };
+}
+
+/**
+ * Records that a person has judged this a real opportunity, and — only if they
+ * ask for it — sets the probability the BANT count suggests.
+ *
+ * The suggested figure is never applied on its own. Probability drives the
+ * weighted pipeline number, and a figure that moved itself whenever somebody
+ * ticked a box would quietly restate the forecast without anyone deciding to.
+ */
+export async function markOpportunityQualified(
+  opportunityId: string,
+  applySuggestedProbability: boolean,
+): Promise<LifecycleActionResult> {
+  const { supabase, userId, role, canManage } = await getLifecycleAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
+  if (!canManage) return { ok: false, error: "You do not have permission to qualify opportunities." };
+  if (!UUID.test(opportunityId)) return { ok: false, error: "Malformed opportunity reference." };
+
+  const [{ data: opportunityRow }, { data: qualificationRow }] = await Promise.all([
+    supabase.from("opportunities").select("id, name, status").eq("id", opportunityId).maybeSingle(),
+    supabase
+      .from("opportunity_qualification")
+      .select("opportunity_id, has_budget, has_authority, has_need, has_timeline, qualified_at")
+      .eq("opportunity_id", opportunityId)
+      .maybeSingle(),
+  ]);
+
+  if (!opportunityRow) return { ok: false, error: NOT_FOUND };
+  if (isClosed((opportunityRow as { status: string }).status)) {
+    return { ok: false, error: "This opportunity has left the lifecycle." };
+  }
+  if (!qualificationRow) {
+    return { ok: false, error: "Record the discovery findings before qualifying this opportunity." };
+  }
+
+  const state = qualificationState(qualificationRow as never);
+  if (!state.complete) {
+    return {
+      ok: false,
+      error: `${state.outstanding.map((test) => test.label).join(", ")} not yet established. Confirm all four before qualifying.`,
+    };
+  }
+
+  const { error } = await supabase
+    .from("opportunity_qualification")
+    .update({ qualified_at: new Date().toISOString(), qualified_by: userId, updated_by: userId })
+    .eq("opportunity_id", opportunityId)
+    // Idempotent: qualifying twice should not restamp who did it first.
+    .is("qualified_at", null);
+
+  if (error) return { ok: false, error: friendlyError(error, "Could not qualify this opportunity.") };
+
+  if (applySuggestedProbability) {
+    await supabase
+      .from("opportunities")
+      .update({ probability: suggestedProbability(state.met) })
+      .eq("id", opportunityId);
+  }
+
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "update",
+      "opportunity_qualification",
+      opportunityId,
+      userId,
+      `Qualified "${(opportunityRow as { name: string }).name}" on all four BANT tests` +
+        (applySuggestedProbability ? ` and set probability to ${suggestedProbability(state.met)}%` : ""),
+      null,
+      { met: state.met, applied_probability: applySuggestedProbability },
+    ),
+    actor_role: role,
+  });
+
+  revalidateLifecycle(opportunityId);
   return { ok: true };
 }
 

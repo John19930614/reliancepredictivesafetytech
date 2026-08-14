@@ -42,7 +42,16 @@ import { loadLeadContext, scoreBand } from "@/lib/lifecycle/lead-context";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
 import { LifecycleRail } from "@/components/lifecycle/LifecycleRail";
 import { LifecycleStepActions } from "@/components/lifecycle/LifecycleStepActions";
-import { AiTriagePanels, LeadCapturedPanels, SalesReviewPanels } from "@/components/lifecycle/StepPanels";
+import {
+  AiTriagePanels,
+  AssignOwnerPanels,
+  DiscoveryPanels,
+  LeadCapturedPanels,
+  QualifiedPanels,
+  SalesReviewPanels,
+} from "@/components/lifecycle/StepPanels";
+import { findOwner, loadOwnerOptions } from "@/lib/lifecycle/owners";
+import type { QualificationRow } from "@/lib/lifecycle/qualification";
 import {
   LifecycleFacts,
   LifecycleIndicators,
@@ -137,7 +146,7 @@ export default async function LifecycleRecordPage({ params }: PageProps) {
   const closed = isClosed(opportunity.status);
   const exit = lifecycleExit(opportunity.status);
 
-  const [clientResult, historyResult, leadContext] = await Promise.all([
+  const [clientResult, historyResult, leadContext, owners, qualificationResult] = await Promise.all([
     opportunity.client_id
       ? supabase.from("company_clients").select("id, name").eq("id", opportunity.client_id).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -148,12 +157,27 @@ export default async function LifecycleRecordPage({ params }: PageProps) {
       .order("changed_at", { ascending: false })
       .limit(historyLimit),
     loadLeadContext(supabase, opportunity.demo_request_id),
+    // Only read where the screen uses it: the roster is a service-role read, and
+    // steps that do not assign an owner should not pay for it.
+    step?.key === "assign_owner" && canManage ? loadOwnerOptions() : Promise.resolve([]),
+    supabase
+      .from("opportunity_qualification")
+      .select(
+        "opportunity_id, discovery_call_at, primary_need, pain_points, decision_makers, budget_range, timeline, has_budget, has_authority, has_need, has_timeline, competition, qualified_at, qualified_by, updated_at",
+      )
+      .eq("opportunity_id", id)
+      .maybeSingle(),
   ]);
 
   const client = (clientResult?.data ?? null) as { id: string; name: string } | null;
   const history: OpportunityStageEventRow[] = Array.isArray(historyResult?.data)
     ? (historyResult.data as OpportunityStageEventRow[])
     : [];
+
+  // A missing qualification row is ordinary — most deals reach step 5 before
+  // anyone has written anything down.
+  const qualification = (qualificationResult?.data ?? null) as QualificationRow | null;
+  const currentOwner = findOwner(owners, opportunity.owner_user_id);
 
   const inStep = daysSince(opportunity.step_changed_at);
   const toClose = daysUntil(opportunity.expected_close_date);
@@ -301,6 +325,21 @@ export default async function LifecycleRecordPage({ params }: PageProps) {
         {step?.key === "ai_triage" ? <AiTriagePanels context={leadContext} /> : null}
         {step?.key === "sales_review" ? (
           <SalesReviewPanels canManage={canManage} context={leadContext} opportunity={opportunity} />
+        ) : null}
+        {step?.key === "assign_owner" ? (
+          <AssignOwnerPanels
+            canManage={canManage}
+            currentOwner={currentOwner}
+            opportunity={opportunity}
+            owners={owners}
+            rosterUnavailable={canManage && owners.length === 0}
+          />
+        ) : null}
+        {step?.key === "discovery" ? (
+          <DiscoveryPanels canManage={canManage} opportunity={opportunity} qualification={qualification} />
+        ) : null}
+        {step?.key === "opportunity_qualified" ? (
+          <QualifiedPanels canManage={canManage} opportunity={opportunity} qualification={qualification} />
         ) : null}
 
         <LifecyclePanel

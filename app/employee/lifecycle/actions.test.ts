@@ -16,7 +16,9 @@ import {
   applyTriageDecision,
   createOpportunity,
   exitOpportunity,
+  markOpportunityQualified,
   reopenOpportunity,
+  saveOpportunityQualification,
   skipOpportunityToStep,
   updateOpportunity,
 } from "./actions";
@@ -36,7 +38,7 @@ const GOOD_REASON = "Budget pulled for the fiscal year, revisit in Q1.";
 
 interface QueryRecord {
   table: string;
-  op: "select" | "insert" | "update" | "delete";
+  op: "select" | "insert" | "update" | "upsert" | "delete";
   payload?: unknown;
   filters: Array<[string, unknown]>;
 }
@@ -69,6 +71,15 @@ function createSupabaseMock(routes: Record<string, Route>) {
       update(payload: unknown) {
         record.op = "update";
         record.payload = payload;
+        return api;
+      },
+      upsert(payload: unknown) {
+        record.op = "upsert";
+        record.payload = payload;
+        return api;
+      },
+      is(column: string, value: unknown) {
+        record.filters.push([`is:${column}`, value]);
         return api;
       },
       delete() {
@@ -770,5 +781,149 @@ describe("applyTriageDecision", () => {
     expect((await applyTriageDecision(OPP_ID, "accepted")).ok).toBe(false);
     expect(supabase.calls).toHaveLength(0);
     expect(auditMock).not.toHaveBeenCalled();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Steps 5 & 6 — qualification                                                */
+/* -------------------------------------------------------------------------- */
+
+function qualificationRow(over: Record<string, unknown> = {}) {
+  return {
+    opportunity_id: OPP_ID,
+    has_budget: true,
+    has_authority: true,
+    has_need: true,
+    has_timeline: true,
+    qualified_at: null,
+    ...over,
+  };
+}
+
+describe("saveOpportunityQualification", () => {
+  it("upserts on the opportunity id and stamps who wrote it", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity() },
+      "opportunity_qualification:upsert": {},
+    });
+    signIn("employee", supabase);
+
+    const result = await saveOpportunityQualification(OPP_ID, { primaryNeed: "Unplanned downtime" });
+
+    expect(result).toEqual({ ok: true });
+    const write = findCall(supabase, "opportunity_qualification", "upsert");
+    expect(write?.payload).toMatchObject({
+      opportunity_id: OPP_ID,
+      primary_need: "Unplanned downtime",
+      updated_by: USER_ID,
+    });
+  });
+
+  it("refuses an empty edit before touching the database", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("employee", supabase);
+
+    expect((await saveOpportunityQualification(OPP_ID, {})).ok).toBe(false);
+    expect(supabase.calls).toHaveLength(0);
+  });
+
+  // The RLS policy says the same thing; refusing here gives a message rather
+  // than a silent zero-row write.
+  it("refuses on a deal that has left the lifecycle", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ status: "closed_lost" }) },
+    });
+    signIn("employee", supabase);
+
+    const result = await saveOpportunityQualification(OPP_ID, { primaryNeed: "x" });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("history");
+    expect(findCall(supabase, "opportunity_qualification", "upsert")).toBeUndefined();
+  });
+
+  it("refuses when signed out, and never queries", async () => {
+    const supabase = createSupabaseMock({});
+    signOut();
+    expect((await saveOpportunityQualification(OPP_ID, { primaryNeed: "x" })).ok).toBe(false);
+    expect(supabase.calls).toHaveLength(0);
+  });
+});
+
+describe("markOpportunityQualified", () => {
+  it("records the decision and names what is outstanding when it is not complete", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity() },
+      "opportunity_qualification:select": { data: qualificationRow({ has_timeline: false, has_budget: false }) },
+    });
+    signIn("employee", supabase);
+
+    const result = await markOpportunityQualified(OPP_ID, false);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Budget");
+    expect(result.error).toContain("Timeline");
+    expect(findCall(supabase, "opportunity_qualification", "update")).toBeUndefined();
+  });
+
+  it("qualifies when all four are established", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity() },
+      "opportunity_qualification:select": { data: qualificationRow() },
+      "opportunity_qualification:update": {},
+    });
+    signIn("employee", supabase);
+
+    expect(await markOpportunityQualified(OPP_ID, false)).toEqual({ ok: true });
+
+    const update = findCall(supabase, "opportunity_qualification", "update");
+    expect(update?.payload).toMatchObject({ qualified_by: USER_ID });
+    // Idempotent: qualifying twice must not restamp who did it first.
+    expect(update?.filters).toContainEqual(["is:qualified_at", null]);
+  });
+
+  // Probability drives the weighted pipeline, so it never moves on its own.
+  it("only touches probability when explicitly asked", async () => {
+    const without = createSupabaseMock({
+      "opportunities:select": { data: opportunity() },
+      "opportunity_qualification:select": { data: qualificationRow() },
+      "opportunity_qualification:update": {},
+    });
+    signIn("employee", without);
+    await markOpportunityQualified(OPP_ID, false);
+    expect(findCall(without, "opportunities", "update")).toBeUndefined();
+
+    const withIt = createSupabaseMock({
+      "opportunities:select": { data: opportunity() },
+      "opportunity_qualification:select": { data: qualificationRow() },
+      "opportunity_qualification:update": {},
+      "opportunities:update": { data: [{ id: OPP_ID }] },
+    });
+    signIn("employee", withIt);
+    await markOpportunityQualified(OPP_ID, true);
+    expect(findCall(withIt, "opportunities", "update")?.payload).toMatchObject({ probability: 60 });
+  });
+
+  it("refuses when discovery was never recorded", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity() },
+      "opportunity_qualification:select": { data: null },
+    });
+    signIn("employee", supabase);
+
+    const result = await markOpportunityQualified(OPP_ID, false);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("discovery");
+  });
+
+  it("refuses on a deal that has left the lifecycle", async () => {
+    const supabase = createSupabaseMock({
+      "opportunities:select": { data: opportunity({ status: "on_hold" }) },
+      "opportunity_qualification:select": { data: qualificationRow() },
+    });
+    signIn("employee", supabase);
+
+    expect((await markOpportunityQualified(OPP_ID, false)).ok).toBe(false);
   });
 });

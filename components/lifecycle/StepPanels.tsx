@@ -14,7 +14,16 @@ import { AlertTriangle, Inbox, ScanSearch, UserCheck } from "lucide-react";
 import type { LeadContext } from "@/lib/lifecycle/lead-context";
 import { scoreBand } from "@/lib/lifecycle/lead-context";
 import type { OpportunityRow } from "@/lib/lifecycle/types";
+import {
+  discoveryItems,
+  discoveryProgress,
+  qualificationState,
+  suggestedProbability,
+  type QualificationRow,
+} from "@/lib/lifecycle/qualification";
 import { TriageDecision } from "@/components/lifecycle/TriageDecision";
+import { OwnerAssignment, type OwnerChoice } from "@/components/lifecycle/OwnerAssignment";
+import { QualificationForm, type QualificationDraft } from "@/components/lifecycle/QualificationForm";
 import { LifecycleFacts, LifecyclePanel } from "@/components/lifecycle/LifecycleFurniture";
 
 function formatDate(value: string | null): string {
@@ -278,4 +287,215 @@ export function SalesReviewPanels({
       </LifecyclePanel>
     </>
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Step 4 — Assign Owner                                                      */
+/* -------------------------------------------------------------------------- */
+
+export function AssignOwnerPanels({
+  opportunity,
+  owners,
+  currentOwner,
+  rosterUnavailable,
+  canManage,
+}: {
+  opportunity: OpportunityRow;
+  owners: OwnerChoice[];
+  currentOwner: OwnerChoice | null;
+  rosterUnavailable: boolean;
+  canManage: boolean;
+}) {
+  return (
+    <>
+      <LifecyclePanel
+        aside={
+          currentOwner ? (
+            <span className="lc-pill lc-pill-good">Assigned</span>
+          ) : (
+            <span className="lc-pill lc-pill-warn">Unassigned</span>
+          )
+        }
+        title="Accountable Owner"
+      >
+        {currentOwner ? (
+          <LifecycleFacts
+            rows={[
+              { label: "Owner", value: currentOwner.name },
+              { label: "Email", value: currentOwner.email || "—" },
+              { label: "Open deals", value: String(currentOwner.openDeals) },
+              { label: "Assigned", value: formatDate(opportunity.assigned_at) },
+            ]}
+          />
+        ) : (
+          <p className="lc-body">
+            Nobody answers for this deal yet. One name, not a team — ownership is what turns a step into an outcome, and
+            the SLA clock does not start until it is set.
+          </p>
+        )}
+
+        <OwnerAssignment
+          canManage={canManage}
+          currentOwnerId={opportunity.owner_user_id}
+          opportunityId={opportunity.id}
+          owners={owners}
+          rosterUnavailable={rosterUnavailable}
+        />
+      </LifecyclePanel>
+
+      {owners.length > 0 ? (
+        <LifecyclePanel
+          aside={<span className="lc-pill lc-pill-neutral">{owners.length} eligible</span>}
+          title="Owner Capacity"
+        >
+          {/* Lightest load first — the order is the routing suggestion. */}
+          <ul className="lc-capacity">
+            {owners.slice(0, 8).map((owner) => (
+              <li className="lc-capacity-row" key={owner.userId}>
+                <span className="lc-capacity-name">
+                  {owner.name}
+                  {owner.userId === opportunity.owner_user_id ? " · owner" : ""}
+                </span>
+                <span className="lc-capacity-meta">
+                  {owner.openDeals} open
+                  {owner.openValue > 0
+                    ? ` · ${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(owner.openValue)}`
+                    : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </LifecyclePanel>
+      ) : null}
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Steps 5 & 6 — Discovery and Qualification                                  */
+/* -------------------------------------------------------------------------- */
+
+export function DiscoveryPanels({
+  opportunity,
+  qualification,
+  canManage,
+}: {
+  opportunity: OpportunityRow;
+  qualification: QualificationRow | null;
+  canManage: boolean;
+}) {
+  const items = discoveryItems(qualification);
+  const progress = discoveryProgress(qualification);
+
+  return (
+    <>
+      <LifecyclePanel
+        aside={
+          <span className={`lc-pill lc-pill-${progress.captured === progress.total ? "good" : "warn"}`}>
+            {progress.captured} of {progress.total}
+          </span>
+        }
+        title="Discovery Checklist"
+      >
+        <ul className="lc-list">
+          {items.map((item) => (
+            <li key={item.label} style={item.captured ? undefined : { opacity: 0.62 }}>
+              {item.captured ? "✓" : "○"} {item.label}
+            </li>
+          ))}
+        </ul>
+      </LifecyclePanel>
+
+      <LifecyclePanel title="Discovery Notes" wide>
+        <QualificationForm
+          alreadyQualified={Boolean(qualification?.qualified_at)}
+          canManage={canManage}
+          initial={toDraft(qualification)}
+          mode="discovery"
+          opportunityId={opportunity.id}
+          suggested={suggestedProbability(qualificationState(qualification).met)}
+        />
+      </LifecyclePanel>
+    </>
+  );
+}
+
+export function QualifiedPanels({
+  opportunity,
+  qualification,
+  canManage,
+}: {
+  opportunity: OpportunityRow;
+  qualification: QualificationRow | null;
+  canManage: boolean;
+}) {
+  const state = qualificationState(qualification);
+
+  return (
+    <>
+      <LifecyclePanel
+        aside={
+          <span className={`lc-pill lc-pill-${state.complete ? "good" : "warn"}`}>
+            {state.met} of {state.total}
+          </span>
+        }
+        title="Qualification (BANT)"
+        wide
+      >
+        <QualificationForm
+          alreadyQualified={state.qualified}
+          canManage={canManage}
+          initial={toDraft(qualification)}
+          mode="qualify"
+          opportunityId={opportunity.id}
+          suggested={suggestedProbability(state.met)}
+        />
+      </LifecyclePanel>
+
+      <LifecyclePanel title="What Discovery found">
+        {qualification ? (
+          <LifecycleFacts
+            rows={[
+              { label: "Primary need", value: qualification.primary_need || "—" },
+              { label: "Decision makers", value: qualification.decision_makers || "—" },
+              { label: "Budget", value: qualification.budget_range || "—" },
+              { label: "Timeline", value: qualification.timeline || "—" },
+            ]}
+          />
+        ) : (
+          <p className="lc-empty">Nothing was recorded at Discovery. Go back a step before judging this one.</p>
+        )}
+      </LifecyclePanel>
+
+      <LifecyclePanel title="Probability">
+        <LifecycleFacts
+          rows={[
+            { label: "Current", value: `${opportunity.probability}%` },
+            { label: "Suggested", value: `${suggestedProbability(state.met)}%` },
+          ]}
+        />
+        <p className="lc-meta">
+          The suggestion is advisory. Probability drives the weighted pipeline number, so it only moves when someone
+          decides it should.
+        </p>
+      </LifecyclePanel>
+    </>
+  );
+}
+
+/** Maps a stored row onto the form's draft shape. */
+function toDraft(row: QualificationRow | null): QualificationDraft {
+  return {
+    discoveryCallAt: row?.discovery_call_at ? row.discovery_call_at.slice(0, 10) : "",
+    primaryNeed: row?.primary_need ?? "",
+    painPoints: row?.pain_points ?? "",
+    decisionMakers: row?.decision_makers ?? "",
+    budgetRange: row?.budget_range ?? "",
+    timeline: row?.timeline ?? "",
+    competition: row?.competition ?? "",
+    hasBudget: row?.has_budget ?? false,
+    hasAuthority: row?.has_authority ?? false,
+    hasNeed: row?.has_need ?? false,
+    hasTimeline: row?.has_timeline ?? false,
+  };
 }
