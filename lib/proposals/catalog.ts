@@ -10,6 +10,8 @@
 // mutation would silently reprice every proposal computed afterwards in the same
 // server process.
 
+import { unitToQtyBasis, type QtyBasis } from "./qty-basis";
+
 /** Display order of the service picker's option groups (asset: SERVICE_GROUPS). */
 export const serviceGroups = Object.freeze([
   "Platform & Licensing",
@@ -288,4 +290,37 @@ export function lookupService(key: string): ServiceOption | null {
 
 export function lookupPackage(key: string): PackageOption | null {
   return isPackageKey(key) ? packageData[key] : null;
+}
+
+/**
+ * The billing basis a catalog service implies, derived from the `unit` it
+ * already carries — "Session" is a session, "Person" is an attendee, "Hour" is
+ * an hour. Deriving keeps ONE vocabulary: a unit and a basis cannot disagree
+ * because there is nothing to keep in step.
+ *
+ * Null for the units that name a real thing but no basis — Day, Mile, Night,
+ * Project, Document, Audit, Package, Year, Block, Site, User, Unit. Those rows
+ * keep printing their unit and keep multiplying, which is both correct and the
+ * behaviour every proposal already sent depends on.
+ *
+ * NOTE this is only a FALLBACK. A row that stored its own `qty_basis` uses
+ * that, for the same reason a row's stored `unit` beats the catalog's: a
+ * repriced or re-based catalog entry must not reach into a document that has
+ * already gone out. See resolveQtyBasis() in qty-basis.ts.
+ */
+export function serviceQtyBasis(key: string): QtyBasis | null {
+  const option = lookupService(key);
+  return option ? unitToQtyBasis(option.unit) : null;
+}
+
+/**
+ * True for the services that are delivered as a taught course, and therefore
+ * the only ones where "in person or virtual" is a question worth asking.
+ *
+ * Derived from the catalog group rather than an enumerated key list, so a new
+ * Training Catalog entry gets the selector without a second edit somewhere
+ * else. A mileage line or a document build never offers one.
+ */
+export function serviceSupportsDeliveryMode(key: string): boolean {
+  return lookupService(key)?.group === "Training Catalog";
 }

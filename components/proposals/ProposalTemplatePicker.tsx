@@ -31,7 +31,7 @@ import { isNoPlatformPackageKey } from "@/lib/proposals/catalog";
 export const transactionTypeOptionPrefix = "type:";
 
 interface ProposalTemplatePickerProps {
-  /** "type:<key>", a saved template uuid, or "" for the blank path. */
+  /** "type:<key>" or a saved template uuid. "" means nothing is chosen yet. */
   value: string;
   onChange: (templateId: string) => void;
   disabled?: boolean;
@@ -104,21 +104,43 @@ export function ProposalTemplatePicker({ value, onChange, disabled }: ProposalTe
 
   return (
     <div className="field">
-      <label htmlFor="proposal_template">Proposal type</label>
+      <label htmlFor="proposal_template">
+        Proposal type <span aria-hidden="true">*</span>
+      </label>
       <select
         id="proposal_template"
         name="proposal_template"
         value={value}
         // Deliberately NOT disabled while the saved list loads or is empty —
-        // the built-in types and the blank path are real choices regardless.
+        // the built-in types are real choices regardless.
         disabled={disabled}
+        // A proposal with no type stamped falls back to the platform-era copy
+        // for its subtitle, its section 03 lead-in and its deliverables, and
+        // computes includesPlatformPackage = true from the default package key.
+        // That is how a signed CPR/AED training proposal went out carrying
+        // "Configured platform subscription" and a Selected Platform Package
+        // block. The per-type suppression that prevents it is keyed entirely on
+        // this control, so the control cannot be optional.
+        required
+        aria-required="true"
         onChange={(event) => onChange(event.target.value)}
       >
-        {/* Said "(default pilot scope)", which was accurate and was the
-            problem: a blank proposal opened on the pilot package with three
-            phases whose copy ended "— included in the pilot". Both are neutral
-            now, so blank means blank — and a pilot is the Pilot type below. */}
-        <option value="">Blank proposal — no pilot wording</option>
+        {/*
+          A PLACEHOLDER, not a choice. There used to be a real "Blank proposal"
+          option here and it was the preselected one, so the default outcome of
+          the New proposal form was a document with no type — the single input
+          that decides whether the client reads about a platform subscription or
+          about the work they are actually buying. `disabled` keeps it visible
+          as a prompt while making it unselectable, so the seller has to say
+          what kind of deal this is.
+
+          A seller who wants an empty scope picks the type and clears the seeded
+          lines in the editor; the type is the part that cannot be added back
+          later without restyling a document that may already be out.
+        */}
+        <option value="" disabled>
+          Select a proposal type…
+        </option>
         <optgroup label="Proposal types — platform subscription">
           {builtInGroups.subscription.map((builtIn) => (
             <option key={builtIn.key} value={`${transactionTypeOptionPrefix}${builtIn.key}`}>
@@ -167,10 +189,11 @@ export function ProposalTemplatePicker({ value, onChange, disabled }: ProposalTe
         <p style={{ color: "var(--portal-muted)", fontSize: "0.8rem", marginTop: 4 }}>{selectedSaved.description}</p>
       ) : value === "" ? (
         <p style={{ color: "var(--portal-muted)", fontSize: "0.8rem", marginTop: 4 }}>
-          Starts blank: manual price, no pilot wording. Pick a proposal type above for a ready-made starting point
+          Required. The type decides what the client reads — a subscription document names a platform package, a
+          services document does not
           {loading ? null : templates.length === 0 ? (
             <>
-              , or{" "}
+              . You can also{" "}
               <Link href="/employee/proposals/templates">
                 <LayoutTemplate size={13} style={{ verticalAlign: "-2px" }} /> save your own from an existing proposal
               </Link>

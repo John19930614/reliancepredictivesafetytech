@@ -330,6 +330,8 @@ describe("client identity never crosses between proposals", () => {
       templateId: TEMPLATE_ID,
       title: "Beta Rollout",
       clientId: CLIENT_ID,
+      // leakyBody predates proposal types, so the caller supplies one.
+      typeKey: "platform",
     });
 
     expect(result).toEqual({ ok: true, proposalId: NEW_PROPOSAL_ID });
@@ -371,7 +373,11 @@ describe("client identity never crosses between proposals", () => {
     });
     signIn("employee", supabase);
 
-    const result = await createProposalFromTemplate({ templateId: TEMPLATE_ID, title: "Unassigned deal" });
+    const result = await createProposalFromTemplate({
+      templateId: TEMPLATE_ID,
+      title: "Unassigned deal",
+      typeKey: "platform",
+    });
 
     expect(result.ok).toBe(true);
     const inserted = findCall(supabase, "client_proposals", "insert")?.payload as { form_data: GeneratorState };
@@ -396,6 +402,68 @@ describe("client identity never crosses between proposals", () => {
     expect(findCall(supabase, "client_proposals", "insert")).toBeUndefined();
   });
 
+  it("refuses a legacy typeless template when the caller names no type", async () => {
+    // The last path that could still mint an untyped proposal. An untyped state
+    // renders the platform-era fallback copy, which is how a CPR class came to
+    // promise "Configured platform subscription".
+    const supabase = createSupabaseMock({
+      "client_proposal_templates:select": {
+        data: { id: TEMPLATE_ID, name: "Pilot", form_data: leakyBody, is_archived: false },
+      },
+    });
+    signIn("employee", supabase);
+
+    const result = await createProposalFromTemplate({ templateId: TEMPLATE_ID, title: "Beta Rollout" });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("proposal type");
+    expect(findCall(supabase, "client_proposals", "insert")).toBeUndefined();
+  });
+
+  it("refuses a caller-supplied type that is not a real proposal type", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposal_templates:select": {
+        data: { id: TEMPLATE_ID, name: "Pilot", form_data: leakyBody, is_archived: false },
+      },
+    });
+    signIn("employee", supabase);
+
+    const result = await createProposalFromTemplate({
+      templateId: TEMPLATE_ID,
+      title: "Beta Rollout",
+      typeKey: "not_a_type",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(findCall(supabase, "client_proposals", "insert")).toBeUndefined();
+  });
+
+  it("lets the template's own type win over a caller-supplied one", async () => {
+    const typedBody: GeneratorState = {
+      ...leakyBody,
+      fields: { ...leakyBody.fields, proposalType: "training" },
+    };
+    const supabase = createSupabaseMock({
+      "client_proposal_templates:select": {
+        data: { id: TEMPLATE_ID, name: "Training", form_data: typedBody, is_archived: false },
+      },
+      "client_proposals:insert": { data: { id: NEW_PROPOSAL_ID } },
+      "client_proposal_revisions:insert": {},
+    });
+    signIn("employee", supabase);
+
+    const result = await createProposalFromTemplate({
+      templateId: TEMPLATE_ID,
+      title: "Beta Rollout",
+      typeKey: "platform",
+    });
+
+    expect(result.ok).toBe(true);
+    const inserted = findCall(supabase, "client_proposals", "insert")?.payload as { form_data: GeneratorState };
+    // typeKey is a fallback for legacy templates, never a way to relabel one.
+    expect(inserted.form_data.fields.proposalType).toBe("training");
+  });
+
   it("refuses a template whose stored body is not a generator state", async () => {
     const supabase = createSupabaseMock({
       "client_proposal_templates:select": {
@@ -418,7 +486,7 @@ describe("client identity never crosses between proposals", () => {
     });
     signIn("employee", supabase);
 
-    await createProposalFromTemplate({ templateId: TEMPLATE_ID, title: "Beta Rollout" });
+    await createProposalFromTemplate({ templateId: TEMPLATE_ID, title: "Beta Rollout", typeKey: "platform" });
 
     const inserted = findCall(supabase, "client_proposals", "insert")?.payload as { proposal_value: number };
     // annualPrice 24000 (package row) + discovery phase 3500.
@@ -435,7 +503,12 @@ describe("client identity never crosses between proposals", () => {
     });
     signIn("employee", supabase);
 
-    await createProposalFromTemplate({ templateId: TEMPLATE_ID, title: "Beta Rollout", proposalValue: 19000 });
+    await createProposalFromTemplate({
+      templateId: TEMPLATE_ID,
+      title: "Beta Rollout",
+      proposalValue: 19000,
+      typeKey: "platform",
+    });
 
     const inserted = findCall(supabase, "client_proposals", "insert")?.payload as { proposal_value: number };
     expect(inserted.proposal_value).toBe(19000);

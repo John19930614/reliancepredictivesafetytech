@@ -36,6 +36,7 @@ import {
   buildTransactionTemplateState,
   getTransactionTemplateLabel,
   isTransactionTemplateKey,
+  type TransactionTemplateKey,
 } from "@/lib/proposals/transaction-templates";
 import type { GeneratorState } from "@/lib/proposals/generator-state";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
@@ -327,6 +328,17 @@ export interface CreateProposalFromTemplateInput {
   owner?: string | null;
   proposalValue?: number | null;
   validUntil?: string | null;
+  /**
+   * The proposal type to stamp when the TEMPLATE ITSELF carries none.
+   *
+   * Templates captured before proposal types existed hold no `proposalType`,
+   * and a proposal minted from one renders the platform-era fallback copy —
+   * which is how a CPR class came to promise "Configured platform subscription".
+   * Requiring a type here closes the last path that could still mint an
+   * untyped proposal. Ignored when the template already carries a valid type:
+   * the template's own type wins, so this cannot be used to relabel one.
+   */
+  typeKey?: string | null;
 }
 
 /**
@@ -390,8 +402,36 @@ export async function createProposalFromTemplate(
     return { ok: false, error: "That template's saved form data is unusable, so it cannot start a proposal." };
   }
 
+  // Every NEW proposal must carry a type. The renderer falls back to platform-era
+  // copy for an untyped state (resolveTypeCopy -> legacyDocumentCopy), which is
+  // correct for a document already in a client's hands and wrong for one being
+  // written now. The template's own type wins where it has one; otherwise the
+  // caller must supply it, and we refuse rather than mint an untyped proposal.
+  // `fields` is persisted JSON, so its values are untrusted and loosely typed —
+  // narrow to string before asking whether it names a real type.
+  const isTypeKey = (value: unknown): value is TransactionTemplateKey =>
+    typeof value === "string" && isTransactionTemplateKey(value);
+
+  const templateTypeKey = formData.fields?.proposalType;
+  const resolvedTypeKey = isTypeKey(templateTypeKey)
+    ? templateTypeKey
+    : isTypeKey(input.typeKey)
+      ? input.typeKey
+      : null;
+  if (!resolvedTypeKey) {
+    return {
+      ok: false,
+      error:
+        "That template was saved before proposal types existed. Choose a proposal type to start from it.",
+    };
+  }
+  const typedFormData: GeneratorState =
+    templateTypeKey === resolvedTypeKey
+      ? formData
+      : { ...formData, fields: { ...formData.fields, proposalType: resolvedTypeKey } };
+
   // Price from the template's own line items unless the seller typed a value.
-  const computed = computeProposalTotals(formData).total;
+  const computed = computeProposalTotals(typedFormData).total;
   const derivedValue = validateProposalFields({ proposalValue: computed }).ok ? computed : null;
   const proposalValue = input.proposalValue ?? derivedValue;
   const summary = `Started from template "${template.name}"`;
@@ -408,7 +448,7 @@ export async function createProposalFromTemplate(
       body_markdown: null,
       status: "draft",
       current_revision: 1,
-      form_data: formData,
+      form_data: typedFormData,
       created_by: userId,
     })
     .select("id, proposal_number")
@@ -419,13 +459,13 @@ export async function createProposalFromTemplate(
   // the document prints this proposal's number rather than the one the template
   // was captured under. Written before revision 1 so the checkpoint carries it.
   //
-  // A NEW object rather than a mutation of `formData`: that object was already
-  // handed to the insert above, and mutating it after the fact would make the
-  // state that was written and the state in memory disagree.
+  // A NEW object rather than a mutation of `typedFormData`: that object was
+  // already handed to the insert above, and mutating it after the fact would
+  // make the state that was written and the state in memory disagree.
   const allocatedNumber = (proposal.proposal_number ?? null) as string | null;
   const savedFormData: GeneratorState = allocatedNumber
-    ? { ...formData, fields: { ...formData.fields, proposalNo: allocatedNumber } }
-    : formData;
+    ? { ...typedFormData, fields: { ...typedFormData.fields, proposalNo: allocatedNumber } }
+    : typedFormData;
 
   if (allocatedNumber) {
     const { error: numberError } = await supabase

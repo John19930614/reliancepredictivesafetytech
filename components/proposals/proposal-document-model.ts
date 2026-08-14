@@ -597,7 +597,12 @@ function toFeeRow(row: ProposalLineItem): DocumentFeeRow {
   return {
     ...row,
     unit,
-    qtyLabel: unit ? `${row.qty} ${unit}` : String(row.qty),
+    // qtyLabel arrives on the row from pricing, already aware of the quantity
+    // basis — "2 sessions", "10 attendees", "Flat fee". Recomputing it here as
+    // `${qty} ${unit}` is what it used to do, and that is wrong for a flat fee:
+    // a $2,500 retainer stored with a quantity of 4 would print "4 Site" beside
+    // an amount that never multiplied. Taking the spread's value gives the
+    // document, the PDF and the DOCX the same label from one place.
     priceLabel: formatLineAmount(row.price),
     amountLabel: formatLineAmount(row.amount),
   };
@@ -707,6 +712,110 @@ export function buildDocline(
   return monthPrefix ? `${packageName} — ${monthPrefix}Term` : `${packageName} Proposal`;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Document identity — who the company is, and who prepared it                 */
+/*                                                                             */
+/* ONE stored field, `sellerName`, used to feed three things at once: the       */
+/* header wordmark, the "Prepared By" party name, and the legal notice's        */
+/* "produced by". So a preparer's name typed into that field did not just       */
+/* misfile a contact — it replaced the company on the front page of a signed    */
+/* client document and named a person as the entity that produced it. The two   */
+/* identities are separated below: the wordmark and the notice are always the   */
+/* COMPANY, and a person's name is routed to the Prepared By block, which is    */
+/* the only place on the document a human being belongs.                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Post-nominal credentials that only ever follow a PERSON'S name.
+ *
+ * Safety practice is full of them and they are how a preparer's name is
+ * normally written on a proposal. No company name ends in one, which is what
+ * makes them a safe signal.
+ */
+const personCredentials: readonly string[] = Object.freeze([
+  "ASP", "CET", "CHMM", "CHST", "CIH", "CRSP", "CSHM", "CSP", "GSP", "OHST",
+  "SMS", "STS", "STSC", "CHS", "JD", "MBA", "MS", "PE", "PHD", "RN", "EMT",
+]);
+
+/**
+ * True when a value stored in `sellerName` is plainly a person's name.
+ *
+ * DELIBERATELY CONSERVATIVE. A false positive here replaces a real company name
+ * with the default one, which is a worse document than the bug this guards
+ * against. So only two signals count, and both are unambiguous:
+ *
+ *   1. the value is the same string as the preparer's own name — somebody typed
+ *      the preparer into the company field;
+ *   2. the value ends in a comma and a post-nominal credential ("Jane Roe, CSP"),
+ *      which no company name does.
+ *
+ * Everything else is left alone. An unfamiliar company name is still a company
+ * name, and this guard must never rewrite one.
+ */
+export function looksLikePersonName(sellerName: string, preparedBy: string): boolean {
+  const value = sellerName.trim();
+  if (value === "") return false;
+
+  const preparer = preparedBy.trim();
+  if (preparer !== "" && value.toLowerCase() === preparer.toLowerCase()) return true;
+
+  const suffix = /,\s*([A-Za-z.]{2,5})\.?\s*$/.exec(value);
+  if (!suffix) return false;
+  return personCredentials.includes(suffix[1].replace(/\./g, "").toUpperCase());
+}
+
+export interface DocumentIdentity {
+  /** The legal entity: header wordmark, Prepared By party name, legal notice. */
+  companyName: string;
+  /** The human who wrote it, for the Prepared By block. "" when none recorded. */
+  preparerName: string;
+}
+
+/**
+ * Splits the stored seller fields into the two identities the document needs.
+ *
+ * Nothing is thrown away: a person's name typed into the company field still
+ * reaches the page, as the preparer. An explicit `preparedBy` always wins,
+ * because that field was filled in on purpose.
+ */
+export function resolveDocumentIdentity(sellerName: string, preparedBy: string): DocumentIdentity {
+  const seller = sellerName.trim();
+  const preparer = preparedBy.trim();
+
+  if (seller !== "" && !looksLikePersonName(seller, preparer)) {
+    return { companyName: seller, preparerName: preparer };
+  }
+
+  return {
+    companyName: documentTermDefaults.sellerName,
+    preparerName: preparer !== "" ? preparer : seller,
+  };
+}
+
+/**
+ * The label over one row of section 03's schedule, e.g. "Service Line 1".
+ *
+ * Composed from the type's `unitNoun` rather than frozen, so a time-and-
+ * materials proposal labels its rows with what it actually sells instead of
+ * borrowing a subscription's word for them. An untyped proposal resolves to
+ * "service" and prints exactly what it always printed.
+ *
+ * NOTE FOR WHOEVER CONFIRMS THE WORDING: this terminology is not signed off
+ * yet, which is the whole reason no label is written here. Change a profile's
+ * `unitNoun` and the screen, the PDF, the DOCX, the share page and the DocuSign
+ * envelope all follow, because every one of them reads these headings off the
+ * model.
+ */
+export function buildScopeLineLabel(unitNoun: string, index: number): string {
+  const cleaned = unitNoun.trim();
+  const noun = cleaned === "" ? "Service" : cleaned;
+  const titled = noun
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+  return `${titled} Line ${index + 1}`;
+}
+
 /** Splits a stored bio into paragraphs on blank lines, dropping empties. */
 export function splitBioParagraphs(bio: string): string[] {
   return bio
@@ -748,14 +857,22 @@ export function buildProposalDocumentModel({
   // training proposal came to promise "Configured platform subscription and
   // client account setup" for a CPR class.
   const typeCopy = resolveTypeCopy(typeProfile, legacyDocumentCopy);
+  // Section headings AND the noun section 03 uses for one line of the schedule.
+  // Resolved once, here, so the scope block below and the return value below
+  // that cannot disagree about which vocabulary this document speaks.
+  const lexicon = resolveLexicon(typeProfile);
   // A services-only engagement produces NO package row at all (see
   // buildPackageLine), so the selected key is read from the state rather than
   // inferred from a row that was deliberately omitted.
   const selectedPackageKey = fieldText(state, "packageSelect", defaultPackageKey);
   const includesPlatformPackage = !isNoPlatformPackageKey(selectedPackageKey);
 
-  const sellerName = fieldText(state, "sellerName", documentTermDefaults.sellerName);
-  const preparedBy = fieldText(state, "preparedBy");
+  // ONE field fed the wordmark, the Prepared By name and the legal notice, so
+  // one wrong value wronged all three. See resolveDocumentIdentity.
+  const { companyName, preparerName } = resolveDocumentIdentity(
+    fieldText(state, "sellerName", documentTermDefaults.sellerName),
+    fieldText(state, "preparedBy"),
+  );
   const clientCompany = fieldText(state, "clientCompany");
   // Falls back to the legacy single-contact fields internally, so a proposal
   // saved before the multi-contact panel existed still names its addressee.
@@ -786,8 +903,11 @@ export function buildProposalDocumentModel({
   const clientLines: string[] = clientContacts.map(formatClientContactLine);
   clientLines.push(...fieldLines(state, "clientAddress"));
 
+  // The party is the COMPANY; the preparer is a line inside its block. That
+  // split is the whole point of resolveDocumentIdentity — a person's name
+  // reaches the document here and nowhere else.
   const sellerLines: string[] = [];
-  if (preparedBy) sellerLines.push(`Prepared by: ${preparedBy}`);
+  if (preparerName) sellerLines.push(`Prepared by: ${preparerName}`);
   sellerLines.push(...fieldLines(state, "sellerContact"));
 
   /* --- Package block ---------------------------------------------------- */
@@ -813,8 +933,11 @@ export function buildProposalDocumentModel({
     heading: `${index + 1}. ${displayName(row, index)}`,
     body: row.desc.trim(),
   }));
+  // "Service Line 1:" was frozen here for every type. The noun now comes from
+  // the type's own lexicon, so a task-based engagement labels its rows with
+  // what it sells rather than with a subscription's word for them.
   const serviceScope: DocumentScopeEntry[] = serviceRows.map((row, index) => ({
-    heading: `Service Line ${index + 1}: ${displayName(row, index)}`,
+    heading: `${buildScopeLineLabel(lexicon.unitNoun, index)}: ${displayName(row, index)}`,
     body: row.desc.trim(),
   }));
 
@@ -901,11 +1024,13 @@ export function buildProposalDocumentModel({
       term,
       includesPlatformPackage ? null : proposalTypeLabel ?? "Professional Services",
     ),
-    wordmark: sellerName,
+    // The COMPANY, never a person. A preparer typed into sellerName lands in
+    // the Prepared By lines below instead of becoming the masthead.
+    wordmark: companyName,
     statusLabel: proposalStatusLabels[proposal.status] ?? String(proposal.status),
     preparedFor: buildParty(clientCompany, clientLines),
     clientContacts,
-    preparedByBlock: buildParty(sellerName, sellerLines),
+    preparedByBlock: buildParty(companyName, sellerLines),
     proposalDate: formatDocumentDate(fieldText(state, "proposalDate")),
     proposalNumber: fieldText(state, "proposalNo", missingValue),
     validity,
@@ -966,7 +1091,13 @@ export function buildProposalDocumentModel({
     // client reads "Courses & Delivery" and "Training Fees"; a T&M client reads
     // "Rates & Estimated Fees", which makes the estimate argument in the
     // heading over the money rather than only in the terms.
-    ...resolveLexicon(typeProfile),
+    //
+    // Listed rather than spread: the lexicon also carries `unitNoun`, which is
+    // consumed above to label the scope lines and is not itself a field of the
+    // rendered model. A spread would put it on the model silently.
+    scopeHeading: lexicon.scopeHeading,
+    feesHeading: lexicon.feesHeading,
+    termHeading: lexicon.termHeading,
     // The legal section, composed for this proposal's type. Before this, all
     // seven types printed one identical clause set, so a training proposal
     // carried "Taxes & SaaS Fees" and a SaaS warranty disclaimer for a class in
@@ -981,10 +1112,12 @@ export function buildProposalDocumentModel({
     // renderer through this builder, and a per-caller trim is how they would
     // start disagreeing about what section 09 says.
     team: fitTeamBios(team),
-    sellerSignature: preparedBy ? `${preparedBy} / Authorized Representative` : "Authorized Representative",
+    sellerSignature: preparerName ? `${preparerName} / Authorized Representative` : "Authorized Representative",
     signature,
+    // "produced by" names the COMPANY. A person's name here made the notice
+    // assert that an individual, not the entity, issued the document.
     legalNotice:
-      `LEGAL NOTICE: This proposal is produced by ${sellerName}. It is not legal advice. Terms referencing CCPA, ` +
+      `LEGAL NOTICE: This proposal is produced by ${companyName}. It is not legal advice. Terms referencing CCPA, ` +
       "Wisconsin trade secret law, OSHA, E-SIGN, and other statutes are for commercial purposes. All proposals must " +
       "be reviewed by qualified legal counsel in the governing jurisdiction before execution.",
     purposeCallout: typeCopy.purposeCallout,

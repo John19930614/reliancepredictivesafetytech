@@ -353,21 +353,46 @@
   table-layout: fixed;
 }
 
+/*
+ * COLUMN WIDTHS — and why the money columns are no longer equal to Qty.
+ *
+ * All three figure columns were 12%. On the ~728px content width that is about
+ * 87px, and 18px of it is horizontal padding: 69px of usable space. The header
+ * cells are 9.5px, uppercase, with 0.07em of extra tracking (see .rp-doc-fee th
+ * below), and "UNIT PRICE" set that way measures ~70px. Under `table-layout:
+ * fixed` a header cannot claim more room than its column, and .rp-doc-right set
+ * `white-space: nowrap` on it, so the label could not wrap either — it simply
+ * ran on into AMOUNT and the two headings printed over one another. The print
+ * block tightens the padding further, so the same collision reached paper.
+ *
+ * Fixed on both sides. The widths below give UNIT PRICE and AMOUNT room for
+ * their own labels at their own letter-spacing, taken from Description (the
+ * one column with prose that reflows for free) and from Qty (which never holds
+ * more than a short number and a unit). And the header cells are allowed to
+ * wrap, so a narrow viewport — where percentages shrink and no width can be
+ * guaranteed — breaks the label over two lines instead of overlapping.
+ *
+ * The PDF and DOCX renderers measure and wrap their own tables and never load
+ * this sheet, so this is a screen-and-print fix only.
+ */
 .rp-doc-fee col.rp-doc-col-item {
   width: 24%;
 }
 
 .rp-doc-fee col.rp-doc-col-desc {
-  width: 40%;
+  width: 35%;
 }
 
 .rp-doc-fee col.rp-doc-col-qty {
-  width: 12%;
+  width: 9%;
 }
 
-.rp-doc-fee col.rp-doc-col-price,
+.rp-doc-fee col.rp-doc-col-price {
+  width: 17%;
+}
+
 .rp-doc-fee col.rp-doc-col-amount {
-  width: 12%;
+  width: 15%;
 }
 
 /*
@@ -399,6 +424,18 @@
 .rp-doc-right {
   text-align: right;
   white-space: nowrap;
+}
+
+/*
+ * The nowrap above is for FIGURES: "$16,679.25" and "12 Person" must never
+ * break mid-value. A column HEADING is a label, not a figure, and holding it on
+ * one line is what let "UNIT PRICE" overrun into "AMOUNT" instead of wrapping.
+ *
+ * Scoped to header cells of the fee table and written with enough specificity
+ * (0,2,2) to beat .rp-doc-right (0,1,0), so the body cells keep their nowrap.
+ */
+.rp-doc-fee thead th.rp-doc-right {
+  white-space: normal;
 }
 
 .rp-doc-fee-group td {

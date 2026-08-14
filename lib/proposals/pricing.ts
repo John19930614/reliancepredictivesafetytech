@@ -23,6 +23,17 @@ import {
   type ServiceOption,
 } from "./catalog";
 import { parseProposalTerm } from "./term";
+import {
+  coerceDeliveryMode,
+  coerceQtyBasis,
+  coerceQtyTiers,
+  deliveryModeLabel,
+  formatQtyLabel,
+  priceQty,
+  resolveQtyBasis,
+  type DeliveryMode,
+  type QtyBasis,
+} from "./qty-basis";
 
 /* -------------------------------------------------------------------------- */
 /* Coercion helpers                                                            */
@@ -265,9 +276,42 @@ export interface ProposalLineItem {
    * Empty for package and phase rows, which have no unit.
    */
   unit: string;
+  /**
+   * What the quantity MEANS, and therefore how the row was priced:
+   * `session` | `attendee` | `hour` scale linearly, `flat` does not scale at
+   * all. Null for a row with no basis — a Day, a Mile, a Project — which is
+   * every row saved before the enum existed. See qty-basis.ts.
+   */
+  qtyBasis: QtyBasis | null;
+  /**
+   * Quantity AS BILLED. Equals the stored quantity for every basis except
+   * `flat`, which bills one whatever the row says.
+   */
   qty: number;
+  /**
+   * Pre-composed quantity label — "2 sessions", "10 attendees", "Flat fee",
+   * and for a row with no basis the quantity and its unit exactly as the
+   * document has always printed them. Composed here so the label and the math
+   * are decided in ONE place: a renderer that pairs a number with its own idea
+   * of the unit is how "1 Person" ended up against a $1,200 session price.
+   */
+  qtyLabel: string;
+  /**
+   * Per-unit rate the client is actually billed, after any volume tier. This
+   * is what a fee table must print beside the amount, because `qty × price`
+   * has to reconcile.
+   */
   price: number;
-  /** qty × price, rounded to cents. */
+  /**
+   * The row's stored rate before tiering. Equal to `price` unless a tier ladder
+   * stepped it, which nothing in the catalog does today.
+   */
+  listPrice: number;
+  /** Delivery mode for an instructor-led course; null when unstated. */
+  deliveryMode: DeliveryMode | null;
+  /** "Instructor-led course — in person" / "— virtual"; "" when unstated. */
+  deliveryLabel: string;
+  /** qty × price, rounded to cents. For a `flat` row, simply the price. */
   amount: number;
 }
 
@@ -291,6 +335,11 @@ export interface ProposalTotals {
  *   tax      = taxable × taxPct/100        (tax applies AFTER the discount)
  *   total    = taxable + tax
  *   deposit  = total × depositPct/100
+ *
+ * A row's amount is qty × price for every billing basis except `flat`, which
+ * bills its price ONCE and ignores the quantity entirely — see buildItemLine()
+ * and qty-basis.ts. A row that stored no basis is priced by multiplication,
+ * exactly as it was before the basis existed.
  *
  * Reads only from `state`. Malformed values are coerced, never trusted:
  * percentages are clamped (discount/deposit to 0–100, tax to ≥ 0) and qty/price
@@ -397,8 +446,18 @@ function buildPackageLine(state: GeneratorState | null | undefined): ProposalLin
     desc: `Platform access for the ${termPrefix}term${includesClause}.`,
     // A subscription row is billed as one term, not in units.
     unit: "",
+    // Deliberately NOT `flat`, even though a subscription is a fixed fee: the
+    // basis drives the printed label, and every proposal ever sent prints "1"
+    // here. Stamping it `flat` would silently rewrite that column to "Flat fee"
+    // on documents already in clients' hands, for no gain — the row is already
+    // pinned at qty 1 by this function.
+    qtyBasis: null,
     qty,
+    qtyLabel: formatQtyLabel(null, qty, ""),
     price,
+    listPrice: price,
+    deliveryMode: null,
+    deliveryLabel: "",
     amount: roundCents(qty * price),
   };
 }
@@ -416,16 +475,59 @@ function buildPackageLine(state: GeneratorState | null | undefined): ProposalLin
  * $1,200 session price and started printing it as "1 Person" — a $1,200 head.
  * The totals were right the whole time; the label was quoting a price nobody
  * had offered.
+ *
+ * THE BASIS TRAVELS THE SAME WAY, and for the same reason — except that a basis
+ * moves the TOTAL, not just the label, so getting this fallback order wrong is
+ * worse than a mislabelled row. The order is: the row's own `qty_basis`, else
+ * what the row's own `unit` implies, else no basis at all. Only the last of
+ * those describes a row saved before any of this existed, and "no basis" is
+ * defined to be the arithmetic that has always applied: qty × price. That is
+ * the whole backward-compatibility guarantee, and it is why unitToQtyBasis()
+ * can never return `flat` for a unit the catalog has ever shipped.
  */
 function buildItemLine(item: GeneratorItem, source: Exclude<ProposalLineSource, "package">): ProposalLineItem {
   const key = toText(item.key).trim();
   const option = source === "phase" ? lookupPhase(key) : lookupService(key);
-  const qty = clamp(toNumber(item.qty, 0), 0);
-  const price = clamp(toNumber(item.price, 0), 0);
+  const storedQty = clamp(toNumber(item.qty, 0), 0);
+  const listPrice = clamp(toNumber(item.price, 0), 0);
   const name = toText(item.name) || option?.name || "";
   const desc = toText(item.desc) || option?.desc || "";
   // Phases have no billing unit; only the service catalog carries one.
   const unit = toText(item.unit) || (source === "service" ? ((option as ServiceOption | null)?.unit ?? "") : "");
 
-  return { source, key, name, desc, unit, qty, price, amount: roundCents(qty * price) };
+  // Every one of these reads an untrusted persisted value, so every one of them
+  // coerces. An unrecognized basis, a tier ladder made of strings, a delivery
+  // mode of `{}` — each degrades to absent, which is legacy behaviour, rather
+  // than throwing or inverting a total.
+  // STORED vs DERIVED matters, and only for the label.
+  //
+  // A line that names its own basis was written by someone who chose it, so it
+  // may say "12 attendees". A legacy line has no basis and we infer one from its
+  // unit — useful for arithmetic, but it must NOT rewrite the words on a
+  // document already in a client's hands: a sent proposal reading "12 Person"
+  // has to keep reading "12 Person". Same rule the type-profile copy follows.
+  //
+  // The inferred basis can never be `flat` (see unitToQtyBasis), so inferring
+  // one can never stop a legacy line multiplying.
+  const storedBasis = coerceQtyBasis(item.qty_basis);
+  const qtyBasis = resolveQtyBasis(item.qty_basis, unit);
+  const tiers = coerceQtyTiers(item.qty_tiers);
+  const { qty, rate, amount } = priceQty(qtyBasis, storedQty, listPrice, tiers);
+  const deliveryMode = coerceDeliveryMode(item.delivery_mode);
+
+  return {
+    source,
+    key,
+    name,
+    desc,
+    unit,
+    qtyBasis,
+    qty,
+    qtyLabel: formatQtyLabel(storedBasis, qty, unit),
+    price: rate,
+    listPrice,
+    deliveryMode,
+    deliveryLabel: deliveryModeLabel(deliveryMode),
+    amount: roundCents(amount),
+  };
 }

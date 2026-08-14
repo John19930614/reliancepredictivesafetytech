@@ -16,12 +16,44 @@ import type { ProposalTotals } from "@/lib/proposals/pricing";
 /** What this invoice is billing for. */
 export type InvoiceKind = "deposit" | "full" | "balance";
 
+/**
+ * Whether a line's quantity multiplies its price.
+ *
+ * The whole reason this exists: a class quoted at 12 seats x $105 bills $1,260,
+ * and when 10 people turn up it has to bill $1,050 — so the quantity is a
+ * multiplier. A $2,500 site retainer with a quantity of 1 must NOT become
+ * $5,000 because somebody typed 2 into the same box — so there the quantity is
+ * a label. One column, `client_invoice_line_items.qty_basis`, tells the two
+ * apart; without it the editor would have to guess, and it would guess wrong in
+ * the direction that overcharges a client.
+ */
+export const quantityBases = ["session", "attendee", "hour", "flat"] as const;
+
+export type QuantityBasis = (typeof quantityBases)[number];
+
+/**
+ * The safe default, matching the column default.
+ *
+ * 'flat' is safe precisely because it refuses to multiply: a line whose basis is
+ * unknown or unreadable keeps the amount it already had rather than scaling by a
+ * number nobody meant as a multiplier.
+ */
+export const defaultQuantityBasis: QuantityBasis = "flat";
+
+export function isQuantityBasis(value: unknown): value is QuantityBasis {
+  return typeof value === "string" && (quantityBases as readonly string[]).includes(value);
+}
+
 export interface DraftInvoiceLine {
   description: string;
   quantity: number;
   unitAmount: number;
   lineTotal: number;
   sortOrder: number;
+  /** What one of this line is, as printed: "Seat", "Session", "Hour". */
+  unit: string;
+  /** Whether `quantity` multiplies `unitAmount`. */
+  qtyBasis: QuantityBasis;
 }
 
 export interface DraftInvoice {
@@ -102,6 +134,250 @@ export function addDays(date: string, days: number): string {
   return parsed.toISOString().slice(0, 10);
 }
 
+/** Words that name a basis, longest first so "half day" cannot match "hour". */
+const basisWords: Array<[RegExp, QuantityBasis]> = [
+  [/attend|seat|person|people|particip|student|delegate|head|employee|worker|learner/i, "attendee"],
+  [/hour|hr\b/i, "hour"],
+  [/session|class|course|day|visit|workshop|training|audit|inspection|module/i, "session"],
+];
+
+/**
+ * Decides a line's quantity basis when the invoice is generated.
+ *
+ * THE ROW'S OWN BASIS WINS. lib/proposals/qty-basis.ts stores what the quantity
+ * meant when the client agreed to it, and re-deriving that here could only
+ * disagree with the document they signed. It is read through this module's own
+ * guard rather than trusted wholesale, because the value that matters here is
+ * the one the `qty_basis` CHECK constraint will accept — if the proposal
+ * vocabulary ever grows a fifth member, an invoice write must fail this check in
+ * TypeScript rather than fail a 23514 in production.
+ *
+ * The rest is for rows saved before that column existed, which carry a null
+ * basis. A fee-table row that genuinely multiplies — amount == qty x price with
+ * a quantity that is not 1 — must not be filed as 'flat', or the first person to
+ * correct a headcount would find the total refusing to move. Equally, a row that
+ * does not multiply must not be filed as a scaling basis, or correcting a typo
+ * in the quantity would silently re-price a fixed fee.
+ *
+ * So the unit word decides where it can, and the arithmetic decides where it
+ * cannot: a row whose stored amount is the product of its own quantity and price
+ * is a scaling row whatever it calls its unit, and everything else is flat.
+ * 'session' is the fallback bucket for an unrecognised scaling unit ("Mile",
+ * "Report") because the four permitted values carry no generic "each" — the
+ * PRINTED label comes from `unit`, which keeps the real word, so the bucket only
+ * has to get the arithmetic right.
+ */
+export function quantityBasisFor(row: {
+  unit?: string;
+  qty?: number;
+  price?: number;
+  amount?: number;
+  qtyBasis?: unknown;
+}): QuantityBasis {
+  if (isQuantityBasis(row.qtyBasis)) return row.qtyBasis;
+
+  const unit = typeof row.unit === "string" ? row.unit : "";
+  for (const [pattern, basis] of basisWords) {
+    if (pattern.test(unit)) return basis;
+  }
+
+  const qty = round2(typeof row.qty === "number" ? row.qty : 0);
+  const price = round2(typeof row.price === "number" ? row.price : 0);
+  const amount = round2(typeof row.amount === "number" ? row.amount : 0);
+
+  // A quantity of exactly 1 tells us nothing — 1 x price == price for a flat fee
+  // and a scaling row alike — so it stays flat, which is the choice that cannot
+  // re-price anything on its own.
+  if (qty > 0 && qty !== 1 && price > 0 && Math.abs(round2(qty * price) - amount) < 0.01) {
+    return "session";
+  }
+
+  return defaultQuantityBasis;
+}
+
+/**
+ * What one line is worth. THE definition, used by the builder above and by the
+ * server action that applies an edit, so a repriced line and a freshly generated
+ * one cannot disagree about arithmetic.
+ *
+ * `flat` returns the unit amount untouched: the quantity on a fixed fee is a
+ * label ("1 project"), and multiplying by it would double a retainer the moment
+ * someone typed 2 into a box that does not price anything.
+ *
+ * Quantity is rounded BEFORE multiplying, because numeric(12,2) is what the
+ * database stores — computing against an unrounded 10.004 would produce a total
+ * the stored quantity cannot reproduce, and the client adds the line up.
+ */
+export function lineTotalFor(input: { quantity: number; unitAmount: number; qtyBasis: QuantityBasis }): number {
+  const unitAmount = round2(input.unitAmount);
+  if (input.qtyBasis === "flat") return unitAmount;
+  return round2(round2(input.quantity) * unitAmount);
+}
+
+/**
+ * The invoice-level arithmetic: subtotal is the sum of the stored lines, and the
+ * total is that plus tax.
+ *
+ * THIS IS THE INVARIANT — total = subtotal + tax_amount — and it is recomputed
+ * from the lines every time one changes rather than adjusted in place, so a
+ * dropped update or a rounding drift cannot leave an invoice asking for a number
+ * its own lines do not add up to.
+ */
+export function invoiceTotalsFrom(
+  lines: Array<{ lineTotal: number }>,
+  taxAmount: number,
+): { subtotal: number; tax: number; total: number } {
+  const subtotal = round2(lines.reduce((sum, line) => sum + round2(line.lineTotal), 0));
+  const tax = round2(Math.max(0, Number.isFinite(taxAmount) ? taxAmount : 0));
+  return { subtotal, tax, total: round2(subtotal + tax) };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Editing a draft line                                                       */
+/* -------------------------------------------------------------------------- */
+
+/** Largest quantity anyone will bill on one line. A class is not 100,000 seats. */
+export const maxLineQuantity = 100_000;
+
+/** Largest unit price, well inside numeric(14,2) and well past any real rate. */
+export const maxLineUnitAmount = 1_000_000;
+
+/** Largest subtotal, tax or total. Above this it is a typo, not an invoice. */
+export const maxInvoiceAmount = 100_000_000;
+
+/** Matches the column CHECK: char_length(btrim(description)) between 1 and 500. */
+export const maxLineDescriptionLength = 500;
+
+/** Matches the column CHECK on client_invoice_line_items.unit. */
+export const maxLineUnitLength = 60;
+
+/** A line as stored, in the shape the editor works in. */
+export interface EditableInvoiceLine {
+  id: string;
+  description: string;
+  quantity: number;
+  unitAmount: number;
+  unit: string;
+  qtyBasis: QuantityBasis;
+  serviceDate: string | null;
+  lineTotal: number;
+}
+
+/**
+ * One operator's change to one line. Every field is optional: an omitted field
+ * is left exactly as stored, so a form that only offers a quantity box cannot
+ * blank a description it never showed.
+ */
+export interface InvoiceLineEdit {
+  id: string;
+  quantity?: number | null;
+  unitAmount?: number | null;
+  unit?: string | null;
+  qtyBasis?: string | null;
+  serviceDate?: string | null;
+  description?: string | null;
+}
+
+export interface CheckedInvoiceLineEdit {
+  ok: boolean;
+  error?: string;
+  /** The line as it will be stored, with lineTotal recomputed. Set when ok. */
+  line?: EditableInvoiceLine;
+}
+
+/** True for a real YYYY-MM-DD calendar date, false for "2026-02-31". */
+function isCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * Validates an edit and returns the line as it will be stored.
+ *
+ * PURE, and the only place the edited figures are computed. The line total is
+ * derived here from the quantity, the price and the basis — a caller-supplied
+ * total is not read, not merged, and has nowhere to enter. This is money: the
+ * browser proposes quantities, the server decides amounts.
+ *
+ * Every bound below mirrors a CHECK constraint on the table, so a value that
+ * would be rejected by the database comes back as a sentence an operator can act
+ * on rather than a 23514 they cannot.
+ */
+export function checkInvoiceLineEdit(current: EditableInvoiceLine, edit: InvoiceLineEdit): CheckedInvoiceLineEdit {
+  const next: EditableInvoiceLine = { ...current };
+
+  if (edit.description !== undefined && edit.description !== null) {
+    const description = edit.description.trim();
+    if (description.length === 0) return { ok: false, error: "A line needs a description." };
+    if (description.length > maxLineDescriptionLength) {
+      return { ok: false, error: `Keep the description under ${maxLineDescriptionLength} characters.` };
+    }
+    next.description = description;
+  }
+
+  if (edit.quantity !== undefined && edit.quantity !== null) {
+    if (typeof edit.quantity !== "number" || !Number.isFinite(edit.quantity)) {
+      return { ok: false, error: "Quantity must be a number." };
+    }
+    // Rounded first, then tested: a quantity of 0.004 passes `> 0` and then
+    // rounds to zero, which violates the `quantity > 0` CHECK and fails the
+    // whole write with a message nobody can act on.
+    const quantity = round2(edit.quantity);
+    if (quantity <= 0) return { ok: false, error: "Quantity must be more than zero." };
+    if (quantity > maxLineQuantity) {
+      return { ok: false, error: `Quantity looks wrong — keep it under ${maxLineQuantity.toLocaleString("en-US")}.` };
+    }
+    next.quantity = quantity;
+  }
+
+  if (edit.unitAmount !== undefined && edit.unitAmount !== null) {
+    if (typeof edit.unitAmount !== "number" || !Number.isFinite(edit.unitAmount)) {
+      return { ok: false, error: "Unit price must be a number." };
+    }
+    const unitAmount = round2(edit.unitAmount);
+    if (unitAmount < 0) return { ok: false, error: "Unit price cannot be negative." };
+    if (unitAmount > maxLineUnitAmount) {
+      return { ok: false, error: "That unit price looks wrong. Check it before billing it." };
+    }
+    next.unitAmount = unitAmount;
+  }
+
+  if (edit.unit !== undefined && edit.unit !== null) {
+    const unit = edit.unit.trim();
+    if (unit.length > maxLineUnitLength) {
+      return { ok: false, error: `Keep the unit under ${maxLineUnitLength} characters.` };
+    }
+    next.unit = unit;
+  }
+
+  if (edit.qtyBasis !== undefined && edit.qtyBasis !== null) {
+    if (!isQuantityBasis(edit.qtyBasis)) {
+      return { ok: false, error: "Choose how the quantity is counted." };
+    }
+    next.qtyBasis = edit.qtyBasis;
+  }
+
+  if (edit.serviceDate !== undefined) {
+    // Explicit null clears the date; that is a real edit, not an omission.
+    if (edit.serviceDate === null || edit.serviceDate === "") {
+      next.serviceDate = null;
+    } else if (typeof edit.serviceDate !== "string" || !isCalendarDate(edit.serviceDate)) {
+      return { ok: false, error: "Give the service date as YYYY-MM-DD." };
+    } else {
+      next.serviceDate = edit.serviceDate;
+    }
+  }
+
+  next.lineTotal = lineTotalFor(next);
+
+  if (next.lineTotal > maxInvoiceAmount) {
+    return { ok: false, error: "That line comes to more than this system will invoice. Split it or check the figures." };
+  }
+
+  return { ok: true, line: next };
+}
+
 /** Human note describing how the total differs from the sum of the lines. */
 function adjustmentNote(totals: ProposalTotals): string | null {
   const parts: string[] = [];
@@ -141,6 +417,10 @@ export function buildDraftInvoice(input: BuildDraftInvoiceInput): DraftInvoice {
               unitAmount: deposit,
               lineTotal: deposit,
               sortOrder: 10,
+              unit: "",
+              // A deposit is a fixed sum, not a rate. Marking it flat is what
+              // stops an edited quantity from multiplying it.
+              qtyBasis: "flat",
             },
           ]
         : [];
@@ -167,6 +447,8 @@ export function buildDraftInvoice(input: BuildDraftInvoiceInput): DraftInvoice {
               unitAmount: balance,
               lineTotal: balance,
               sortOrder: 10,
+              unit: "",
+              qtyBasis: "flat",
             },
           ]
         : [];
@@ -210,6 +492,11 @@ export function buildDraftInvoice(input: BuildDraftInvoiceInput): DraftInvoice {
       unitAmount,
       lineTotal,
       sortOrder: (index + 1) * 10,
+      // The unit is now a column of its own as well as part of the description,
+      // because the printed document lays it out in its own column and a
+      // renderer cannot pull it back out of a sentence.
+      unit: (row.unit ?? "").trim().slice(0, maxLineUnitLength),
+      qtyBasis: quantityBasisFor(row),
     };
   });
 

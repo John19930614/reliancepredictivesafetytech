@@ -9,6 +9,7 @@ import {
   serializeClientContacts,
   type ClientCompanyDetail,
 } from "./client-contacts";
+import type { DeliveryMode, QtyBasis, QtyTier } from "./qty-basis";
 
 export interface GeneratorItem {
   type: string;
@@ -18,6 +19,26 @@ export interface GeneratorItem {
   price: number;
   desc: string;
   unit: string;
+  /**
+   * What `qty` means, and therefore how the row is priced — see qty-basis.ts.
+   *
+   * OPTIONAL, AND ABSENT ON EVERY ROW SAVED BEFORE IT EXISTED. Absent means the
+   * basis is derived from `unit`, and a unit that implies nothing prices the
+   * row exactly as it always did: qty × price. Nothing that reads a proposal
+   * may require this field.
+   *
+   * Stored snake_case because this is persisted JSON inside
+   * `client_proposals.form_data`, not a computed TypeScript value.
+   */
+  qty_basis?: QtyBasis;
+  /**
+   * Optional volume rate ladder — a per-unit rate that steps at a headcount.
+   * Absent or empty means a single flat rate, which is what every stored row
+   * has today. No thresholds are defined in this codebase.
+   */
+  qty_tiers?: QtyTier[];
+  /** Optional: how an instructor-led course is delivered. Never affects price. */
+  delivery_mode?: DeliveryMode;
 }
 
 /** Scalar values a form field may hold. Never objects/arrays/null. */
@@ -54,12 +75,33 @@ export function isGeneratorFieldValue(value: unknown): value is GeneratorFieldVa
 }
 
 /**
+ * A tier ladder entry must be a record of two finite numbers, for the same
+ * reason `qty` and `price` must: it is money, and it is arithmetic. A string or
+ * a NaN here would propagate into a total.
+ */
+function isOptionalQtyTierList(value: unknown): value is QtyTier[] | undefined {
+  if (value === undefined) return true;
+  if (!Array.isArray(value)) return false;
+  return value.every((entry) => isPlainRecord(entry) && isFiniteNumber(entry.min_qty) && isFiniteNumber(entry.price));
+}
+
+/**
  * Deep guard for a single phase/service line item.
  *
  * `qty` and `price` MUST be finite numbers — never numeric-looking strings.
  * They are interpolated into the generator's `innerHTML` templates, so allowing
  * a string there is a stored-XSS vector even though the asset now coerces
  * defensively at the interpolation site.
+ *
+ * `qty_basis` and `delivery_mode` are checked for SHAPE (absent, or a string)
+ * and not for membership, exactly as `key` is. This guard is the load gate for
+ * every proposal in the platform — the document page, the PDF, the DOCX, the
+ * share link and the acceptance flow all refuse a state it rejects — so
+ * rejecting an unrecognized enum value would make a signed proposal
+ * unopenable rather than merely oddly labelled. Membership is resolved where
+ * the money is computed instead: coerceQtyBasis() / coerceDeliveryMode() in
+ * qty-basis.ts treat anything unknown as absent, which prices the row exactly
+ * as it priced before either field existed.
  */
 export function isGeneratorItem(value: unknown): value is GeneratorItem {
   if (!isPlainRecord(value)) return false;
@@ -68,6 +110,9 @@ export function isGeneratorItem(value: unknown): value is GeneratorItem {
   if (!isOptionalString(value.name)) return false;
   if (!isOptionalString(value.desc)) return false;
   if (!isOptionalString(value.unit)) return false;
+  if (!isOptionalString(value.qty_basis)) return false;
+  if (!isOptionalString(value.delivery_mode)) return false;
+  if (!isOptionalQtyTierList(value.qty_tiers)) return false;
   if (!isFiniteNumber(value.qty)) return false;
   if (!isFiniteNumber(value.price)) return false;
   return true;

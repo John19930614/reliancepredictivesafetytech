@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { packageData, phaseOptions, serviceOptions } from "@/lib/proposals/catalog";
 import type { GeneratorItem, GeneratorState } from "@/lib/proposals/generator-state";
 import { computeProposalTotals } from "@/lib/proposals/pricing";
+import { proposalTypeProfiles } from "@/lib/proposals/type-profiles";
 import type { ProposalStatus } from "@/lib/proposals/types";
 import {
   buildProposalDocumentModel,
@@ -588,5 +589,254 @@ describe("blank package", () => {
     expect(built.packageIntro).toContain("March 2026 – August 2026");
     expect(built.packageIntro).toContain("6-month");
     expect(built.packageIntro).not.toMatch(/0 users/);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* THE CPR PROPOSAL                                                            */
+/*                                                                             */
+/* A signed First Aid / CPR / AED training proposal went to a client carrying  */
+/* platform subscription copy. Nothing in the per-type machinery was broken —  */
+/* it was never reached, because the proposal carried no type. Two defaults    */
+/* compounded:                                                                 */
+/*                                                                            */
+/*   1. `defaultPackageKey` is "blank", `blank` is NAMED "Platform Services",  */
+/*      and `blank` counts as a platform line — so a proposal where nobody     */
+/*      picked a package computes includesPlatformPackage = true and renders   */
+/*      section 02 "Selected Platform Package";                                */
+/*   2. with no type stamped, resolveTypeCopy falls back to the platform-era   */
+/*      copy — the "...Predictive Risk Platform Services" subtitle, the        */
+/*      "organized into practical work phases and service lines" lead-in, and  */
+/*      the three subscription deliverables.                                   */
+/*                                                                            */
+/* Both halves are asserted below: the legacy fallback still behaves exactly   */
+/* as it did (a document already in a client's hands must not be restyled),    */
+/* and a stamped services type produces none of it.                            */
+/* -------------------------------------------------------------------------- */
+
+/** The three deliverables a training client must never be promised. */
+const platformDeliverables = [
+  "Configured platform subscription and client account setup",
+  "Billing package selection and proposal pricing schedule",
+  "User and jobsite structure based on the selected package",
+];
+
+/** The CPR proposal's line items, under either set of fields. */
+const cprLines: Partial<GeneratorState> = {
+  phases: [],
+  services: [
+    item({ type: "service", key: "firstAid", name: "First Aid / CPR / AED Training", qty: 6, price: 95, desc: "" }),
+  ],
+};
+
+describe("a task-based proposal prints no platform boilerplate", () => {
+  const built = buildProposalDocumentModel({
+    state: state({
+      ...cprLines,
+      fields: {
+        proposalType: "training",
+        packageSelect: "none",
+        clientCompany: "Hunzinger Construction",
+      },
+    }),
+    proposal: subject(),
+  });
+
+  it("renders no Selected Platform Package block", () => {
+    // Section 02's heading IS the tell: "Selected Platform Package" over a
+    // CPR class is the first thing the client read.
+    expect(built.includesPlatformPackage).toBe(false);
+    expect(built.packageHeading).toBe("Engagement Summary");
+    expect(built.packageHeading).not.toContain("Platform");
+    expect(built.packageIntro).not.toMatch(/base subscription/i);
+    expect(built.feeGroups.map((group) => group.label)).not.toContain("Base Subscription");
+    expect(built.totals.lineItems.some((row) => row.source === "package")).toBe(false);
+  });
+
+  it("shows no subscription, term-limit or seat rows in section 02", () => {
+    const labels = built.packagePills.map((pill) => pill.label);
+    for (const forbidden of ["Subscription Price", "Pilot Price", "Included Users", "Included Jobsites"]) {
+      expect(labels, `${forbidden} pill is still printed`).not.toContain(forbidden);
+    }
+    // No billing cadence is invented either: the seeded term is absent here, and
+    // the platform-era default is "One-time (pilot)".
+    expect(labels).not.toContain("Billing");
+    expect(JSON.stringify(built.packagePills)).not.toMatch(/pilot/i);
+  });
+
+  it("promises none of the three platform deliverables", () => {
+    for (const deliverable of platformDeliverables) {
+      expect(built.deliverables, `still promises "${deliverable}"`).not.toContain(deliverable);
+    }
+    // And it promises something instead — an empty section 04 would be its own
+    // defect, so the suppression is proved to be a swap, not a deletion.
+    expect(built.deliverables.length).toBeGreaterThan(0);
+    expect(built.deliverables.join(" ")).not.toMatch(/platform|subscription|jobsite structure/i);
+  });
+
+  it("replaces the platform-era masthead and section 03 lead-in", () => {
+    // PROP-4: the per-type scopeIntro already existed and was simply not reached.
+    expect(built.subtitle).not.toBe(documentCopy.subtitle);
+    expect(built.subtitle).not.toMatch(/platform services/i);
+    expect(built.scopeIntro).not.toBe(documentCopy.scopeIntro);
+    expect(built.scopeIntro).not.toMatch(/enterprise platform rollout/i);
+    expect(built.docline).not.toMatch(/platform|pilot/i);
+  });
+
+  it("tells the client nothing is missing that was never part of the deal", () => {
+    // "No implementation phases selected." on a training proposal describes an
+    // absence that is the design.
+    expect(built.phaseEmptyNote).toBe("");
+    expect(built.serviceEmptyNote).toBe("");
+  });
+});
+
+describe("a proposal written before types existed still renders as it was sent", () => {
+  // THE OTHER HALF OF THE CONTRACT, and the reason the fallback exists at all
+  // (lib/proposals/type-profiles/index.ts). Requiring a type at creation must
+  // not reach backwards into documents a client is already holding.
+  const legacy = buildProposalDocumentModel({
+    state: state({ ...cprLines, fields: { clientCompany: "Hunzinger Construction" } }),
+    proposal: subject(),
+  });
+
+  it("keeps the platform-era prose verbatim", () => {
+    expect(legacy.subtitle).toBe(documentCopy.subtitle);
+    expect(legacy.scopeIntro).toBe(documentCopy.scopeIntro);
+    expect(legacy.purposeCallout).toBe(documentCopy.purposeCallout);
+    expect(legacy.deliverables).toEqual([...documentCopy.baseDeliverables]);
+    expect(legacy.scheduleSteps).toEqual([...documentCopy.scheduleSteps]);
+    expect(legacy.clientResponsibilities).toEqual([...documentCopy.clientResponsibilities]);
+  });
+
+  it("keeps the platform package block it was sent with", () => {
+    // Documenting the defect, not endorsing it: with no packageSelect the model
+    // falls back to `blank`, which is named "Platform Services" and counts as a
+    // platform line. That is what these documents printed, so that is what they
+    // must keep printing — the fix is that no NEW proposal can reach this state.
+    expect(legacy.includesPlatformPackage).toBe(true);
+    expect(legacy.packageHeading).toBe("Selected Platform Package");
+  });
+
+  it("keeps the platform-era section headings and line labels", () => {
+    expect(legacy.scopeHeading).toBe("Detailed Scope of Work");
+    expect(legacy.feesHeading).toBe("Pricing Schedule");
+    expect(legacy.termHeading).toBe("Schedule and Implementation Approach");
+    expect(legacy.serviceScope[0].heading).toBe("Service Line 1: First Aid / CPR / AED Training");
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* PROP-5 — the schedule line noun                                             */
+/* -------------------------------------------------------------------------- */
+
+describe("section 03 labels its lines with what the type sells", () => {
+  const withType = (proposalType: string | undefined) =>
+    buildProposalDocumentModel({
+      state: state({
+        ...cprLines,
+        fields: proposalType ? { proposalType, packageSelect: "none" } : {},
+      }),
+      proposal: subject(),
+    });
+
+  it("uses the profile's unit noun rather than a frozen label", () => {
+    // Data-driven, on purpose: this terminology is not confirmed with the
+    // seller yet, so the assertion reads the noun off the profile instead of
+    // pinning a string the profile does not control.
+    for (const key of ["time_and_materials", "training", "fixed_price"] as const) {
+      const noun = proposalTypeProfiles[key].lexicon.unitNoun;
+      const expected = noun.charAt(0).toUpperCase() + noun.slice(1);
+      expect(withType(key).serviceScope[0].heading, key).toBe(
+        `${expected} Line 1: First Aid / CPR / AED Training`,
+      );
+    }
+  });
+
+  it("falls back to Service Line for a proposal with no type", () => {
+    // The platform default, and the label every already-sent document carries.
+    expect(withType(undefined).serviceScope[0].heading).toBe("Service Line 1: First Aid / CPR / AED Training");
+  });
+
+  it("numbers every line, not just the first", () => {
+    const multi = buildProposalDocumentModel({
+      state: state({
+        fields: { proposalType: "time_and_materials", packageSelect: "none" },
+        phases: [],
+        services: [
+          item({ type: "service", key: "reviewHour", name: "Program Review", qty: 4, price: 150 }),
+          item({ type: "service", key: "fieldDay", name: "Field Day", qty: 2, price: 1200 }),
+        ],
+      }),
+      proposal: subject(),
+    });
+    expect(multi.serviceScope.map((entry) => entry.heading)).toEqual([
+      "Task Line 1: Program Review",
+      "Task Line 2: Field Day",
+    ]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* PROP-2 — the header wordmark is the company, not a person                   */
+/* -------------------------------------------------------------------------- */
+
+describe("the document's company identity is separate from its preparer", () => {
+  const build = (fields: Record<string, string>) =>
+    buildProposalDocumentModel({ state: state({ fields }), proposal: subject() });
+
+  it("prints the stored company in the wordmark, the party cell and the notice", () => {
+    const built = build({
+      sellerName: "Reliance Predictive Safety Technologies",
+      preparedBy: "Jordan Blake",
+      sellerContact: "Sussex, Wisconsin",
+    });
+
+    expect(built.wordmark).toBe("Reliance Predictive Safety Technologies");
+    expect(built.preparedByBlock.name).toBe("Reliance Predictive Safety Technologies");
+    expect(built.preparedByBlock.lines).toEqual(["Prepared by: Jordan Blake", "Sussex, Wisconsin"]);
+    expect(built.legalNotice).toContain("produced by Reliance Predictive Safety Technologies");
+  });
+
+  it("refuses to let a credentialled person's name become the company", () => {
+    // The reported shape: a preparer typed into the seller field became the
+    // masthead of a client-facing document AND the entity the legal notice said
+    // produced it. No company name ends in a post-nominal safety credential.
+    const built = build({ sellerName: "Jordan Blake, CSP", sellerContact: "Sussex, Wisconsin" });
+
+    expect(built.wordmark).toBe("Reliance Predictive Safety Technologies");
+    expect(built.legalNotice).toContain("produced by Reliance Predictive Safety Technologies");
+    expect(built.legalNotice).not.toContain("Jordan Blake");
+    // Nothing is lost — the name lands where a person belongs.
+    expect(built.preparedByBlock.lines[0]).toBe("Prepared by: Jordan Blake, CSP");
+    expect(built.sellerSignature).toBe("Jordan Blake, CSP / Authorized Representative");
+  });
+
+  it("refuses when the seller field simply repeats the preparer", () => {
+    const built = build({ sellerName: "Jordan Blake", preparedBy: "  jordan blake  " });
+
+    expect(built.wordmark).toBe("Reliance Predictive Safety Technologies");
+    // The explicit preparedBy wins for the line itself.
+    expect(built.preparedByBlock.lines[0]).toBe("Prepared by: jordan blake");
+  });
+
+  it("leaves an unfamiliar company name alone", () => {
+    // The guard must never rewrite a real company. A false positive here is a
+    // worse document than the bug it exists to stop.
+    for (const name of [
+      "Reliance Predictive Safety Technologies LLC",
+      "Blake & Sons",
+      "Hunzinger Construction Company",
+      "RPST",
+    ]) {
+      expect(build({ sellerName: name }).wordmark, name).toBe(name);
+    }
+  });
+
+  it("falls back to the company default when no seller name is stored", () => {
+    const built = build({});
+    expect(built.wordmark).toBe("Reliance Predictive Safety Technologies");
+    expect(built.preparedByBlock.name).toBe("Reliance Predictive Safety Technologies");
+    expect(built.sellerSignature).toBe("Authorized Representative");
   });
 });

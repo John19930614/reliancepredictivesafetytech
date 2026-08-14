@@ -85,6 +85,110 @@ describe("the stylesheet parses", () => {
   });
 });
 
+/* -------------------------------------------------------------------------- */
+/* Fee table column layout                                                     */
+/*                                                                             */
+/* THE BUG THIS EXISTS FOR: the UNIT PRICE and AMOUNT column headings printed  */
+/* on top of one another. Three CSS facts combined, none wrong on its own:     */
+/*                                                                            */
+/*   .rp-doc-fee            table-layout: fixed   (a column cannot grow)       */
+/*   .rp-doc-col-price/-amount  width: 12%        (~69px of usable space)      */
+/*   .rp-doc-fee th         uppercase + 0.07em    ("UNIT PRICE" ≈ 70px)        */
+/*   .rp-doc-right          white-space: nowrap   (and it cannot wrap either)  */
+/*                                                                            */
+/* Every one of those lives in this stylesheet, which is why no render test    */
+/* could see it: jsdom does not lay tables out, and the PDF and DOCX renderers */
+/* measure their own columns and never load this sheet at all. This suite      */
+/* read only colour and specificity before — a whole class of defect, in the   */
+/* one table where a client reads the numbers, with no coverage.               */
+/* -------------------------------------------------------------------------- */
+
+/** The declared width of one fee-table column, as a percentage number. */
+function columnWidth(columnClass: string): number {
+  const rule = rules.find(
+    (candidate) =>
+      candidate.selector.includes(`col.${columnClass}`) && /(^|[\s;])width:/.test(candidate.body),
+  );
+  expect(rule, `no width declared for .${columnClass}`).toBeDefined();
+  const match = /(^|[\s;])width:\s*([\d.]+)%/.exec(rule!.body);
+  expect(match, `.${columnClass} width is not a percentage`).not.toBeNull();
+  return Number(match![2]);
+}
+
+describe("the fee table's money columns fit their own headings", () => {
+  const feeColumns = ["rp-doc-col-item", "rp-doc-col-desc", "rp-doc-col-qty", "rp-doc-col-price", "rp-doc-col-amount"];
+
+  it("declares a width for every column, because the layout is fixed", () => {
+    // Under table-layout: fixed an undeclared column takes an equal share of
+    // whatever is left, which is how a money column silently loses its room.
+    const fixed = rules.find((rule) => /^\.rp-doc-fee$/.test(rule.selector));
+    expect(fixed?.body, ".rp-doc-fee no longer sets table-layout").toMatch(/table-layout:\s*fixed/);
+    for (const column of feeColumns) expect(columnWidth(column)).toBeGreaterThan(0);
+  });
+
+  it("still adds up to the full table, so no column is squeezed by rounding", () => {
+    const total = feeColumns.reduce((sum, column) => sum + columnWidth(column), 0);
+    expect(total).toBeCloseTo(100, 5);
+  });
+
+  it("gives UNIT PRICE and AMOUNT more room than Qty", () => {
+    // "QTY" is three characters. "UNIT PRICE" is ten, uppercase, tracked out.
+    // Equal widths are what made them collide, so equal widths are the thing
+    // this asserts against.
+    const qty = columnWidth("rp-doc-col-qty");
+    const price = columnWidth("rp-doc-col-price");
+    const amount = columnWidth("rp-doc-col-amount");
+
+    expect(price, "UNIT PRICE is no wider than Qty").toBeGreaterThan(qty);
+    expect(amount, "AMOUNT is no wider than Qty").toBeGreaterThan(qty);
+    // The measured floor: at the 8.5in document width, 18px of cell padding and
+    // the header's own letter-spacing, "UNIT PRICE" needs ~70px — a shade under
+    // 10% of the ~728px content box. 14% keeps a real margin at the narrower
+    // print width, where the padding tightens but the font does not shrink.
+    expect(price, "UNIT PRICE has no margin over its own label").toBeGreaterThanOrEqual(14);
+    expect(amount, "AMOUNT has no margin over its own label").toBeGreaterThanOrEqual(14);
+  });
+
+  it("lets the column headings wrap, while the figures below them stay unbroken", () => {
+    // The widths above are a percentage of a container that shrinks: the 900px
+    // breakpoint narrows the padding and a phone narrows everything. Wrapping
+    // is what makes the fix hold at any width, so it is asserted separately.
+    const nowrapOnEveryRightCell = rules.find((rule) => rule.selector === ".rp-doc-right");
+    expect(nowrapOnEveryRightCell?.body, ".rp-doc-right no longer holds figures on one line").toMatch(
+      /white-space:\s*nowrap/,
+    );
+
+    const headerWrap = rules.filter(
+      (rule) =>
+        /\.rp-doc-fee\b/.test(rule.selector) &&
+        /\bth\b/.test(rule.selector) &&
+        /white-space:\s*normal/.test(rule.body),
+    );
+    expect(headerWrap.length, "no rule releases the fee table's header cells from nowrap").toBeGreaterThan(0);
+
+    // And it has to actually win the cascade against the rule it is undoing.
+    for (const rule of headerWrap) {
+      expect(
+        compare(specificity(rule.selector), specificity(".rp-doc-right")),
+        `"${rule.selector}" does not outrank ".rp-doc-right", so the heading still cannot wrap`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("does not put the nowrap back when the document is printed", () => {
+    // The print block tightens cell padding, which makes the columns tighter
+    // still — reinstating nowrap there would reopen the bug on paper only,
+    // where nobody looks until a client has the page.
+    const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const printRules = parseRules(withoutComments.slice(withoutComments.indexOf("@media print")));
+    const offenders = printRules
+      .filter((rule) => /\.rp-doc-fee\b/.test(rule.selector) && /\bth\b/.test(rule.selector))
+      .filter((rule) => /white-space:\s*nowrap/.test(rule.body))
+      .map((rule) => rule.selector);
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe("light text always carries its own background", () => {
   // The class of bug, stated as a rule: any declaration block that sets text to
   // the light panel colour must set a background in the SAME block. A block

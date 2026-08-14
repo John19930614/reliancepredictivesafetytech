@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FilePlus2, Loader2 } from "lucide-react";
-import { createProposal } from "@/app/employee/proposals/actions";
 import {
   createProposalFromTemplate,
   createProposalFromTransactionType,
@@ -57,7 +56,25 @@ export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
     setSubmitting(true);
     setError("");
 
+    // The type gate, checked before anything is written.
+    //
+    // `required` on the <select> already stops a normal submit, but this form
+    // submits through onSubmit rather than the browser's own validation path in
+    // every case (a programmatic submit, or a stale value left in state after a
+    // failed create, both reach here). A proposal created with no type falls
+    // back to platform-era copy for its subtitle, its section 03 lead-in and
+    // its deliverables — the defect that put "Configured platform subscription"
+    // on a signed CPR/AED training proposal — so this is checked here too.
     const formData = new FormData(event.currentTarget);
+    if (!templateId) {
+      setSubmitting(false);
+      setError(
+        "Choose a proposal type. It decides what the client's document says about the deal — a subscription " +
+          "document names a platform package and a services document does not.",
+      );
+      return;
+    }
+
     const valueRaw = String(formData.get("proposal_value") ?? "").trim();
     const parsedValue = valueRaw ? Number(valueRaw) : null;
     if (valueRaw && Number.isNaN(parsedValue)) {
@@ -88,20 +105,29 @@ export function ProposalCreateForm({ clients }: { clients: ClientOption[] }) {
       }
     }
 
-    // Three create paths, all landing in the same editor. The blank path calls
-    // createProposal(), which seeds neutral zero-price phases and no pilot
-    // wording (df4d47e); the proposal-type path seeds from the built-in
-    // transaction-type registry; the saved-template path uses the Proposal
-    // Templates module's own action. Both template paths scrub any captured
-    // client identity out and layer this company's in.
+    // Two create paths, both landing in the same editor and both carrying a
+    // type. The proposal-type path seeds from the built-in transaction-type
+    // registry, which stamps `proposalType` into the state; the saved-template
+    // path uses the Proposal Templates module's own action, and a template
+    // captured from a typed proposal carries the stamp with it. Both scrub any
+    // captured client identity out and layer this company's in.
+    //
+    // A template captured BEFORE types existed carries no stamp, and that
+    // action refuses it rather than minting an untyped proposal. The refusal
+    // surfaces through setError below, which asks for a type — so the seller
+    // picks a built-in type instead. Failing closed is deliberate: an untyped
+    // proposal renders the platform-era fallback copy.
+    //
+    // The third path — createProposal(), the untyped blank one — is no longer
+    // reachable from this form. It is what produced the typeless proposals in
+    // the first place, and it now refuses to create one without a type of its
+    // own accord (app/employee/proposals/actions.ts).
     const result = templateId.startsWith(transactionTypeOptionPrefix)
       ? await createProposalFromTransactionType({
           ...shared,
           typeKey: templateId.slice(transactionTypeOptionPrefix.length),
         })
-      : templateId
-        ? await createProposalFromTemplate({ ...shared, templateId })
-        : await createProposal(shared);
+      : await createProposalFromTemplate({ ...shared, templateId });
 
     if (!result.ok || !result.proposalId) {
       setError(result.error ?? "Failed to create the proposal.");

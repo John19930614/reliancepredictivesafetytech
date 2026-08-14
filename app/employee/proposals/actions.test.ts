@@ -24,8 +24,13 @@ import { recordAcceptanceIncome } from "@/lib/proposals/acceptance-income";
 import { notifyProposalEventById } from "@/lib/proposals/notifications-server";
 import { resolveProposalRoleFlags } from "@/lib/proposals/policy";
 import { isGeneratorState, type GeneratorState } from "@/lib/proposals/generator-state";
-import { phaseOptions } from "@/lib/proposals/catalog";
+import { isNoPlatformPackageKey, phaseOptions } from "@/lib/proposals/catalog";
 import { computeProposalTotals } from "@/lib/proposals/pricing";
+import {
+  buildTransactionTemplateState,
+  transactionTemplateKeys,
+} from "@/lib/proposals/transaction-templates";
+import { resolveProposalTypeProfile } from "@/lib/proposals/type-profiles";
 import {
   createProposal,
   decideProposal,
@@ -218,7 +223,7 @@ describe("proposal action RBAC", () => {
     const supabase = createSupabaseMock({});
     signIn("client_user", supabase);
 
-    expect((await createProposal({ title: "X" })).ok).toBe(false);
+    expect((await createProposal({ title: "X", typeKey: "platform" })).ok).toBe(false);
     expect((await updateProposalMeta(PROPOSAL_ID, { owner: "Jo" })).ok).toBe(false);
     expect((await saveProposalRevision(PROPOSAL_ID, { title: "X" })).ok).toBe(false);
     expect((await saveProposalDraft(PROPOSAL_ID, validState)).ok).toBe(false);
@@ -612,11 +617,11 @@ describe("server-side input validation", () => {
     const supabase = createSupabaseMock({});
     signIn("employee", supabase);
 
-    expect((await createProposal({ title: "a".repeat(201) })).fieldErrors?.title).toBeTruthy();
-    expect((await createProposal({ title: "T", proposalValue: Number.NaN })).fieldErrors?.proposalValue).toBeTruthy();
-    expect((await createProposal({ title: "T", proposalValue: 1e12 })).fieldErrors?.proposalValue).toBeTruthy();
-    expect((await createProposal({ title: "T", validUntil: "2026-02-30" })).fieldErrors?.validUntil).toBeTruthy();
-    expect((await createProposal({ title: "T", clientId: "not-a-uuid" })).fieldErrors?.clientId).toBeTruthy();
+    expect((await createProposal({ title: "a".repeat(201), typeKey: "platform" })).fieldErrors?.title).toBeTruthy();
+    expect((await createProposal({ title: "T", typeKey: "platform", proposalValue: Number.NaN })).fieldErrors?.proposalValue).toBeTruthy();
+    expect((await createProposal({ title: "T", typeKey: "platform", proposalValue: 1e12 })).fieldErrors?.proposalValue).toBeTruthy();
+    expect((await createProposal({ title: "T", typeKey: "platform", validUntil: "2026-02-30" })).fieldErrors?.validUntil).toBeTruthy();
+    expect((await createProposal({ title: "T", typeKey: "platform", clientId: "not-a-uuid" })).fieldErrors?.clientId).toBeTruthy();
     expect(supabase.calls).toHaveLength(0);
   });
 
@@ -648,7 +653,7 @@ describe("revision 1 form state", () => {
     });
     signIn("employee", supabase);
 
-    const result = await createProposal({ title: "Acme Rollout", clientId: CLIENT_ID });
+    const result = await createProposal({ title: "Acme Rollout", typeKey: "platform", clientId: CLIENT_ID });
 
     expect(result).toEqual({ ok: true, proposalId: PROPOSAL_ID });
     // form_data lands on the UPDATE, not the insert: the proposal row has to
@@ -685,7 +690,7 @@ describe("revision 1 form state", () => {
     });
     signIn("employee", supabase);
 
-    await createProposal({ title: "Unassigned deal" });
+    await createProposal({ title: "Unassigned deal", typeKey: "training" });
 
     const revision = supabase.calls.find((c) => c.table === "client_proposal_revisions" && c.op === "insert");
     const seeded = revision?.payload?.form_data as GeneratorState;
@@ -724,7 +729,7 @@ describe("revision 1 form state", () => {
     });
     signIn("employee", supabase);
 
-    await createProposal({ title: "Unassigned deal" });
+    await createProposal({ title: "Unassigned deal", typeKey: "training" });
 
     const workingCopy = supabase.calls.find((c) => c.table === "client_proposals" && c.op === "update");
     const seeded = workingCopy?.payload?.form_data as GeneratorState;
@@ -737,6 +742,107 @@ describe("revision 1 form state", () => {
     expect(seeded.fields.packageSelect).toBe("none");
     expect(totals.lineItems).toHaveLength(3);
     expect(totals.lineItems.some((row) => row.source === "package")).toBe(false);
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* The proposal type is not optional                                        */
+  /*                                                                          */
+  /* A proposal saved with no `proposalType` resolves no type profile, and    */
+  /* everything per-type is keyed on that resolution — so it silently prints  */
+  /* the platform-era subtitle, the platform-era section 03 lead-in and the   */
+  /* three platform deliverables. That is the correct rendering for a         */
+  /* document written before types existed and the wrong one for anything     */
+  /* created today: it is how a signed CPR/AED training proposal reached a    */
+  /* client carrying platform subscription copy.                              */
+  /*                                                                          */
+  /* The form requires the choice; these prove the ACTION does too, because a */
+  /* Server Action is a public POST endpoint and the form is not the gate.    */
+  /* ------------------------------------------------------------------------ */
+
+  it("refuses to create a proposal with no type, before touching the database", async () => {
+    const supabase = createSupabaseMock({});
+    signIn("employee", supabase);
+
+    for (const bad of [undefined, null, "", "   ", "not_a_type", 7, {}]) {
+      const result = await createProposal({ title: "Acme Rollout", typeKey: bad as never });
+      expect(result.ok, `typeKey ${JSON.stringify(bad)} was accepted`).toBe(false);
+      expect(result.fieldErrors?.typeKey, `typeKey ${JSON.stringify(bad)} reported no field error`).toBeTruthy();
+    }
+
+    // Nothing was written and nothing was audited: the refusal happens before
+    // the insert that would allocate a proposal number.
+    expect(supabase.calls).toHaveLength(0);
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("stamps the chosen type into the seeded state, for every registered type", async () => {
+    for (const key of transactionTemplateKeys) {
+      const supabase = createSupabaseMock({
+        "client_proposals:insert": { data: { id: PROPOSAL_ID } },
+        "client_proposals:update": {},
+        "client_proposal_revisions:insert": {},
+      });
+      signIn("employee", supabase);
+
+      const result = await createProposal({ title: `A ${key} deal`, typeKey: key });
+      expect(result.ok, key).toBe(true);
+
+      const revision = supabase.calls.find((c) => c.table === "client_proposal_revisions" && c.op === "insert");
+      const seeded = revision?.payload?.form_data as GeneratorState;
+
+      // The stamp the whole document keys on.
+      expect(seeded.fields.proposalType, key).toBe(key);
+      // And it actually resolves: a stamp the profile registry does not
+      // recognise would leave the document on the legacy fallback anyway.
+      expect(resolveProposalTypeProfile(seeded.fields)?.key, key).toBe(key);
+
+      // The package follows what the type SELLS, read from the registry rather
+      // than defaulted — a services type must not seed a subscription.
+      expect(seeded.fields.packageSelect, key).toBe(buildTransactionTemplateState(key).fields.packageSelect);
+    }
+  });
+
+  it("gives a services type a document with no platform package at all", async () => {
+    // The CPR proposal, at the point it was created. Training sells no
+    // subscription, so the seeded state must not carry one — `blank` would,
+    // because `blank` is named "Platform Services" and counts as a platform
+    // line (lib/proposals/catalog.ts).
+    const supabase = createSupabaseMock({
+      "client_proposals:insert": { data: { id: PROPOSAL_ID } },
+      "client_proposals:update": {},
+      "client_proposal_revisions:insert": {},
+    });
+    signIn("employee", supabase);
+
+    await createProposal({ title: "First Aid / CPR / AED for Hunzinger", typeKey: "training" });
+
+    const revision = supabase.calls.find((c) => c.table === "client_proposal_revisions" && c.op === "insert");
+    const seeded = revision?.payload?.form_data as GeneratorState;
+
+    expect(isNoPlatformPackageKey(String(seeded.fields.packageSelect))).toBe(true);
+    expect(computeProposalTotals(seeded).lineItems.some((row) => row.source === "package")).toBe(false);
+  });
+
+  it("duplicates an untyped proposal without inventing a type for it", async () => {
+    // The legacy contract, at the one place it could be broken by this change:
+    // a copy has to read as the document it was copied from. Retro-fitting a
+    // type would restyle a proposal that may already be in a client's hands.
+    const untyped: GeneratorState = { v: 1, fields: { clientCompany: "Acme" }, phases: [], services: [] };
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: { ...proposal(), form_data: untyped } },
+      "client_proposals:insert": { data: { id: "33333333-3333-4333-8333-333333333333" } },
+      "client_proposal_revisions:insert": {},
+    });
+    signIn("employee", supabase);
+
+    const result = await duplicateProposal(PROPOSAL_ID);
+    expect(result.ok).toBe(true);
+
+    const revision = supabase.calls.find((c) => c.table === "client_proposal_revisions" && c.op === "insert");
+    const copied = revision?.payload?.form_data as GeneratorState;
+    expect(copied).toEqual(untyped);
+    expect(copied.fields).not.toHaveProperty("proposalType");
+    expect(resolveProposalTypeProfile(copied.fields)).toBeNull();
   });
 
   it("refuses to restore a revision with no usable form data", async () => {
