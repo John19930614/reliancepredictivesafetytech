@@ -1,0 +1,488 @@
+/**
+ * Client Lifecycle Command Center — one opportunity, one step at a time.
+ *
+ * MODULE_ID: client_lifecycle
+ * PATH_PREFIX: /employee/lifecycle
+ *
+ * An async SERVER component. Every read happens here; the only client code is
+ * the header's Exit Path / Skip to Step / Next Step island (CLAUDE.md: no
+ * client-side data mutation, no client-side Supabase reads).
+ *
+ * The screen is the same shape on all eleven steps — header, rail, KPI tiles,
+ * panel grid, indicator strip, record tabs — and the step decides what fills the
+ * grid. Steps whose bespoke panels are not built yet still render their purpose
+ * and the deal facts, so the lifecycle is walkable end to end from day one
+ * rather than showing eight blank screens.
+ *
+ * Error boundary: inherited from app/employee/error.tsx.
+ */
+
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import type { Metadata } from "next";
+import {
+  ArrowLeft,
+  Brain,
+  CalendarClock,
+  CircleDollarSign,
+  Clock3,
+  Gauge,
+  Target,
+} from "lucide-react";
+import { getLifecycleAccess } from "@/lib/lifecycle/access";
+import { isClosed, lifecycleExit } from "@/lib/lifecycle/exits";
+import {
+  lifecycleStep,
+  lifecycleStepCount,
+  nextStepKey,
+  stepNumber,
+} from "@/lib/lifecycle/steps";
+import { opportunitySelect, type OpportunityRow, type OpportunityStageEventRow } from "@/lib/lifecycle/types";
+import { loadLeadContext, scoreBand } from "@/lib/lifecycle/lead-context";
+import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
+import { LifecycleRail } from "@/components/lifecycle/LifecycleRail";
+import { LifecycleStepActions } from "@/components/lifecycle/LifecycleStepActions";
+import {
+  AiTriagePanels,
+  AssignOwnerPanels,
+  ClosedWonPanels,
+  CommitContractPanels,
+  DiscoveryPanels,
+  LeadCapturedPanels,
+  NegotiationPanels,
+  ProposalReviewPanels,
+  QualifiedPanels,
+  SalesReviewPanels,
+  SolutionProposalPanels,
+} from "@/components/lifecycle/StepPanels";
+import { emptyDealContext, loadDealContext } from "@/lib/lifecycle/deal-context";
+import { emptyOnboardingContext, loadOnboardingContext } from "@/lib/lifecycle/onboarding-context";
+import { findOwner, loadOwnerOptions } from "@/lib/lifecycle/owners";
+import type { QualificationRow } from "@/lib/lifecycle/qualification";
+import {
+  LifecycleFacts,
+  LifecycleIndicators,
+  LifecycleKpis,
+  LifecyclePanel,
+  LifecycleRecordTabs,
+  StepActivities,
+  type Indicator,
+  type KpiTile,
+} from "@/components/lifecycle/LifecycleFurniture";
+
+export const metadata: Metadata = {
+  title: "Client Lifecycle",
+  description: "One controlled record from lead to close.",
+};
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const historyLimit = 12;
+const clientPickerLimit = 200;
+
+/** Steps whose panels run on proposals, paperwork and invoices. */
+const dealSteps = new Set(["solution_proposal", "proposal_review", "negotiation_approval", "commit_contract"]);
+
+interface PageProps {
+  params: Promise<{ id: string }>;
+}
+
+function money(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  } catch {
+    return `${currency} ${amount.toFixed(0)}`;
+  }
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function daysSince(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return Math.max(0, Math.floor((Date.now() - parsed.getTime()) / 86_400_000));
+}
+
+/** Whole days until a date; negative once it has passed. */
+function daysUntil(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return Math.ceil((parsed.getTime() - Date.now()) / 86_400_000);
+}
+
+export default async function LifecycleRecordPage({ params }: PageProps) {
+  const { id } = await params;
+  if (!UUID.test(id)) notFound();
+
+  const { supabase, canRead, canManage, canAdvance, canSkip, canExit, canReopen } = await getLifecycleAccess();
+
+  if (!supabase) {
+    return <section className="portal-card empty-state">Supabase is not configured yet.</section>;
+  }
+  if (!canRead) {
+    return <section className="portal-card empty-state">The Client Lifecycle is not visible for this account.</section>;
+  }
+
+  const { data: row, error: readError } = await supabase
+    .from("opportunities")
+    .select(opportunitySelect)
+    .eq("id", id)
+    .maybeSingle();
+
+  // The lifecycle ships behind a migration that has to be rehearsed on staging
+  // first, so a deploy can legitimately land ahead of it.
+  if (readError && isMissingSchemaRelationError(readError)) {
+    return (
+      <section className="portal-card empty-state">
+        The Client Lifecycle is not set up in Supabase yet. Apply the latest database migrations and try again.
+      </section>
+    );
+  }
+  if (!row) notFound();
+
+  const opportunity = row as OpportunityRow;
+  const step = lifecycleStep(opportunity.step);
+  const number = stepNumber(opportunity.step);
+  const next = nextStepKey(opportunity.step);
+  const closed = isClosed(opportunity.status);
+  const exit = lifecycleExit(opportunity.status);
+
+  const onDealStep = dealSteps.has(opportunity.step);
+
+  const [clientResult, historyResult, leadContext, owners, qualificationResult, deal, clientsResult, onboarding] =
+    await Promise.all([
+      opportunity.client_id
+        ? supabase.from("company_clients").select("id, name").eq("id", opportunity.client_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+      supabase
+        .from("opportunity_stage_events")
+        .select("id, from_step, to_step, from_status, to_status, kind, reason, steps_skipped, changed_by, changed_at")
+        .eq("opportunity_id", id)
+        .order("changed_at", { ascending: false })
+        .limit(historyLimit),
+      loadLeadContext(supabase, opportunity.demo_request_id),
+      // Only read where the screen uses it: the roster is a service-role read, and
+      // steps that do not assign an owner should not pay for it.
+      step?.key === "assign_owner" && canManage ? loadOwnerOptions() : Promise.resolve([]),
+      supabase
+        .from("opportunity_qualification")
+        .select(
+          "opportunity_id, discovery_call_at, primary_need, pain_points, decision_makers, budget_range, timeline, has_budget, has_authority, has_need, has_timeline, competition, qualified_at, qualified_by, updated_at",
+        )
+        .eq("opportunity_id", id)
+        .maybeSingle(),
+      // Six reads back the deal panels, so the other seven steps do not pay for
+      // them.
+      onDealStep ? loadDealContext(supabase, id, opportunity.client_id) : Promise.resolve(emptyDealContext),
+      // Only step 7 offers a company picker, and only for a deal that has no
+      // company yet — which is the one case where a proposal cannot be written.
+      step?.key === "solution_proposal" && canManage && !opportunity.client_id
+        ? supabase.from("company_clients").select("id, name").order("name", { ascending: true }).limit(clientPickerLimit)
+        : Promise.resolve({ data: [] }),
+      // Step 11 reports the company's own onboarding state rather than keeping
+      // a second copy of it.
+      step?.key === "closed_won_onboarded"
+        ? loadOnboardingContext(supabase, opportunity.client_id)
+        : Promise.resolve(emptyOnboardingContext),
+    ]);
+
+  const client = (clientResult?.data ?? null) as { id: string; name: string } | null;
+  const history: OpportunityStageEventRow[] = Array.isArray(historyResult?.data)
+    ? (historyResult.data as OpportunityStageEventRow[])
+    : [];
+  const clients: Array<{ id: string; name: string }> = Array.isArray(clientsResult?.data)
+    ? (clientsResult.data as Array<{ id: string; name: string }>)
+    : [];
+
+  // A missing qualification row is ordinary — most deals reach step 5 before
+  // anyone has written anything down.
+  const qualification = (qualificationResult?.data ?? null) as QualificationRow | null;
+  const currentOwner = findOwner(owners, opportunity.owner_user_id);
+
+  const inStep = daysSince(opportunity.step_changed_at);
+  const toClose = daysUntil(opportunity.expected_close_date);
+  const weighted = (opportunity.value * opportunity.probability) / 100;
+
+  // Steps 1–3 are about a LEAD, not yet a deal: a value and a close date on a
+  // lead nobody has qualified are noise. Those steps get the lead's own numbers.
+  const leadStep = step?.number !== undefined && step.number <= 3;
+  const triage = leadContext.triage;
+  const band = scoreBand(triage?.priority_score ?? opportunity.ai_score);
+
+  const leadTiles: KpiTile[] = [
+    {
+      label: "AI Score",
+      value: triage ? String(triage.priority_score) : "Not scored",
+      detail: triage ? `${triage.confidence} confidence · rank #${triage.priority_rank}` : "Awaiting the triage job",
+      tone: triage ? (band === "high" ? "good" : band === "low" ? "warn" : "default") : "warn",
+      icon: <Brain size={18} />,
+    },
+    {
+      label: "Segment",
+      value: triage?.segment || "Unsegmented",
+      detail: triage ? "as the model read it" : "no triage yet",
+      icon: <Target size={18} />,
+    },
+    {
+      label: "Lead Age",
+      value: leadContext.lead ? `${daysSince(leadContext.lead.created_at) ?? 0}d` : "—",
+      detail: leadContext.lead ? "since it arrived" : "opened by hand",
+      icon: <Clock3 size={18} />,
+    },
+    {
+      label: "Review Status",
+      value: triage ? triage.status : "n/a",
+      detail:
+        triage?.status === "suggested"
+          ? "waiting on a person"
+          : triage?.status === "accepted"
+            ? "score applied to the deal"
+            : triage?.status === "dismissed"
+              ? "opportunity left unscored"
+              : "nothing to review",
+      tone: triage?.status === "suggested" ? "warn" : "default",
+      icon: <Gauge size={18} />,
+    },
+  ];
+
+  const dealTiles: KpiTile[] = [
+    {
+      label: "Deal Value",
+      value: money(opportunity.value, opportunity.currency),
+      detail: `${money(weighted, opportunity.currency)} weighted at ${opportunity.probability}%`,
+      icon: <CircleDollarSign size={18} />,
+    },
+    {
+      label: "AI Score",
+      value: opportunity.ai_score === null ? "Not scored" : String(opportunity.ai_score),
+      detail:
+        opportunity.ai_score === null
+          ? "Awaiting triage"
+          : `${opportunity.ai_confidence ?? "unknown"} confidence · ${formatDate(opportunity.ai_scored_at)}`,
+      tone: opportunity.ai_score === null ? "warn" : "default",
+      icon: <Brain size={18} />,
+    },
+    {
+      label: "Days in Step",
+      value: inStep === null ? "—" : String(inStep),
+      detail: step ? `on ${step.label}` : "off-lifecycle",
+      // A deal parked on one step for a fortnight is the thing a pipeline
+      // review is looking for, so the tile says so rather than waiting to be
+      // noticed.
+      tone: inStep !== null && inStep >= 14 ? "warn" : "default",
+      icon: <Clock3 size={18} />,
+    },
+    {
+      label: "Expected Close",
+      value: opportunity.expected_close_date ? formatDate(opportunity.expected_close_date) : "Not set",
+      detail:
+        toClose === null
+          ? "No date set"
+          : toClose < 0
+            ? `${Math.abs(toClose)} days past`
+            : `${toClose} days out`,
+      tone: toClose !== null && toClose < 0 ? "warn" : "default",
+      icon: <CalendarClock size={18} />,
+    },
+  ];
+
+  const tiles: KpiTile[] = leadStep ? leadTiles : dealTiles;
+
+  const indicators: Indicator[] = [
+    { label: "Status", value: exit ? exit.label : opportunity.status === "won" ? "Won" : "Open", tone: exit ? "bad" : "good" },
+    { label: "Stage", value: step?.label ?? opportunity.step, tone: "neutral" },
+    { label: "Record status", value: step?.status ?? "—", tone: "neutral" },
+    { label: "Owner", value: opportunity.owner_user_id ? "Assigned" : "Unassigned", tone: opportunity.owner_user_id ? "good" : "warn" },
+    { label: "Source", value: opportunity.source || "—", tone: "neutral" },
+    { label: "Region", value: opportunity.region || "—", tone: "neutral" },
+    { label: "Industry", value: opportunity.industry || "—", tone: "neutral" },
+  ];
+
+  return (
+    <div className="lc-shell">
+      <header className="lc-head">
+        <div className="lc-head-id">
+          <p className="lc-kicker">
+            Client Lifecycle — Step {number ?? "?"} of {lifecycleStepCount}
+          </p>
+          <h1>{step?.label ?? opportunity.step}</h1>
+          <p className="lc-sub">
+            {step?.summary ?? "This opportunity is on a step that is not part of the lifecycle."}
+          </p>
+        </div>
+
+        <LifecycleStepActions
+          advanceLabel={step?.advanceLabel ?? ""}
+          canAdvance={canAdvance}
+          canExit={canExit}
+          canReopen={canReopen}
+          canSkip={canSkip}
+          clientHref={client ? `/employee/clients/${client.id}` : null}
+          currentStepKey={opportunity.step}
+          nextStepLabel={next ? (lifecycleStep(next)?.label ?? next) : null}
+          opportunityId={opportunity.id}
+          status={opportunity.status}
+        />
+      </header>
+
+      {closed && exit ? (
+        <div className="lc-exit-banner" role="status">
+          <strong>{exit.label}</strong>
+          <span>
+            {opportunity.exit_reason}
+            {opportunity.exit_competitor ? ` · lost to ${opportunity.exit_competitor}` : ""}
+            {opportunity.hold_until ? ` · picking back up ${formatDate(opportunity.hold_until)}` : ""}
+          </span>
+        </div>
+      ) : null}
+
+      <LifecycleRail currentKey={opportunity.step} status={opportunity.status} />
+
+      <LifecycleKpis tiles={tiles} />
+
+      <div className="lc-grid">
+        {step?.key === "lead_captured" ? <LeadCapturedPanels context={leadContext} /> : null}
+        {step?.key === "ai_triage" ? <AiTriagePanels context={leadContext} /> : null}
+        {step?.key === "sales_review" ? (
+          <SalesReviewPanels canManage={canManage} context={leadContext} opportunity={opportunity} />
+        ) : null}
+        {step?.key === "assign_owner" ? (
+          <AssignOwnerPanels
+            canManage={canManage}
+            currentOwner={currentOwner}
+            opportunity={opportunity}
+            owners={owners}
+            rosterUnavailable={canManage && owners.length === 0}
+          />
+        ) : null}
+        {step?.key === "discovery" ? (
+          <DiscoveryPanels canManage={canManage} opportunity={opportunity} qualification={qualification} />
+        ) : null}
+        {step?.key === "opportunity_qualified" ? (
+          <QualifiedPanels canManage={canManage} opportunity={opportunity} qualification={qualification} />
+        ) : null}
+        {step?.key === "solution_proposal" ? (
+          <SolutionProposalPanels canManage={canManage} clients={clients} deal={deal} opportunity={opportunity} />
+        ) : null}
+        {step?.key === "proposal_review" ? <ProposalReviewPanels deal={deal} /> : null}
+        {step?.key === "negotiation_approval" ? <NegotiationPanels deal={deal} /> : null}
+        {step?.key === "commit_contract" ? <CommitContractPanels deal={deal} opportunity={opportunity} /> : null}
+        {step?.key === "closed_won_onboarded" ? (
+          <ClosedWonPanels canAdvance={canAdvance} onboarding={onboarding} opportunity={opportunity} />
+        ) : null}
+
+        <LifecyclePanel
+          aside={<Link href="/employee/lifecycle">All opportunities</Link>}
+          title="Opportunity Summary"
+        >
+          <LifecycleFacts
+            rows={[
+              { label: "Opportunity", value: opportunity.name },
+              {
+                label: "Company",
+                value: client ? <Link href={`/employee/clients/${client.id}`}>{client.name}</Link> : "Not linked yet",
+              },
+              { label: "Value", value: money(opportunity.value, opportunity.currency) },
+              { label: "Probability", value: `${opportunity.probability}%` },
+              { label: "Close date", value: formatDate(opportunity.expected_close_date) },
+              { label: "Product interest", value: opportunity.product_interest || "—" },
+              { label: "Opened", value: formatDate(opportunity.created_at) },
+            ]}
+          />
+        </LifecyclePanel>
+
+        <StepActivities activities={step?.activities ?? []} />
+
+        <LifecyclePanel
+          aside={
+            opportunity.next_action_due ? (
+              <span className={`lc-pill lc-pill-${(daysUntil(opportunity.next_action_due) ?? 0) < 0 ? "bad" : "neutral"}`}>
+                due {formatDate(opportunity.next_action_due)}
+              </span>
+            ) : null
+          }
+          title="Next Action"
+        >
+          {opportunity.next_action ? (
+            <p className="lc-body">{opportunity.next_action}</p>
+          ) : (
+            <p className="lc-empty">
+              <Target aria-hidden="true" size={14} /> No next action set. A deal with no next action has no next event.
+            </p>
+          )}
+          {opportunity.last_contact_at ? (
+            <p className="lc-meta">Last contact {formatDate(opportunity.last_contact_at)}</p>
+          ) : null}
+        </LifecyclePanel>
+
+        {opportunity.ai_recommendation ? (
+          <LifecyclePanel
+            aside={<span className="lc-pill lc-pill-neutral">{opportunity.ai_confidence ?? "unknown"} confidence</span>}
+            title="AI Recommendation"
+          >
+            <p className="lc-body">{opportunity.ai_recommendation}</p>
+            <p className="lc-meta">
+              Advisory only — nothing here is applied to the record until a person acts on it.
+            </p>
+          </LifecyclePanel>
+        ) : (
+          <LifecyclePanel
+            aside={<span className="lc-pill lc-pill-warn">Awaiting triage</span>}
+            title="AI Recommendation"
+          >
+            <p className="lc-empty">
+              <Gauge aria-hidden="true" size={14} /> This opportunity has not been scored yet.
+            </p>
+          </LifecyclePanel>
+        )}
+
+        <LifecyclePanel title="Step History" wide>
+          {history.length === 0 ? (
+            <p className="lc-empty">No moves recorded yet.</p>
+          ) : (
+            <ol className="lc-history">
+              {history.map((event) => (
+                <li className={`lc-history-row lc-history-${event.kind}`} key={event.id}>
+                  <strong>
+                    {event.kind === "exit"
+                      ? `${lifecycleExit(event.to_status)?.label ?? event.to_status} at ${lifecycleStep(event.to_step)?.label ?? event.to_step}`
+                      : `${event.from_step ? `${lifecycleStep(event.from_step)?.label ?? event.from_step} → ` : ""}${lifecycleStep(event.to_step)?.label ?? event.to_step}`}
+                  </strong>
+                  <span className="lc-history-meta">
+                    {formatDate(event.changed_at)}
+                    {event.kind !== "advance" ? ` · ${event.kind}` : ""}
+                    {event.steps_skipped > 0 ? ` · ${event.steps_skipped} step${event.steps_skipped === 1 ? "" : "s"} jumped` : ""}
+                  </span>
+                  {event.reason ? <p className="lc-history-reason">{event.reason}</p> : null}
+                </li>
+              ))}
+            </ol>
+          )}
+        </LifecyclePanel>
+      </div>
+
+      <LifecycleIndicators
+        items={indicators}
+        title={step?.number === 1 ? "Lead Quality Indicators" : "Deal Indicators"}
+      />
+
+      <LifecycleRecordTabs active="overview" clientId={client?.id ?? null} opportunityId={opportunity.id} />
+
+      <p className="lc-backlink">
+        <Link href="/employee/lifecycle">
+          <ArrowLeft size={14} /> All opportunities
+        </Link>
+      </p>
+    </div>
+  );
+}

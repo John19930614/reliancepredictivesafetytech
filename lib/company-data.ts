@@ -158,6 +158,12 @@ export const lifecycleStages = [
   "Legal Review",
   "Contract Sent",
   "Signed / Won",
+  // Inserted 2026-08-14. A won deal is not an onboarding client until it has
+  // been billed, and before this stage existed nothing in the journey produced
+  // an invoice — "invoiced" was a status somebody typed onto a ledger row.
+  // Every other stage string is unchanged on purpose: they are stored values,
+  // and renaming one would strand every existing company_clients row.
+  "Invoicing",
   "Onboarding",
   "Pilot / Setup",
   "Active Company",
@@ -1434,6 +1440,8 @@ export const defaultClientOnboardingItems = [
   { section: "Proposal", lifecycle_stage: "Proposal Sent", title: "Proposal sent" },
   { section: "Legal / Contract", lifecycle_stage: "Contract Sent", title: "MSA/SOW prepared" },
   { section: "Legal / Contract", lifecycle_stage: "Signed / Won", title: "Contract signed" },
+  { section: "Invoicing", lifecycle_stage: "Invoicing", title: "Billing contact confirmed" },
+  { section: "Invoicing", lifecycle_stage: "Invoicing", title: "Purchase order received" },
   { section: "Onboarding", lifecycle_stage: "Onboarding", title: "Billing setup confirmed" },
   { section: "Onboarding", lifecycle_stage: "Onboarding", title: "Client admin/contact assigned" },
   { section: "Onboarding", lifecycle_stage: "Onboarding", title: "Sample data received" },

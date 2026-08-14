@@ -38,6 +38,7 @@ import {
   Presentation,
   ReceiptText,
   Scale,
+  Route,
   ScrollText,
   Settings,
   ShieldCheck,
@@ -70,18 +71,53 @@ const navGroups = [
       { href: "/employee/checklist", label: "Startup Checklist", icon: ListChecks },
     ],
   },
+  // The commercial side reads as the funnel it is: Leads → Opportunities →
+  // Contracts → Accounts, in the order a deal actually travels. It was one
+  // "Commercial" heading of nine unordered links, which said nothing about
+  // where a piece of work sits in the journey.
+  //
+  // GROUPING ONLY. Every href, module key and permission is unchanged — access
+  // is resolved by canAccessEmployeePath from the path prefix, and these labels
+  // are not part of that. Nothing here grants or removes anything.
+  //
+  // The catalog `group` field in lib/user-management.ts is deliberately NOT
+  // touched: it drives the Platform-only access check and the permissions
+  // screen's layout, so re-labelling it for cosmetic reasons would edit a field
+  // used in an authorisation decision.
   {
-    label: "Commercial",
+    label: "Leads",
     items: [
-      { href: "/employee/demo-showcase", label: "Demo Showcase", icon: Presentation },
       { href: "/employee/inbox", label: "Request Inbox", icon: Inbox },
+      { href: "/employee/demo-showcase", label: "Demo Showcase", icon: Presentation },
+    ],
+  },
+  {
+    label: "Opportunities",
+    items: [
+      { href: "/employee/lifecycle", label: "Client Lifecycle", icon: Route },
       { href: "/employee/sales", label: "Sales Pipeline", icon: BriefcaseBusiness },
+    ],
+  },
+  {
+    label: "Contracts",
+    items: [
       { href: "/employee/proposals", label: "Proposals", icon: ScrollText },
       // Same module key as Proposals (client_proposals resolves by path prefix),
       // so this widens nothing — it only surfaces the templates manager.
       { href: "/employee/proposals/templates", label: "Proposal Templates", icon: LayoutTemplate },
+    ],
+  },
+  {
+    label: "Accounts",
+    items: [{ href: "/employee/active-companies", label: "Active Companies", icon: Gauge }],
+  },
+  {
+    // What the funnel does not describe: a staffing vertical and a mailbox.
+    // Filing either under one of the four headings above would make that
+    // heading mean less, not more.
+    label: "Commercial",
+    items: [
       { href: "/employee/talent-engine", label: "Talent Engine", icon: HandCoins },
-      { href: "/employee/active-companies", label: "Active Companies", icon: Gauge },
       { href: "/employee/mail", label: "Employee Mail", icon: Mail },
     ],
   },

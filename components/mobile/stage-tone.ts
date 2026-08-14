@@ -8,6 +8,9 @@ const STAGE_TONES: Record<string, string> = {
   "Legal Review": "tone-gold",
   "Contract Sent": "tone-gold",
   "Signed / Won": "tone-green",
+  // Billing is a won deal, not an unstarted one. Without an entry here it fell
+  // through to tone-slate and read on the phone as though nothing had happened.
+  Invoicing: "tone-green",
   Onboarding: "tone-green",
   "Pilot / Setup": "tone-green",
   "Active Company": "tone-green",

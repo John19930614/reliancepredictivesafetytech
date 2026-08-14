@@ -102,6 +102,10 @@ export const portalModuleCatalog = [
   { key: "demo_showcase", label: "Demo Showcase", group: "Commercial", pathPrefixes: ["/employee/demo-showcase"] },
   { key: "request_inbox", label: "Request Inbox", group: "Commercial", pathPrefixes: ["/employee/inbox"] },
   { key: "sales_pipeline", label: "Sales Pipeline", group: "Commercial", pathPrefixes: ["/employee/sales", "/employee/sales-meetings"] },
+  // The eleven-step opportunity lifecycle. Runs beside the sales board rather
+  // than replacing it — the board is still the twelve-stage view of
+  // company_clients, and cutting the two together is a later decision.
+  { key: "client_lifecycle", label: "Client Lifecycle", group: "Commercial", pathPrefixes: ["/employee/lifecycle"] },
   // Covers the whole Proposal Builder surface: the list, the read-only document
   // (/[id]), the generator editor (/[id]/edit), revision views
   // (/[id]/revisions/[revisionId]), the generator asset route (/generator) and

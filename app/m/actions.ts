@@ -272,7 +272,7 @@ export async function updateMobileLeadStage(clientId: string, lifecycleStage: st
 
   const { error } = await supabase
     .from("company_clients")
-    .update({ lifecycle_stage: lifecycleStage })
+    .update({ lifecycle_stage: lifecycleStage, stage_changed_at: new Date().toISOString() })
     .eq("id", cleanClientId);
 
   if (error) {
