@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { ProposalLineItem, ProposalTotals } from "@/lib/proposals/pricing";
-import { addDays, buildDraftInvoice, defaultNetDays, isEmptyDraft, netDaysFromPaymentTerms } from "./draft";
+import {
+  addDays,
+  buildDraftInvoice,
+  checkInvoiceLineEdit,
+  defaultNetDays,
+  invoiceTotalsFrom,
+  isEmptyDraft,
+  isQuantityBasis,
+  lineTotalFor,
+  maxLineQuantity,
+  netDaysFromPaymentTerms,
+  quantityBasisFor,
+  type EditableInvoiceLine,
+} from "./draft";
 
 function line(over: Partial<ProposalLineItem> = {}): ProposalLineItem {
   return {
@@ -269,5 +282,283 @@ describe("line pricing keeps the agreed unit price", () => {
       issueDate: ISSUE,
     });
     expect(draft.lineItems[0].quantity).toBeGreaterThan(0);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Editing a raised invoice                                                   */
+/* -------------------------------------------------------------------------- */
+
+function stored(over: Partial<EditableInvoiceLine> = {}): EditableInvoiceLine {
+  return {
+    id: "11111111-1111-4111-8111-111111111111",
+    description: "Confined Space Entry — classroom",
+    quantity: 12,
+    unitAmount: 105,
+    unit: "Seat",
+    qtyBasis: "attendee",
+    serviceDate: "2026-08-20",
+    lineTotal: 1260,
+    ...over,
+  };
+}
+
+describe("lineTotalFor", () => {
+  // THE CASE THIS WHOLE CHANGE EXISTS FOR. A class is quoted at 12 seats and
+  // ten people turn up; the invoice has to say 1050.00, and it has to get there
+  // by editing a quantity rather than by voiding a numbered document.
+  it("bills 12 seats at 105 as 1260, and 10 seats at 105 as 1050", () => {
+    expect(lineTotalFor({ quantity: 12, unitAmount: 105, qtyBasis: "attendee" })).toBe(1260);
+    expect(lineTotalFor({ quantity: 10, unitAmount: 105, qtyBasis: "attendee" })).toBe(1050);
+  });
+
+  it("scales on every basis that means a multiplier", () => {
+    expect(lineTotalFor({ quantity: 3, unitAmount: 200, qtyBasis: "session" })).toBe(600);
+    expect(lineTotalFor({ quantity: 7.5, unitAmount: 160, qtyBasis: "hour" })).toBe(1200);
+  });
+
+  // A retainer with a quantity of 1 must not become two retainers because
+  // somebody typed 2 into a box that does not price anything.
+  it("ignores the quantity on a flat fee", () => {
+    expect(lineTotalFor({ quantity: 1, unitAmount: 2500, qtyBasis: "flat" })).toBe(2500);
+    expect(lineTotalFor({ quantity: 4, unitAmount: 2500, qtyBasis: "flat" })).toBe(2500);
+    expect(lineTotalFor({ quantity: 0.5, unitAmount: 2500, qtyBasis: "flat" })).toBe(2500);
+  });
+
+  // numeric(12,2) is what the database stores, so the arithmetic has to be done
+  // against the rounded quantity or the stored row cannot reproduce the total.
+  it("multiplies the quantity the database will actually hold", () => {
+    expect(lineTotalFor({ quantity: 10.004, unitAmount: 100, qtyBasis: "attendee" })).toBe(1000);
+  });
+
+  it("rounds the result to cents rather than letting float drift reach a money column", () => {
+    expect(lineTotalFor({ quantity: 3, unitAmount: 0.655, qtyBasis: "hour" })).toBe(1.98);
+    expect(lineTotalFor({ quantity: 3, unitAmount: 0.1, qtyBasis: "hour" })).toBe(0.3);
+  });
+});
+
+describe("invoiceTotalsFrom", () => {
+  // THE INVARIANT: total = subtotal + tax_amount.
+  it("sums the stored lines and adds tax", () => {
+    expect(invoiceTotalsFrom([{ lineTotal: 1050 }, { lineTotal: 250 }], 104)).toEqual({
+      subtotal: 1300,
+      tax: 104,
+      total: 1404,
+    });
+  });
+
+  it("is zero for an invoice with no lines", () => {
+    expect(invoiceTotalsFrom([], 0)).toEqual({ subtotal: 0, tax: 0, total: 0 });
+  });
+
+  // subtotal, total and tax_amount all carry `>= 0` CHECKs; a negative tax
+  // would fail the write with a 23514 nobody can act on.
+  it("floors a negative tax at zero rather than crediting the client", () => {
+    expect(invoiceTotalsFrom([{ lineTotal: 100 }], -50)).toEqual({ subtotal: 100, tax: 0, total: 100 });
+  });
+
+  it("survives a non-finite tax", () => {
+    expect(invoiceTotalsFrom([{ lineTotal: 100 }], Number.NaN).total).toBe(100);
+  });
+
+  it("rounds each line before summing, so cents cannot accumulate", () => {
+    expect(invoiceTotalsFrom([{ lineTotal: 0.1 }, { lineTotal: 0.2 }], 0).subtotal).toBe(0.3);
+  });
+});
+
+describe("checkInvoiceLineEdit", () => {
+  // The headline case, through the validator the action actually calls.
+  it("reprices 12 seats to 10 and recomputes the line total server-side", () => {
+    const checked = checkInvoiceLineEdit(stored(), { id: stored().id, quantity: 10 });
+
+    expect(checked.ok).toBe(true);
+    expect(checked.line?.quantity).toBe(10);
+    expect(checked.line?.lineTotal).toBe(1050);
+    // Untouched fields survive an edit that never mentioned them.
+    expect(checked.line?.description).toBe("Confined Space Entry — classroom");
+    expect(checked.line?.unitAmount).toBe(105);
+  });
+
+  it("leaves a flat line at its unit amount however the quantity is edited", () => {
+    const line = stored({ qtyBasis: "flat", quantity: 1, unitAmount: 2500, lineTotal: 2500 });
+    const checked = checkInvoiceLineEdit(line, { id: line.id, quantity: 9 });
+
+    expect(checked.ok).toBe(true);
+    expect(checked.line?.quantity).toBe(9);
+    expect(checked.line?.lineTotal).toBe(2500);
+  });
+
+  // Switching the basis is the honest way to make a flat line scale.
+  it("recomputes when the basis itself changes", () => {
+    const line = stored({ qtyBasis: "flat", quantity: 10, unitAmount: 105, lineTotal: 105 });
+    const checked = checkInvoiceLineEdit(line, { id: line.id, qtyBasis: "attendee" });
+
+    expect(checked.line?.lineTotal).toBe(1050);
+  });
+
+  it("edits the unit, the description and the service date", () => {
+    const checked = checkInvoiceLineEdit(stored(), {
+      id: stored().id,
+      unit: "  Attendee  ",
+      description: "  Confined Space Entry  ",
+      serviceDate: "2026-09-02",
+    });
+
+    expect(checked.line?.unit).toBe("Attendee");
+    expect(checked.line?.description).toBe("Confined Space Entry");
+    expect(checked.line?.serviceDate).toBe("2026-09-02");
+  });
+
+  it("clears the service date on an explicit null or empty string", () => {
+    expect(checkInvoiceLineEdit(stored(), { id: stored().id, serviceDate: null }).line?.serviceDate).toBeNull();
+    expect(checkInvoiceLineEdit(stored(), { id: stored().id, serviceDate: "" }).line?.serviceDate).toBeNull();
+  });
+
+  it("leaves the service date alone when the edit does not mention it", () => {
+    expect(checkInvoiceLineEdit(stored(), { id: stored().id, quantity: 5 }).line?.serviceDate).toBe("2026-08-20");
+  });
+
+  /* --- negatives --------------------------------------------------------- */
+
+  // quantity > 0 is a column CHECK; a 23514 is not a sentence anyone can act on.
+  it("refuses a quantity of zero or below", () => {
+    for (const quantity of [0, -1, -0.01]) {
+      const checked = checkInvoiceLineEdit(stored(), { id: stored().id, quantity });
+      expect(checked.ok, String(quantity)).toBe(false);
+      expect(checked.error).toContain("more than zero");
+    }
+  });
+
+  // 0.004 passes a naive `> 0` and then rounds to zero, failing the whole write.
+  it("refuses a quantity that rounds away to zero", () => {
+    expect(checkInvoiceLineEdit(stored(), { id: stored().id, quantity: 0.004 }).ok).toBe(false);
+  });
+
+  it("refuses a quantity that is not a number", () => {
+    expect(checkInvoiceLineEdit(stored(), { id: stored().id, quantity: Number.NaN }).ok).toBe(false);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(checkInvoiceLineEdit(stored(), { id: stored().id, quantity: "10" as any }).ok).toBe(false);
+  });
+
+  it("refuses an absurd quantity rather than billing it", () => {
+    expect(checkInvoiceLineEdit(stored(), { id: stored().id, quantity: maxLineQuantity + 1 }).ok).toBe(false);
+  });
+
+  it("refuses a negative unit price", () => {
+    const checked = checkInvoiceLineEdit(stored(), { id: stored().id, unitAmount: -5 });
+    expect(checked.ok).toBe(false);
+    expect(checked.error).toContain("negative");
+  });
+
+  it("refuses an empty description and one past the column CHECK", () => {
+    expect(checkInvoiceLineEdit(stored(), { id: stored().id, description: "   " }).ok).toBe(false);
+    expect(checkInvoiceLineEdit(stored(), { id: stored().id, description: "x".repeat(501) }).ok).toBe(false);
+  });
+
+  it("refuses a unit past the column CHECK", () => {
+    expect(checkInvoiceLineEdit(stored(), { id: stored().id, unit: "x".repeat(61) }).ok).toBe(false);
+  });
+
+  it("refuses a basis outside the enum the CHECK constraint allows", () => {
+    const checked = checkInvoiceLineEdit(stored(), { id: stored().id, qtyBasis: "per_widget" });
+    expect(checked.ok).toBe(false);
+    expect(checked.error).toContain("how the quantity is counted");
+  });
+
+  it("refuses a date that is not a real calendar day", () => {
+    for (const value of ["2026-02-31", "20/08/2026", "2026-8-2", "tomorrow"]) {
+      expect(checkInvoiceLineEdit(stored(), { id: stored().id, serviceDate: value }).ok, value).toBe(false);
+    }
+  });
+
+  it("refuses a line that would come to more than the system will invoice", () => {
+    const line = stored({ qtyBasis: "attendee", unitAmount: 1_000_000 });
+    expect(checkInvoiceLineEdit(line, { id: line.id, quantity: 99_999 }).ok).toBe(false);
+  });
+});
+
+describe("quantityBasisFor", () => {
+  // The proposal stores what the quantity meant when the client agreed to it.
+  // Re-deriving it here could only disagree with the document they signed.
+  it("takes the row's own basis when it has one", () => {
+    expect(quantityBasisFor({ qtyBasis: "attendee", unit: "Session", qty: 2, price: 100, amount: 200 })).toBe(
+      "attendee",
+    );
+    expect(quantityBasisFor({ qtyBasis: "flat", unit: "Hour", qty: 3, price: 100, amount: 300 })).toBe("flat");
+  });
+
+  it("ignores a basis the qty_basis CHECK would reject", () => {
+    expect(quantityBasisFor({ qtyBasis: "per_widget", unit: "Seat" })).toBe("attendee");
+  });
+
+  it("reads the unit word for a row saved before the basis existed", () => {
+    expect(quantityBasisFor({ unit: "Seat" })).toBe("attendee");
+    expect(quantityBasisFor({ unit: "Person" })).toBe("attendee");
+    expect(quantityBasisFor({ unit: "Hour" })).toBe("hour");
+    expect(quantityBasisFor({ unit: "Session" })).toBe("session");
+    expect(quantityBasisFor({ unit: "Training Day" })).toBe("session");
+  });
+
+  // A row whose stored amount is its own quantity times its own price is a
+  // scaling row whatever it calls its unit; filing it flat would freeze it.
+  it("falls back to the arithmetic for an unrecognised unit that plainly scales", () => {
+    expect(quantityBasisFor({ unit: "Mile", qty: 120, price: 0.67, amount: 80.4 })).toBe("session");
+  });
+
+  // 1 x price == price for a flat fee and a scaling row alike, so it tells us
+  // nothing, and flat is the answer that cannot re-price anything on its own.
+  it("stays flat when the quantity is 1, or when the amount is not the product", () => {
+    expect(quantityBasisFor({ unit: "Project", qty: 1, price: 5000, amount: 5000 })).toBe("flat");
+    expect(quantityBasisFor({ unit: "Project", qty: 3, price: 5000, amount: 12000 })).toBe("flat");
+    expect(quantityBasisFor({})).toBe("flat");
+  });
+});
+
+describe("isQuantityBasis", () => {
+  it("accepts exactly the four values the column CHECK allows", () => {
+    for (const value of ["session", "attendee", "hour", "flat"]) expect(isQuantityBasis(value)).toBe(true);
+    for (const value of ["Flat", "each", "", null, undefined, 3]) expect(isQuantityBasis(value), String(value)).toBe(false);
+  });
+});
+
+describe("buildDraftInvoice carries the basis onto the generated lines", () => {
+  // A generated line that files itself flat cannot be corrected from 12 seats
+  // to 10 later, because a flat line ignores its quantity. This is the join
+  // between generating an invoice and being able to fix one.
+  it("keeps a per-seat fee-table row scaling", () => {
+    const draft = buildDraftInvoice({
+      totals: totals({
+        lineItems: [line({ name: "Confined Space Entry", unit: "Seat", qty: 12, price: 105, amount: 1260 })],
+        subtotal: 1260,
+        total: 1260,
+      }),
+      kind: "full",
+      issueDate: ISSUE,
+    });
+
+    expect(draft.lineItems[0].qtyBasis).toBe("attendee");
+    expect(draft.lineItems[0].unit).toBe("Seat");
+    expect(lineTotalFor({ ...draft.lineItems[0], quantity: 10 })).toBe(1050);
+  });
+
+  it("honours a basis the proposal row already decided", () => {
+    const draft = buildDraftInvoice({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      totals: totals({ lineItems: [line({ unit: "Seat", qtyBasis: "flat" } as any)] }),
+      kind: "full",
+      issueDate: ISSUE,
+    });
+    expect(draft.lineItems[0].qtyBasis).toBe("flat");
+  });
+
+  // A deposit is a fixed sum, not a rate.
+  it("marks a deposit and a balance flat", () => {
+    expect(
+      buildDraftInvoice({ totals: totals({ deposit: 900 }), kind: "deposit", issueDate: ISSUE }).lineItems[0].qtyBasis,
+    ).toBe("flat");
+    expect(
+      buildDraftInvoice({ totals: totals({ total: 3000, deposit: 900 }), kind: "balance", issueDate: ISSUE })
+        .lineItems[0].qtyBasis,
+    ).toBe("flat");
   });
 });

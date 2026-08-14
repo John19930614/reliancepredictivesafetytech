@@ -155,12 +155,31 @@ describe("proposals written before types existed", () => {
     expect(legacy).toHaveLength(sharedClauseIds.length);
   });
 
-  it("falls back to the original section headings", () => {
+  it("falls back to the original section headings and the original line noun", () => {
+    // toEqual, not toMatchObject: every member of the untyped fallback is
+    // pinned, so a new lexicon field wired through resolveLexicon has to state
+    // its legacy value here rather than reach a legacy document unannounced.
     expect(resolveLexicon(null)).toEqual({
       scopeHeading: "Detailed Scope of Work",
       feesHeading: "Pricing Schedule",
       termHeading: "Schedule and Implementation Approach",
+      // Composes to "Service Line 1:", which is what every proposal sent before
+      // per-type wording existed prints over its schedule rows.
+      unitNoun: "service",
     });
+  });
+
+  it("forwards each type's own unit noun instead of the platform default", () => {
+    // The field was declared on all seven profiles and forwarded by none, so
+    // every document called every row a "Service Line" regardless.
+    expect(resolveLexicon(proposalTypeProfiles.time_and_materials).unitNoun).toBe("task");
+    expect(resolveLexicon(proposalTypeProfiles.training).unitNoun).toBe("session");
+    expect(resolveLexicon(proposalTypeProfiles.fixed_price).unitNoun).toBe("deliverable");
+    for (const key of keys) {
+      expect(resolveLexicon(proposalTypeProfiles[key]).unitNoun, key).toBe(
+        proposalTypeProfiles[key].lexicon.unitNoun,
+      );
+    }
   });
 
   it("resolves a profile once a type is stamped", () => {

@@ -86,6 +86,83 @@ describe("isGeneratorState", () => {
     expect(isGeneratorState(withService(item({ type: "service", key: "retiredCourse", qty: 3, price: 400 })))).toBe(true);
   });
 
+  it("accepts a row carrying a billing basis, a tier ladder and a delivery mode", () => {
+    expect(
+      isGeneratorState(
+        withService(
+          item({
+            type: "service",
+            key: "bbp",
+            qty: 10,
+            price: 105,
+            unit: "Person",
+            qty_basis: "attendee",
+            qty_tiers: [{ min_qty: 20, price: 95 }],
+            delivery_mode: "virtual",
+          }),
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts a row saved before any of those fields existed", () => {
+    // Backward compatibility is the point: every signed proposal in the
+    // database is this shape, and the guard is the gate the document page, the
+    // PDF, the DOCX and the share link all pass through.
+    const legacy = { type: "service", key: "osha10", name: "OSHA 10 Training", qty: 25, price: 210, desc: "", unit: "Person" };
+    expect(isGeneratorState(withService(legacy))).toBe(true);
+  });
+
+  it("accepts a basis or delivery mode it does not recognize, and lets pricing neutralize it", () => {
+    // Deliberate. This guard is a LOAD gate — rejecting here makes a signed
+    // proposal unopenable, not merely oddly labelled — so an enum value from a
+    // newer build, or a tampered one, still loads and is resolved to "absent"
+    // where the money is computed. See coerceQtyBasis() in qty-basis.ts.
+    expect(isGeneratorState(withService(item({ type: "service", qty_basis: "per_head" })))).toBe(true);
+    expect(isGeneratorState(withService(item({ type: "service", delivery_mode: "hybrid" })))).toBe(true);
+  });
+
+  it("rejects a basis or delivery mode that is not a string", () => {
+    // Same rule as `unit`: a structured value here would be interpolated into
+    // the generator's innerHTML row templates.
+    expect(isGeneratorState(withService(item({ type: "service", qty_basis: 1 })))).toBe(false);
+    expect(isGeneratorState(withService(item({ type: "service", qty_basis: ["flat"] })))).toBe(false);
+    expect(isGeneratorState(withService(item({ type: "service", qty_basis: { toString: "flat" } })))).toBe(false);
+    expect(isGeneratorState(withService(item({ type: "service", delivery_mode: 2 })))).toBe(false);
+    expect(isGeneratorState(withService(item({ type: "service", delivery_mode: {} })))).toBe(false);
+  });
+
+  it("rejects a tier ladder that is not a list of two finite numbers", () => {
+    // Tiers are money and arithmetic, so they get the same strictness qty and
+    // price get: a string or a NaN would propagate straight into a total.
+    expect(isGeneratorState(withService(item({ type: "service", qty_tiers: [] })))).toBe(true);
+    expect(isGeneratorState(withService(item({ type: "service", qty_tiers: [{ min_qty: 20, price: 95 }] })))).toBe(true);
+    expect(isGeneratorState(withService(item({ type: "service", qty_tiers: [{ min_qty: "20", price: 95 }] })))).toBe(false);
+    expect(isGeneratorState(withService(item({ type: "service", qty_tiers: [{ min_qty: 20, price: Number.NaN }] })))).toBe(false);
+    expect(isGeneratorState(withService(item({ type: "service", qty_tiers: [{ min_qty: 20 }] })))).toBe(false);
+    expect(isGeneratorState(withService(item({ type: "service", qty_tiers: [null] })))).toBe(false);
+    expect(isGeneratorState(withService(item({ type: "service", qty_tiers: { min_qty: 20, price: 95 } })))).toBe(false);
+    expect(isGeneratorState(withService(item({ type: "service", qty_tiers: "[]" })))).toBe(false);
+  });
+
+  it("survives the JSON round-trip the database actually performs", () => {
+    // form_data is JSONB: what comes back is JSON.parse(JSON.stringify(x)).
+    // Absent optional fields must stay absent rather than reappearing as null.
+    const saved = {
+      v: 1,
+      fields: { clientCompany: "Acme" },
+      phases: [item({ type: "phase" })],
+      services: [
+        item({ type: "service", key: "bbp", qty: 10, price: 105, unit: "Person", qty_basis: "attendee", delivery_mode: "in_person" }),
+        item({ type: "service", key: "auditDay", qty: 2, price: 1750, unit: "Day" }),
+      ],
+    };
+    const roundTripped = JSON.parse(JSON.stringify(saved));
+    expect(isGeneratorState(roundTripped)).toBe(true);
+    expect(roundTripped.services[0].qty_basis).toBe("attendee");
+    expect("qty_basis" in roundTripped.services[1]).toBe(false);
+  });
+
   it("rejects malformed payloads", () => {
     expect(isGeneratorState(null)).toBe(false);
     expect(isGeneratorState("{}")).toBe(false);

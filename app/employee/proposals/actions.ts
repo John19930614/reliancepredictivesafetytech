@@ -50,6 +50,12 @@ import {
   loadPreparedByName,
 } from "@/lib/proposals/company-server";
 import { lookupPhase, type PhaseKey } from "@/lib/proposals/catalog";
+import {
+  buildTransactionTemplateState,
+  isTransactionTemplateKey,
+  proposalTypeFieldId,
+  type TransactionTemplateKey,
+} from "@/lib/proposals/transaction-templates";
 import { serializeTeamMemberIds, teamFieldIds } from "@/lib/proposals/team-selection";
 import { resolveDocumentExtras } from "@/lib/proposals/team-server";
 import type { DocumentSignature, DocumentTeamMember } from "@/components/proposals/proposal-document-model";
@@ -159,9 +165,39 @@ function buildDefaultPhaseItems(): GeneratorItem[] {
   }));
 }
 
-/** Full, valid generator state so revision 1 is openable and restorable. */
-function buildInitialFormState(prefill: ProposalPrefill | null): GeneratorState {
+/**
+ * Full, valid generator state so revision 1 is openable and restorable.
+ *
+ * `typeKey` is not optional. A proposal saved with no `proposalType` in its
+ * fields resolves NO type profile, and every per-type behaviour is keyed on
+ * that resolution: the document falls back to the platform-era subtitle
+ * ("...Predictive Risk Platform Services"), the platform-era section 03 lead-in
+ * and the platform-era deliverables ("Configured platform subscription",
+ * "Billing package selection", "User and jobsite structure"). That fallback is
+ * correct and deliberate for a document written before types existed — see the
+ * contract at lib/proposals/type-profiles/index.ts — and it is exactly wrong
+ * for a proposal being created today, which is how a signed CPR/AED training
+ * proposal reached a client carrying platform subscription copy.
+ *
+ * So the stamp is applied at creation, not inferred at render. The suppression
+ * machinery downstream is well tested; it was simply never reached.
+ */
+function buildInitialFormState(
+  /**
+   * null ONLY for duplicateProposal's last-resort branch, where a source
+   * proposal's saved state is unreadable and there is no type to inherit.
+   * Inventing one there would stamp a guess onto a copy of a real document.
+   * createProposal validates its key before calling and never passes null.
+   */
+  typeKey: TransactionTemplateKey | null,
+  prefill: ProposalPrefill | null,
+): GeneratorState {
   const prefilled = buildPrefillState(prefill);
+  // The type's own seeded state decides the package: a services type carries
+  // `none` and prints no subscription at all, a platform type carries its tier.
+  // Read from the registry rather than hardcoded here, so a type that changes
+  // what it sells cannot leave this path behind.
+  const typeState = typeKey ? buildTransactionTemplateState(typeKey) : null;
   return {
     v: prefilled?.v ?? 1,
     fields: {
@@ -171,9 +207,16 @@ function buildInitialFormState(prefill: ProposalPrefill | null): GeneratorState 
       // Seeded explicitly rather than by changing defaultPackageKey, so
       // proposals already saved without a packageSelect keep rendering exactly
       // as they were sent.
-      packageSelect: "none",
+      packageSelect: typeState?.fields.packageSelect ?? "none",
+      // The stamp itself. Everything above can be edited afterwards; this is
+      // the one field the document's whole vocabulary is keyed on.
+      ...(typeKey ? { [proposalTypeFieldId]: typeKey } : {}),
       ...(prefilled?.fields ?? {}),
     },
+    // Deliberately NOT the type's seeded scope. This action is the "start from
+    // an empty scope" path — createProposalFromTransactionType is the one that
+    // seeds a type's phases and services. What it borrows from the type is the
+    // vocabulary, not the line items.
     phases: buildDefaultPhaseItems(),
     services: [],
   };
@@ -206,6 +249,14 @@ function recomputeProposalValue(formData: GeneratorState | null): number | null 
 
 export interface CreateProposalInput {
   title: string;
+  /**
+   * Which transaction type this proposal is. REQUIRED.
+   *
+   * Not optional and not defaulted: a default here is a guess about what the
+   * seller is selling, and the wrong guess prints platform subscription copy on
+   * a training document. Callers get an error, not a fallback.
+   */
+  typeKey: TransactionTemplateKey;
   clientId?: string | null;
   owner?: string | null;
   proposalValue?: number | null;
@@ -218,6 +269,19 @@ export async function createProposal(input: CreateProposalInput): Promise<Action
   const { supabase, userId, canManage, role } = await getProposalAccess();
   if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
   if (!canManage) return { ok: false, error: "You do not have permission to create proposals." };
+
+  // A Server Action is a public POST endpoint, so the type gate lives here and
+  // not only in the form. Refusing is the whole point: this action creating a
+  // typeless proposal is the root cause of the platform boilerplate defect, and
+  // silently substituting a type would trade one wrong document for another.
+  const typeKey = typeof input?.typeKey === "string" ? input.typeKey.trim() : "";
+  if (!isTransactionTemplateKey(typeKey)) {
+    return {
+      ok: false,
+      error: "Choose a proposal type. It decides what the client's document says about the deal.",
+      fieldErrors: { typeKey: "Choose a proposal type." },
+    };
+  }
 
   const validation = validateProposalFields({
     title: input.title,
@@ -268,7 +332,7 @@ export async function createProposal(input: CreateProposalInput): Promise<Action
   // Seed revision 1 with a complete generator state. Without this the first
   // revision has null form_data, which makes it un-openable and blanks the
   // working copy if anyone restores it.
-  const formData = buildInitialFormState({
+  const formData = buildInitialFormState(typeKey, {
     company: clientCompany,
     companyProfile,
     preparedBy: preparedByName,
@@ -762,7 +826,12 @@ export async function duplicateProposal(proposalId: string): Promise<ActionResul
   if (!source) return { ok: false, error: NO_ROWS_MESSAGE };
 
   const title = `${source.title} (Copy)`.slice(0, proposalTitleMaxLength);
-  const formData = isGeneratorState(source.form_data) ? source.form_data : buildInitialFormState(null);
+  // A copy carries the ORIGINAL's state verbatim, type stamp included — or
+  // its absence, for a proposal written before types existed. A duplicate must
+  // read as the document it was duplicated from, so no type is invented here
+  // and none is retro-fitted; see the legacy contract in
+  // lib/proposals/type-profiles/index.ts.
+  const formData = isGeneratorState(source.form_data) ? source.form_data : buildInitialFormState(null, null);
 
   const { data: created, error } = await supabase
     .from("client_proposals")

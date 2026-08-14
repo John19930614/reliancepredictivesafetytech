@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { packageData, phaseOptions, serviceOptions } from "./catalog";
 import type { GeneratorItem, GeneratorState } from "./generator-state";
+import type { DeliveryMode } from "./qty-basis";
 import {
   computeDocumentPrice,
   computeDocumentPriceFromState,
@@ -416,6 +417,137 @@ describe("computeProposalTotals — per-unit quantities", () => {
 });
 
 /* -------------------------------------------------------------------------- */
+/* Billing basis — what a quantity MEANS, and what it therefore costs          */
+/*                                                                             */
+/* `unit` used to be a label with no arithmetic behind it, so a per-session     */
+/* class and a per-head course were priced by the same multiplication and       */
+/* printed with the same bare number. These are the two billing models the      */
+/* business actually sells, plus the one where the quantity is not billed.      */
+/* -------------------------------------------------------------------------- */
+
+describe("computeProposalTotals — billing basis", () => {
+  const services = (rows: Partial<GeneratorItem>[]) =>
+    computeProposalTotals(state({ fields: { packageSelect: "none" }, services: rows.map((row) => item(row)) }));
+
+  it("bills a $1,000 session class by the session, and drops to two when one cancels", () => {
+    // Three classes booked at $1,000 for the room. The price does not move with
+    // the headcount; the QUANTITY is the number of classes delivered. One
+    // cancels, two are delivered, the client owes $2,000.
+    const booked = services([{ key: "loto", qty: 3, price: 1000, unit: "Session", qty_basis: "session" }]);
+    expect(booked.lineItems[0]).toMatchObject({ qtyBasis: "session", qty: 3, qtyLabel: "3 sessions", amount: 3000 });
+    expect(booked.total).toBe(3000);
+
+    const delivered = services([{ key: "loto", qty: 2, price: 1000, unit: "Session", qty_basis: "session" }]);
+    expect(delivered.lineItems[0]).toMatchObject({ qty: 2, qtyLabel: "2 sessions", amount: 2000 });
+    expect(delivered.total).toBe(2000);
+  });
+
+  it("bills bloodborne pathogens by the head: 10 attendees at $105 is $1,050", () => {
+    const totals = services([{ key: "bbp", qty: 10, price: 105, unit: "Person", qty_basis: "attendee" }]);
+    expect(totals.lineItems[0]).toMatchObject({
+      qtyBasis: "attendee",
+      qty: 10,
+      qtyLabel: "10 attendees",
+      price: 105,
+      amount: 1050,
+    });
+    expect(totals.subtotal).toBe(1050);
+    expect(totals.total).toBe(1050);
+  });
+
+  it("does not let the quantity move a flat line's amount", () => {
+    // The point of the basis. Same fee at 1, at 4, and at 0 — a flat fee is
+    // removed by deleting the line, not by typing a zero into a box the
+    // document does not bill from.
+    const amounts = [1, 4, 0, 250].map(
+      (qty) => services([{ key: "adminSetup", qty, price: 2500, unit: "Project", qty_basis: "flat" }]).total,
+    );
+    expect(amounts).toEqual([2500, 2500, 2500, 2500]);
+  });
+
+  it("prints a flat line as a fee rather than as a quantity", () => {
+    const totals = services([{ key: "adminSetup", qty: 4, price: 2500, unit: "Project", qty_basis: "flat" }]);
+    // qty is normalized to the one unit actually billed so the fee table still
+    // reconciles: the printed qty × price equals the printed amount.
+    expect(totals.lineItems[0]).toMatchObject({ qtyBasis: "flat", qty: 1, qtyLabel: "Flat fee", price: 2500, amount: 2500 });
+    expect(totals.lineItems[0].qty * totals.lineItems[0].price).toBe(totals.lineItems[0].amount);
+  });
+
+  it("bills hours by the hour and labels them as hours", () => {
+    const totals = services([{ key: "reviewHour", qty: 8, price: 150, unit: "Hour", qty_basis: "hour" }]);
+    expect(totals.lineItems[0]).toMatchObject({ qtyBasis: "hour", qtyLabel: "8 hours", amount: 1200 });
+  });
+
+  it("derives the basis from the row's unit when the row stored none", () => {
+    // Which is what makes the label correct on the proposals already saved.
+    const totals = services([
+      { key: "genTraining", qty: 2, price: 750, unit: "Session" },
+      { key: "osha10", qty: 25, price: 210, unit: "Person" },
+      { key: "customWorkflow", qty: 6, price: 225, unit: "Hour" },
+      { key: "mileage", qty: 120, price: 0.7, unit: "Mile" },
+    ]);
+    expect(totals.lineItems.map((row) => [row.qtyBasis, row.qtyLabel, row.amount])).toEqual([
+      ["session", "2 sessions", 1500],
+      ["attendee", "25 attendees", 5250],
+      ["hour", "6 hours", 1350],
+      [null, "120 Mile", 84],
+    ]);
+  });
+
+  it("lets the row's stored basis beat the unit its catalog entry carries today", () => {
+    // Same guarantee the stored `unit` has: a re-based catalog entry cannot
+    // reach backwards into a document already sent.
+    const totals = services([{ key: "osha10", qty: 1, price: 2100, unit: "Session", qty_basis: "session" }]);
+    expect(serviceOptions.osha10.unit).toBe("Person");
+    expect(totals.lineItems[0]).toMatchObject({ qtyBasis: "session", qtyLabel: "1 session", amount: 2100 });
+  });
+
+  it("keeps the subscription row printing its bare quantity", () => {
+    const totals = computeProposalTotals(state({ fields: { packageSelect: "enterprise", annualPrice: "99500" } }));
+    expect(totals.lineItems[0]).toMatchObject({ source: "package", qtyBasis: null, qtyLabel: "1", amount: 99500 });
+  });
+});
+
+describe("computeProposalTotals — tiered per-head rates", () => {
+  // The MODEL and the arithmetic only. No threshold and no discounted rate is
+  // defined anywhere in this codebase: a line stays at its single flat rate
+  // until someone with the authority to set prices puts numbers on it. These
+  // ladders are the tests' own.
+  const withTiers = (qty: number, tiers: { min_qty: number; price: number }[]) =>
+    computeProposalTotals(
+      state({
+        fields: { packageSelect: "none" },
+        services: [item({ key: "bbp", qty, price: 105, unit: "Person", qty_basis: "attendee", qty_tiers: tiers })],
+      }),
+    );
+
+  const ladder = [
+    { min_qty: 20, price: 95 },
+    { min_qty: 50, price: 85 },
+  ];
+
+  it("holds the list rate below the first threshold", () => {
+    expect(withTiers(10, ladder).lineItems[0]).toMatchObject({ price: 105, listPrice: 105, amount: 1050 });
+  });
+
+  it("steps the rate down for the WHOLE headcount once the threshold is met", () => {
+    // Volume, not graduated: twenty heads at $95 is $1,900, not nineteen at
+    // $105 plus one at $95.
+    expect(withTiers(20, ladder).lineItems[0]).toMatchObject({ price: 95, listPrice: 105, amount: 1900 });
+    expect(withTiers(60, ladder).lineItems[0]).toMatchObject({ price: 85, amount: 5100 });
+  });
+
+  it("keeps a tiered row's own arithmetic reconcilable on the printed page", () => {
+    const row = withTiers(20, ladder).lineItems[0];
+    expect(row.qty * row.price).toBe(row.amount);
+  });
+
+  it("prices a row with no ladder at its single flat rate — the default", () => {
+    expect(withTiers(60, []).lineItems[0]).toMatchObject({ price: 105, amount: 6300 });
+  });
+});
+
+/* -------------------------------------------------------------------------- */
 /* Legacy states — these are documents already in clients' hands               */
 /*                                                                             */
 /* A proposal saved before the per-participant repricing, before `unit` was    */
@@ -490,6 +622,69 @@ describe("computeProposalTotals — legacy saved states", () => {
       }),
     );
     expect(totals.lineItems[0]).toMatchObject({ name: "Retired Course", unit: "Person", amount: 855 });
+  });
+
+  it("prices a state saved before qty_basis existed to the cent, exactly as it did then", () => {
+    // THE REGRESSION GUARD FOR THE WHOLE FEATURE. This is the literal shape a
+    // signed proposal holds in client_proposals.form_data: no qty_basis on any
+    // row, no qty_tiers, no delivery_mode. Every figure below is the one the
+    // client's countersigned document prints, and none of them may move.
+    const legacy = {
+      v: 1,
+      fields: { packageSelect: "professional", annualPrice: "65000", discountPct: "10", taxPct: "5.5", depositPct: "25" },
+      phases: [
+        { type: "phase", key: "discovery", name: "Discovery & Intake", qty: 1, price: 3500, desc: "", unit: "" },
+        { type: "phase", key: "launch", name: "Launch & Training", qty: 2, price: 8000, desc: "", unit: "" },
+      ],
+      services: [
+        { type: "service", key: "osha10", name: "OSHA 10 Training", qty: 25, price: 210, desc: "", unit: "Person" },
+        { type: "service", key: "genTraining", name: "Training Session (general)", qty: 3, price: 750, desc: "", unit: "Session" },
+        { type: "service", key: "auditDay", name: "In-Person Audit Day", qty: 4, price: 1750, desc: "", unit: "Day" },
+        { type: "service", key: "mileage", name: "Travel Mileage", qty: 312, price: 0.655, desc: "", unit: "Mile" },
+        { type: "service", key: "reviewHour", name: "Document Review / Consulting", qty: 6.5, price: 150, desc: "", unit: "Hour" },
+      ],
+    } as unknown as GeneratorState;
+
+    const totals = computeProposalTotals(legacy);
+    expect(totals.lineItems.map((row) => row.amount)).toEqual([65000, 3500, 16000, 5250, 2250, 7000, 204.36, 975]);
+    expect(totals.subtotal).toBe(100179.36);
+    expect(totals.discount).toBe(10017.94);
+    expect(totals.tax).toBe(4958.88);
+    expect(totals.total).toBe(95120.3);
+    expect(totals.deposit).toBe(23780.08);
+
+    // Not one of those rows lost its multiplier to a basis it never stored:
+    // the only basis-free row here is the one whose unit implies none.
+    expect(totals.lineItems.map((row) => row.qtyBasis)).toEqual([
+      null,
+      null,
+      null,
+      "attendee",
+      "session",
+      null,
+      null,
+      "hour",
+    ]);
+    for (const row of totals.lineItems) {
+      expect(row.amount, row.name).toBe(Math.round(row.qty * row.price * 100) / 100);
+    }
+  });
+
+  it("labels a legacy row the way the document already printed it", () => {
+    // toFeeRow() composed `${qty} ${unit}`; qtyLabel must not change a single
+    // character of that for a row with no basis, or every stored proposal
+    // re-renders differently from the copy the client signed.
+    const totals = computeProposalTotals(
+      state({
+        fields: { packageSelect: "none" },
+        services: [
+          item({ key: "auditDay", qty: 4, price: 1750, unit: "Day" }),
+          item({ key: "mileage", qty: 312, price: 0.655, unit: "Mile" }),
+          item({ key: "retiredExtra", name: "Retired Extra", qty: 2, price: 500, unit: "" }),
+        ],
+      }),
+    );
+    expect(totals.lineItems.map((row) => row.qtyLabel)).toEqual(["4 Day", "312 Mile", "2"]);
   });
 });
 
@@ -636,6 +831,133 @@ describe("computeProposalTotals — malformed and hostile input", () => {
     for (const value of [totals.subtotal, totals.discount, totals.tax, totals.total, totals.deposit]) {
       expect(Number.isFinite(value)).toBe(true);
     }
+  });
+
+  it("falls back to plain multiplication for a hostile or unknown qty_basis", () => {
+    // A basis arrives from persisted JSONB, so it is untrusted input like every
+    // other value here. The dangerous failure is not a crash: it is a bogus
+    // value being read as `flat` and quietly dropping a ×10 off a real total.
+    // Ten heads at $105 must stay $1,050 no matter what the field says.
+    // NB " FLAT " is deliberately absent: a real basis in odd casing or with
+    // stray whitespace is a legitimate value written by some other build, and
+    // is normalized rather than discarded. Only values that are not one of the
+    // four at all land here.
+    for (const qty_basis of [
+      "flatten",
+      "flat fee",
+      "per head",
+      "__proto__",
+      "constructor",
+      "toString",
+      "",
+      "   ",
+      "<script>alert(1)</script>",
+      0,
+      1,
+      true,
+      null,
+      {},
+      [],
+      ["flat"],
+      { valueOf: () => "flat" },
+    ]) {
+      const totals = computeProposalTotals(
+        state({
+          fields: { packageSelect: "none" },
+          services: [item({ key: "bbp", qty: 10, price: 105, unit: "Person", qty_basis } as Partial<GeneratorItem>)],
+        }),
+      );
+      const row = totals.lineItems[0];
+      expect(Number.isFinite(row.amount), String(qty_basis)).toBe(true);
+      expect(row.amount, String(qty_basis)).toBe(1050);
+      // Either the row's own unit resolved the basis, or nothing did — never a
+      // basis the payload named.
+      expect(["attendee", null], String(qty_basis)).toContain(row.qtyBasis);
+      expect(totals.total).toBe(1050);
+    }
+  });
+
+  it("ignores a malformed tier ladder instead of repricing from it", () => {
+    for (const qty_tiers of [
+      "[{min_qty:1,price:1}]",
+      { min_qty: 1, price: 1 },
+      [{ min_qty: "1", price: 1 }],
+      [{ min_qty: 1, price: "1" }],
+      [{ min_qty: Number.NaN, price: 1 }],
+      [{ min_qty: 1, price: Number.POSITIVE_INFINITY }],
+      [null, "1:1", 7],
+      [],
+      null,
+    ]) {
+      const totals = computeProposalTotals(
+        state({
+          fields: { packageSelect: "none" },
+          services: [item({ key: "bbp", qty: 10, price: 105, unit: "Person", qty_basis: "attendee", qty_tiers } as Partial<GeneratorItem>)],
+        }),
+      );
+      expect(totals.lineItems[0], JSON.stringify(qty_tiers)).toMatchObject({ price: 105, amount: 1050 });
+    }
+  });
+
+  it("cannot be driven negative or infinite through a tier ladder", () => {
+    const totals = computeProposalTotals(
+      state({
+        fields: { packageSelect: "none" },
+        services: [
+          item({ key: "bbp", qty: 10, price: 105, unit: "Person", qty_basis: "attendee", qty_tiers: [{ min_qty: 1, price: -1000 }] } as Partial<GeneratorItem>),
+          item({ key: "bbp", qty: 10, price: 105, unit: "Person", qty_basis: "attendee", qty_tiers: [{ min_qty: -50, price: 0 }] } as Partial<GeneratorItem>),
+        ],
+      }),
+    );
+    expect(totals.lineItems.map((row) => row.amount)).toEqual([0, 0]);
+    expect(totals.subtotal).toBe(0);
+    expect(totals.total).toBe(0);
+  });
+
+  it("never prints a delivery mode it does not recognize", () => {
+    for (const delivery_mode of ["hybrid", "<img src=x onerror=alert(1)>", "", 1, {}, null]) {
+      const totals = computeProposalTotals(
+        state({
+          fields: { packageSelect: "none" },
+          services: [item({ key: "bbp", qty: 1, price: 400, unit: "Session", delivery_mode } as Partial<GeneratorItem>)],
+        }),
+      );
+      expect(totals.lineItems[0].deliveryMode).toBeNull();
+      expect(totals.lineItems[0].deliveryLabel).toBe("");
+    }
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Delivery mode — wording, never money                                        */
+/* -------------------------------------------------------------------------- */
+
+describe("computeProposalTotals — delivery mode", () => {
+  const trainingLine = (delivery_mode?: DeliveryMode) =>
+    computeProposalTotals(
+      state({
+        fields: { packageSelect: "none" },
+        services: [item({ key: "bbp", qty: 10, price: 105, unit: "Person", qty_basis: "attendee", delivery_mode })],
+      }),
+    ).lineItems[0];
+
+  it("carries the two course delivery modes onto the line", () => {
+    expect(trainingLine("in_person")).toMatchObject({
+      deliveryMode: "in_person",
+      deliveryLabel: "Instructor-led course — in person",
+    });
+    expect(trainingLine("virtual")).toMatchObject({
+      deliveryMode: "virtual",
+      deliveryLabel: "Instructor-led course — virtual",
+    });
+  });
+
+  it("says nothing at all when the seller did not choose", () => {
+    expect(trainingLine()).toMatchObject({ deliveryMode: null, deliveryLabel: "" });
+  });
+
+  it("does not let the delivery mode move a single cent", () => {
+    expect([trainingLine("in_person").amount, trainingLine("virtual").amount, trainingLine().amount]).toEqual([1050, 1050, 1050]);
   });
 });
 

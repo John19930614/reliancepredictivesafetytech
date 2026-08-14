@@ -17,8 +17,11 @@ import type { ClientWorkflowFacts } from "@/lib/pipeline/gates";
 import {
   advanceClientStage,
   createInvoiceFromProposal,
+  loadInvoiceLines,
   overrideClientStage,
   settleInvoice,
+  updateDraftInvoiceLines,
+  updateInvoiceDetails,
 } from "./actions";
 
 const accessMock = vi.mocked(getPipelineAccess);

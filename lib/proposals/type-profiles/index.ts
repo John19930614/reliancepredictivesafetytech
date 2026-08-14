@@ -78,15 +78,35 @@ export function resolveTypeCopy(
   return profile?.copy ?? fallback;
 }
 
-/** Section headings for a type, falling back to the platform-era wording. */
+/**
+ * The words one type puts on its document, falling back to the platform-era
+ * wording for a proposal with no type stamped.
+ *
+ * `unitNoun` has been declared on all seven profiles since this module shipped
+ * — "task" for time & materials, "session" for training, "deliverable" for
+ * fixed price — and was never forwarded, so the renderer went on calling every
+ * row of section 03 a "Service Line". That is subscription vocabulary on a
+ * document that sells no subscription, and it is the same class of defect as
+ * the platform package block: a value the profile already decided, dropped on
+ * the way to the page.
+ *
+ * Forwarded HERE rather than read off `profile.lexicon` at the call site, for
+ * the same reason the headings are: the fallback for an untyped proposal has to
+ * live in exactly one place, or a renderer that forgets it silently restyles a
+ * document that is already in a client's hands.
+ */
 export function resolveLexicon(profile: ProposalTypeProfile | null): Pick<
   ProposalLexicon,
-  "scopeHeading" | "feesHeading" | "termHeading"
+  "scopeHeading" | "feesHeading" | "termHeading" | "unitNoun"
 > {
   return {
     scopeHeading: profile?.lexicon.scopeHeading ?? "Detailed Scope of Work",
     feesHeading: profile?.lexicon.feesHeading ?? "Pricing Schedule",
     termHeading: profile?.lexicon.termHeading ?? "Schedule and Implementation Approach",
+    // "service" composes to "Service Line 1:", the exact label every document
+    // printed before this field was wired through. An untyped proposal must
+    // keep it.
+    unitNoun: profile?.lexicon.unitNoun ?? "service",
   };
 }
 
