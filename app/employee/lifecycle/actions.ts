@@ -1,0 +1,584 @@
+"use server";
+
+// Server actions for the Client Lifecycle.
+//
+// Every move an opportunity makes goes through here: Next Step, Skip to Step,
+// the three Exit Paths, and reopening. Nothing writes company_clients or
+// lifecycle_stage — the existing sales board is untouched and keeps running
+// beside this on its own field.
+//
+// EVERY WRITE IS COMPARE-AND-SET on the (step, status) the caller read.
+// PostgREST reports no error for an UPDATE that matched zero rows, so each
+// mutation asks for the affected ids back and treats an empty result as a
+// concurrent change rather than a success.
+//
+// EVERY MOVE IS RECORDED. opportunity_stage_events is append-only and carries
+// the reason for anything that is not an ordinary one-step advance, which is
+// what makes "who skipped Discovery on this deal, and why" answerable at all.
+
+import { revalidatePath } from "next/cache";
+import { buildDataAuditEvent, recordAuditEvent } from "@/lib/audit/events";
+import { friendlyError } from "@/lib/friendly-error";
+import { getLifecycleAccess } from "@/lib/lifecycle/access";
+import { checkExitInput, isClosed, lifecycleExit } from "@/lib/lifecycle/exits";
+import {
+  firstStepKey,
+  isLifecycleStepKey,
+  lifecycleStep,
+  nextStepKey,
+  stepDistance,
+} from "@/lib/lifecycle/steps";
+import { opportunitySelect, type StageEventKind } from "@/lib/lifecycle/types";
+
+export interface LifecycleActionResult {
+  ok: boolean;
+  error?: string;
+  fieldErrors?: Record<string, string>;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+const SIGNED_OUT = "You must be signed in.";
+const NOT_FOUND = "Opportunity not found or you do not have permission to change it.";
+const MOVED = "This opportunity changed while you were looking at it. Reload and try again.";
+const MIN_REASON = 10;
+
+const lifecyclePath = "/employee/lifecycle";
+
+function revalidateLifecycle(opportunityId?: string): void {
+  revalidatePath(lifecyclePath);
+  if (opportunityId) revalidatePath(`${lifecyclePath}/${opportunityId}`);
+}
+
+interface MoveRow {
+  id: string;
+  name: string;
+  step: string;
+  status: string;
+  client_id: string | null;
+}
+
+const moveSelect = "id, name, step, status, client_id";
+
+/* -------------------------------------------------------------------------- */
+/* Shared move writer                                                         */
+/* -------------------------------------------------------------------------- */
+
+interface ApplyMoveInput {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any;
+  userId: string;
+  role: string | null;
+  before: MoveRow;
+  toStep: string;
+  toStatus: string;
+  kind: StageEventKind;
+  reason: string | null;
+  /** Extra columns to set alongside the move (exit evidence, for instance). */
+  patch?: Record<string, unknown>;
+  summary: string;
+  severity?: "info" | "warn";
+}
+
+async function applyMove(input: ApplyMoveInput): Promise<LifecycleActionResult> {
+  const { supabase, userId, role, before } = input;
+
+  const { data: updated, error: updateError } = await supabase
+    .from("opportunities")
+    .update({ step: input.toStep, status: input.toStatus, ...(input.patch ?? {}) })
+    .eq("id", before.id)
+    // Compare-and-set on both axes: another operator may have moved the step OR
+    // exited the deal since this page rendered.
+    .eq("step", before.step)
+    .eq("status", before.status)
+    .select("id");
+
+  if (updateError) return { ok: false, error: friendlyError(updateError, "Could not move this opportunity.") };
+  if (!Array.isArray(updated) || updated.length === 0) return { ok: false, error: MOVED };
+
+  const distance = stepDistance(before.step, input.toStep);
+
+  // History first. A failure here must not report the move as failed — the step
+  // has already changed — but it must be visible in the logs.
+  const { error: eventError } = await supabase.from("opportunity_stage_events").insert({
+    opportunity_id: before.id,
+    from_step: before.step,
+    to_step: input.toStep,
+    from_status: before.status,
+    to_status: input.toStatus,
+    kind: input.kind,
+    reason: input.reason,
+    steps_skipped: Math.max(0, Math.abs(distance) - (input.kind === "advance" ? 1 : 0)),
+    changed_by: userId,
+  });
+  if (eventError) {
+    console.error("Could not record the lifecycle stage event.", eventError);
+  }
+
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "update",
+      "opportunity",
+      before.id,
+      userId,
+      input.summary,
+      { step: before.step, status: before.status },
+      { step: input.toStep, status: input.toStatus, kind: input.kind, reason: input.reason },
+    ),
+    severity: input.severity ?? "info",
+    actor_role: role,
+  });
+
+  revalidateLifecycle(before.id);
+  return { ok: true };
+}
+
+/** Loads the row a move will act on, or returns the failure to report. */
+async function readMoveTarget(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  opportunityId: string,
+): Promise<{ ok: true; row: MoveRow } | { ok: false; error: string }> {
+  const { data } = await supabase.from("opportunities").select(moveSelect).eq("id", opportunityId).maybeSingle();
+  if (!data) return { ok: false, error: NOT_FOUND };
+  return { ok: true, row: data as MoveRow };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Create                                                                     */
+/* -------------------------------------------------------------------------- */
+
+export interface CreateOpportunityInput {
+  name: string;
+  clientId?: string | null;
+  demoRequestId?: string | null;
+  value?: number | null;
+  source?: string | null;
+  industry?: string | null;
+  region?: string | null;
+  productInterest?: string | null;
+  expectedCloseDate?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * Opens a new opportunity at step 1.
+ *
+ * It always starts at Lead Captured and open — the RLS insert policy enforces
+ * the same thing, so a deal cannot be conjured straight into Commit / Contract.
+ */
+export async function createOpportunity(
+  input: CreateOpportunityInput,
+): Promise<LifecycleActionResult & { opportunityId?: string }> {
+  const { supabase, userId, role, canManage } = await getLifecycleAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
+  if (!canManage) return { ok: false, error: "You do not have permission to open opportunities." };
+
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  if (name.length === 0) {
+    return { ok: false, error: "Give this opportunity a name.", fieldErrors: { name: "A name is required." } };
+  }
+  if (name.length > 200) {
+    return { ok: false, error: "That name is too long.", fieldErrors: { name: "Keep it under 200 characters." } };
+  }
+
+  if (input.clientId && !UUID.test(input.clientId)) return { ok: false, error: "Malformed client reference." };
+  if (input.demoRequestId && !UUID.test(input.demoRequestId)) return { ok: false, error: "Malformed lead reference." };
+
+  const value = typeof input.value === "number" && Number.isFinite(input.value) && input.value > 0
+    ? Math.round(input.value * 100) / 100
+    : 0;
+
+  const expectedCloseDate =
+    typeof input.expectedCloseDate === "string" && ISO_DATE.test(input.expectedCloseDate)
+      ? input.expectedCloseDate
+      : null;
+
+  const { data: created, error } = await supabase
+    .from("opportunities")
+    .insert({
+      name,
+      client_id: input.clientId || null,
+      demo_request_id: input.demoRequestId || null,
+      step: firstStepKey,
+      status: "open",
+      value,
+      expected_close_date: expectedCloseDate,
+      source: input.source?.trim() || null,
+      industry: input.industry?.trim() || null,
+      region: input.region?.trim() || null,
+      product_interest: input.productInterest?.trim() || null,
+      notes: input.notes?.trim() || null,
+      created_by: userId,
+    })
+    .select("id")
+    .single();
+
+  if (error || !created) return { ok: false, error: friendlyError(error, "Could not open the opportunity.") };
+
+  await recordAuditEvent({
+    ...buildDataAuditEvent("create", "opportunity", created.id, userId, `Opened opportunity "${name}"`, null, {
+      client_id: input.clientId || null,
+      demo_request_id: input.demoRequestId || null,
+      value,
+    }),
+    actor_role: role,
+  });
+
+  revalidateLifecycle(created.id);
+  return { ok: true, opportunityId: created.id };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Next Step                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** Moves an opportunity forward exactly one step. */
+export async function advanceOpportunity(opportunityId: string): Promise<LifecycleActionResult> {
+  const { supabase, userId, role, canAdvance } = await getLifecycleAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
+  if (!canAdvance) return { ok: false, error: "You do not have permission to move opportunities." };
+  if (!UUID.test(opportunityId)) return { ok: false, error: "Malformed opportunity reference." };
+
+  const target = await readMoveTarget(supabase, opportunityId);
+  if (!target.ok) return { ok: false, error: target.error };
+  const before = target.row;
+
+  if (isClosed(before.status)) {
+    return { ok: false, error: "This opportunity has left the lifecycle. Reopen it before moving it on." };
+  }
+
+  const to = nextStepKey(before.step);
+  if (!to) {
+    return {
+      ok: false,
+      error: isLifecycleStepKey(before.step)
+        ? "This opportunity is already at the last step of the lifecycle."
+        : "This opportunity is on a step that is not part of the lifecycle.",
+    };
+  }
+
+  return applyMove({
+    supabase,
+    userId,
+    role,
+    before,
+    toStep: to,
+    toStatus: before.status,
+    kind: "advance",
+    reason: null,
+    summary: `Advanced "${before.name}" from ${lifecycleStep(before.step)?.label ?? before.step} to ${lifecycleStep(to)?.label ?? to}`,
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Skip to Step                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Jumps to any step, forwards or backwards, with a written reason.
+ *
+ * Admin-only, and backed by RLS. Skipping asserts the intervening work was not
+ * needed, and moving back rewrites the record of how far a deal got — both are
+ * claims somebody should have to sign their name to.
+ */
+export async function skipOpportunityToStep(
+  opportunityId: string,
+  toStep: string,
+  reason: string,
+): Promise<LifecycleActionResult> {
+  const { supabase, userId, role, canSkip } = await getLifecycleAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
+  if (!canSkip) return { ok: false, error: "Admin role required to skip or reverse steps." };
+  if (!UUID.test(opportunityId)) return { ok: false, error: "Malformed opportunity reference." };
+  if (!isLifecycleStepKey(toStep)) return { ok: false, error: "Choose a valid step." };
+
+  const cleaned = typeof reason === "string" ? reason.trim() : "";
+  if (cleaned.length < MIN_REASON) {
+    return {
+      ok: false,
+      error: "Say why this opportunity is jumping steps.",
+      fieldErrors: { reason: "A reason of at least 10 characters is required." },
+    };
+  }
+  if (cleaned.length > 1000) {
+    return { ok: false, error: "Keep the reason under 1000 characters.", fieldErrors: { reason: "Too long." } };
+  }
+
+  const target = await readMoveTarget(supabase, opportunityId);
+  if (!target.ok) return { ok: false, error: target.error };
+  const before = target.row;
+
+  if (isClosed(before.status)) {
+    return { ok: false, error: "This opportunity has left the lifecycle. Reopen it before moving it." };
+  }
+  if (before.step === toStep) {
+    return { ok: false, error: "This opportunity is already on that step." };
+  }
+
+  const distance = stepDistance(before.step, toStep);
+
+  return applyMove({
+    supabase,
+    userId,
+    role,
+    before,
+    toStep,
+    toStatus: before.status,
+    kind: distance < 0 ? "back" : "skip",
+    reason: cleaned,
+    summary:
+      distance < 0
+        ? `Moved "${before.name}" back to ${lifecycleStep(toStep)?.label ?? toStep}: ${cleaned}`
+        : `Skipped "${before.name}" to ${lifecycleStep(toStep)?.label ?? toStep}: ${cleaned}`,
+    // A jump is the event a pipeline reviewer goes looking for.
+    severity: "warn",
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Exit Paths                                                                 */
+/* -------------------------------------------------------------------------- */
+
+export interface ExitOpportunityInput {
+  status: string;
+  reason: string;
+  competitor?: string | null;
+  holdUntil?: string | null;
+}
+
+/**
+ * Takes an opportunity out of the lifecycle: Closed Lost, On Hold, or
+ * Disqualified.
+ *
+ * Deliberately NOT admin-only. A rep who has just been told the deal is dead
+ * has to be able to say so — routing that through an admin is how pipelines
+ * fill with stale open deals nobody trusts. Reopening is the admin act.
+ *
+ * The step is left exactly where it was: "lost at Negotiation" and "lost at
+ * Discovery" are different problems, and collapsing them loses the only useful
+ * thing a dead deal has left.
+ */
+export async function exitOpportunity(
+  opportunityId: string,
+  input: ExitOpportunityInput,
+): Promise<LifecycleActionResult> {
+  const { supabase, userId, role, canExit } = await getLifecycleAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
+  if (!canExit) return { ok: false, error: "You do not have permission to close opportunities." };
+  if (!UUID.test(opportunityId)) return { ok: false, error: "Malformed opportunity reference." };
+
+  const checked = checkExitInput(input);
+  if (!checked.ok || !checked.value) {
+    return { ok: false, error: checked.error, fieldErrors: checked.fieldErrors };
+  }
+  const exit = checked.value;
+
+  const target = await readMoveTarget(supabase, opportunityId);
+  if (!target.ok) return { ok: false, error: target.error };
+  const before = target.row;
+
+  if (isClosed(before.status)) {
+    return { ok: false, error: "This opportunity has already left the lifecycle." };
+  }
+
+  const label = lifecycleExit(exit.status)?.label ?? exit.status;
+
+  return applyMove({
+    supabase,
+    userId,
+    role,
+    before,
+    toStep: before.step,
+    toStatus: exit.status,
+    kind: "exit",
+    reason: exit.reason,
+    patch: {
+      exit_reason: exit.reason,
+      exit_competitor: exit.competitor,
+      hold_until: exit.holdUntil,
+      exited_at: new Date().toISOString(),
+      exited_by: userId,
+    },
+    summary:
+      `Marked "${before.name}" ${label} at ${lifecycleStep(before.step)?.label ?? before.step}: ${exit.reason}` +
+      (exit.competitor ? ` (lost to ${exit.competitor})` : ""),
+    severity: "warn",
+  });
+}
+
+/**
+ * Brings an exited opportunity back into the lifecycle at the step it left.
+ *
+ * Admin-only: an exit is a reported outcome, and numbers have already been read
+ * off it. Un-reporting it should leave a name behind.
+ */
+export async function reopenOpportunity(opportunityId: string, reason: string): Promise<LifecycleActionResult> {
+  const { supabase, userId, role, canReopen } = await getLifecycleAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
+  if (!canReopen) return { ok: false, error: "Admin role required to reopen a closed opportunity." };
+  if (!UUID.test(opportunityId)) return { ok: false, error: "Malformed opportunity reference." };
+
+  const cleaned = typeof reason === "string" ? reason.trim() : "";
+  if (cleaned.length < MIN_REASON) {
+    return {
+      ok: false,
+      error: "Say why this opportunity is being reopened.",
+      fieldErrors: { reason: "A reason of at least 10 characters is required." },
+    };
+  }
+
+  const target = await readMoveTarget(supabase, opportunityId);
+  if (!target.ok) return { ok: false, error: target.error };
+  const before = target.row;
+
+  if (!isClosed(before.status)) {
+    return { ok: false, error: "This opportunity is already open." };
+  }
+
+  return applyMove({
+    supabase,
+    userId,
+    role,
+    before,
+    toStep: before.step,
+    toStatus: "open",
+    kind: "reopen",
+    reason: cleaned,
+    // The exit evidence is cleared so the record cannot claim both states at
+    // once, but the stage event keeps the whole history of what it said.
+    patch: { exit_reason: null, exit_competitor: null, hold_until: null, exited_at: null, exited_by: null },
+    summary: `Reopened "${before.name}" at ${lifecycleStep(before.step)?.label ?? before.step}: ${cleaned}`,
+    severity: "warn",
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Field edits                                                                */
+/* -------------------------------------------------------------------------- */
+
+export interface UpdateOpportunityInput {
+  ownerUserId?: string | null;
+  value?: number | null;
+  probability?: number | null;
+  expectedCloseDate?: string | null;
+  nextAction?: string | null;
+  nextActionDue?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * Edits the deal facts every lifecycle screen reads: owner, value, probability,
+ * close date and next action.
+ *
+ * Only the keys actually supplied are written, so an unrelated edit cannot
+ * blank a field the caller never saw.
+ */
+export async function updateOpportunity(
+  opportunityId: string,
+  input: UpdateOpportunityInput,
+): Promise<LifecycleActionResult> {
+  const { supabase, userId, role, canManage } = await getLifecycleAccess();
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
+  if (!canManage) return { ok: false, error: "You do not have permission to edit opportunities." };
+  if (!UUID.test(opportunityId)) return { ok: false, error: "Malformed opportunity reference." };
+
+  const patch: Record<string, unknown> = {};
+
+  if (input.ownerUserId !== undefined) {
+    if (input.ownerUserId !== null && !UUID.test(input.ownerUserId)) {
+      return { ok: false, error: "Malformed owner reference." };
+    }
+    patch.owner_user_id = input.ownerUserId;
+    // The SLA clock the concept starts at Assign Owner hangs off this.
+    patch.assigned_at = input.ownerUserId ? new Date().toISOString() : null;
+  }
+
+  if (input.value !== undefined) {
+    const value = Number(input.value);
+    if (!Number.isFinite(value) || value < 0) {
+      return { ok: false, error: "Enter a deal value of zero or more.", fieldErrors: { value: "Invalid amount." } };
+    }
+    patch.value = Math.round(value * 100) / 100;
+  }
+
+  if (input.probability !== undefined) {
+    const probability = Number(input.probability);
+    if (!Number.isFinite(probability) || probability < 0 || probability > 100) {
+      return {
+        ok: false,
+        error: "Probability has to be between 0 and 100.",
+        fieldErrors: { probability: "0 to 100." },
+      };
+    }
+    patch.probability = Math.round(probability);
+  }
+
+  if (input.expectedCloseDate !== undefined) {
+    if (input.expectedCloseDate !== null && !ISO_DATE.test(input.expectedCloseDate)) {
+      return { ok: false, error: "Enter the close date as YYYY-MM-DD." };
+    }
+    patch.expected_close_date = input.expectedCloseDate;
+  }
+
+  if (input.nextActionDue !== undefined) {
+    if (input.nextActionDue !== null && !ISO_DATE.test(input.nextActionDue)) {
+      return { ok: false, error: "Enter the due date as YYYY-MM-DD." };
+    }
+    patch.next_action_due = input.nextActionDue;
+  }
+
+  if (input.nextAction !== undefined) {
+    const action = input.nextAction?.trim() ?? "";
+    if (action.length > 500) return { ok: false, error: "That next action is too long." };
+    patch.next_action = action || null;
+  }
+
+  if (input.notes !== undefined) {
+    const notes = input.notes?.trim() ?? "";
+    if (notes.length > 8000) return { ok: false, error: "Those notes are too long." };
+    patch.notes = notes || null;
+  }
+
+  if (Object.keys(patch).length === 0) return { ok: true };
+
+  const { data: before } = await supabase
+    .from("opportunities")
+    .select(moveSelect)
+    .eq("id", opportunityId)
+    .maybeSingle();
+  if (!before) return { ok: false, error: NOT_FOUND };
+
+  const { data: updated, error } = await supabase
+    .from("opportunities")
+    .update(patch)
+    .eq("id", opportunityId)
+    .select("id");
+
+  if (error) return { ok: false, error: friendlyError(error, "Could not save this opportunity.") };
+  if (!Array.isArray(updated) || updated.length === 0) return { ok: false, error: NOT_FOUND };
+
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "update",
+      "opportunity",
+      opportunityId,
+      userId,
+      `Updated ${Object.keys(patch).join(", ")} on "${(before as MoveRow).name}"`,
+      null,
+      patch,
+    ),
+    actor_role: role,
+  });
+
+  revalidateLifecycle(opportunityId);
+  return { ok: true };
+}
+
+/** The columns a lifecycle read asks for. Re-exported so the page and the
+ *  actions cannot drift; `"use server"` files may only export async functions,
+ *  hence the wrapper rather than a bare const. */
+export async function lifecycleSelectColumns(): Promise<string> {
+  return opportunitySelect;
+}

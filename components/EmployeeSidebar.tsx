@@ -38,6 +38,7 @@ import {
   Presentation,
   ReceiptText,
   Scale,
+  Route,
   ScrollText,
   Settings,
   ShieldCheck,
@@ -76,6 +77,7 @@ const navGroups = [
       { href: "/employee/demo-showcase", label: "Demo Showcase", icon: Presentation },
       { href: "/employee/inbox", label: "Request Inbox", icon: Inbox },
       { href: "/employee/sales", label: "Sales Pipeline", icon: BriefcaseBusiness },
+      { href: "/employee/lifecycle", label: "Client Lifecycle", icon: Route },
       { href: "/employee/proposals", label: "Proposals", icon: ScrollText },
       // Same module key as Proposals (client_proposals resolves by path prefix),
       // so this widens nothing — it only surfaces the templates manager.

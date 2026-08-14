@@ -9171,3 +9171,800 @@ a.platform-card:hover {
 }
 
 /* ===== End client workflow =============================================== */
+
+/* ===== Client Lifecycle Command Center =================================== *
+   Eleven steps, one owner, one outcome. Same shape on every step: header,
+   rail, KPI tiles, panel grid, indicator strip, record tabs.
+
+   Brand colour comes from the portal variables. The rail is GOLD rather than
+   the green used by the client workflow rail — the lifecycle is one continuous
+   run to a win, and the concept draws completed steps in the same gold as the
+   live one rather than switching colour partway.
+   ------------------------------------------------------------------------- */
+
+.lc-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.lc-shell {
+  display: grid;
+  gap: 16px;
+}
+
+/* --- Header -------------------------------------------------------------- */
+
+.lc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.lc-head-id {
+  min-width: 0;
+}
+
+.lc-kicker {
+  margin: 0 0 3px;
+  color: var(--portal-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.lc-head h1 {
+  margin: 0 0 4px;
+  font-size: 1.72rem;
+  line-height: 1.15;
+}
+
+.lc-sub {
+  margin: 0;
+  max-width: 74ch;
+  color: var(--portal-muted);
+  font-size: 0.9rem;
+}
+
+.lc-actions-wrap {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
+.lc-head-actions {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+/* --- Buttons ------------------------------------------------------------- */
+
+.lc-btn {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 15px;
+  border: 1px solid #d9e0ea;
+  border-radius: 7px;
+  background: #fff;
+  color: #1f2937;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.87rem;
+  font-weight: 750;
+  white-space: nowrap;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.lc-btn:hover:not(:disabled) {
+  border-color: rgba(201, 147, 43, 0.55);
+  transform: translateY(-1px);
+}
+
+.lc-btn:disabled,
+.lc-btn[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+  transform: none;
+}
+
+.lc-btn-primary {
+  border-color: var(--portal-gold);
+  background: linear-gradient(135deg, var(--portal-gold-bright), var(--portal-gold));
+  color: #090909;
+}
+
+/* --- Rail ---------------------------------------------------------------- */
+
+.lc-rail-wrap {
+  padding: 18px 18px 14px;
+  overflow-x: auto;
+  border: 1px solid #e0e4e8;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.07);
+}
+
+.lc-rail {
+  display: flex;
+  align-items: flex-start;
+  min-width: max-content;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lc-rail-step {
+  position: relative;
+  display: flex;
+  flex: 1 0 104px;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  text-align: center;
+}
+
+/* Drawn on the LATER step: a step being done (or current) is what proves the
+   segment behind it is complete, and CSS has no previous-sibling selector. */
+.lc-rail-step + .lc-rail-step::before {
+  content: "";
+  position: absolute;
+  top: 15px;
+  right: 50%;
+  left: -50%;
+  height: 2px;
+  background: #e3e8ee;
+}
+
+.lc-rail-step-done + .lc-rail-step-done::before,
+.lc-rail-step-done + .lc-rail-step-current::before {
+  background: var(--portal-gold);
+}
+
+.lc-rail-node {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e3e8ee;
+  border-radius: 999px;
+  background: #fff;
+  color: #98a2b3;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.lc-rail-step-done .lc-rail-node {
+  border-color: var(--portal-gold);
+  background: #fdf6e6;
+  color: #8a5d05;
+}
+
+.lc-rail-step-current .lc-rail-node {
+  border-color: var(--portal-gold);
+  background: linear-gradient(135deg, var(--portal-gold-bright), var(--portal-gold));
+  color: #241a04;
+  box-shadow: 0 0 0 4px rgba(201, 147, 43, 0.16);
+}
+
+/* An exited deal is parked, not progressing — the node stops looking live. */
+.lc-rail-node-stalled {
+  border-color: #cbd5e1 !important;
+  background: #eef2f6 !important;
+  color: #64748b !important;
+  box-shadow: none !important;
+}
+
+.lc-rail-label {
+  max-width: 98px;
+  color: var(--portal-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.lc-rail-step-done .lc-rail-label {
+  color: #8a5d05;
+}
+
+.lc-rail-step-current .lc-rail-label {
+  color: #111;
+  font-weight: 900;
+}
+
+.lc-rail-link {
+  display: contents;
+  color: inherit;
+}
+
+.lc-rail-trophy {
+  display: flex;
+  align-items: center;
+  padding: 4px 0 0 8px;
+  color: var(--portal-gold);
+}
+
+/* --- KPI tiles ----------------------------------------------------------- */
+
+.lc-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+
+.lc-kpi {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 16px 18px;
+  border: 1px solid #e0e4e8;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.06);
+}
+
+.lc-kpi-icon {
+  display: inline-flex;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: #fdf6e6;
+  color: #8a5d05;
+}
+
+.lc-kpi-warn .lc-kpi-icon {
+  background: #fef3c7;
+  color: #a16207;
+}
+
+.lc-kpi-good .lc-kpi-icon {
+  background: #e6f4ea;
+  color: #2e7d32;
+}
+
+.lc-kpi-body {
+  min-width: 0;
+}
+
+.lc-kpi-label {
+  margin: 0;
+  color: var(--portal-muted);
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.lc-kpi-value {
+  display: block;
+  font-size: 1.3rem;
+  line-height: 1.2;
+}
+
+.lc-kpi-detail {
+  margin: 2px 0 0;
+  color: var(--portal-muted);
+  font-size: 0.75rem;
+}
+
+/* --- Panels -------------------------------------------------------------- */
+
+.lc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.lc-panel {
+  border: 1px solid #e0e4e8;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.06);
+}
+
+.lc-panel-wide {
+  grid-column: 1 / -1;
+}
+
+.lc-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 17px;
+  border-bottom: 1px solid #edf0f2;
+}
+
+.lc-panel-head h2 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.lc-panel-aside {
+  color: var(--portal-muted);
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.lc-panel-body {
+  padding: 15px 17px;
+}
+
+.lc-facts {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+}
+
+.lc-fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.lc-fact dt {
+  color: var(--portal-muted);
+  font-size: 0.82rem;
+}
+
+.lc-fact dd {
+  margin: 0;
+  font-size: 0.87rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.lc-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lc-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #334155;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.lc-list svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--portal-gold);
+}
+
+.lc-body {
+  margin: 0;
+  color: #334155;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.lc-meta {
+  margin: 8px 0 0;
+  color: var(--portal-muted);
+  font-size: 0.78rem;
+}
+
+.lc-empty {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--portal-muted);
+  font-size: 0.85rem;
+}
+
+/* --- Pills --------------------------------------------------------------- */
+
+.lc-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.73rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.lc-pill-neutral { background: #eef2f6; color: #475467; }
+.lc-pill-good    { background: #e6f4ea; color: #1b5e20; }
+.lc-pill-warn    { background: #fef3c7; color: #a16207; }
+.lc-pill-bad     { background: #fee2e2; color: #b42318; }
+
+/* --- Indicator strip ------------------------------------------------------*/
+
+.lc-strip {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 18px;
+  overflow-x: auto;
+  border: 1px solid #e0e4e8;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.lc-strip-title {
+  margin: 0;
+  color: #111;
+  font-size: 0.85rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.lc-strip-items {
+  display: flex;
+  gap: 22px;
+}
+
+.lc-strip-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.lc-strip-label {
+  color: var(--portal-muted);
+  font-size: 0.79rem;
+}
+
+/* --- Record tabs ----------------------------------------------------------*/
+
+.lc-tabs {
+  display: flex;
+  gap: 7px;
+  padding: 10px;
+  overflow-x: auto;
+  border-radius: 12px;
+  background: #111;
+}
+
+.lc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  color: #c3c8d0;
+  font-size: 0.83rem;
+  font-weight: 750;
+  white-space: nowrap;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.lc-tab:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.lc-tab-on {
+  background: linear-gradient(135deg, var(--portal-gold-bright), var(--portal-gold));
+  color: #241a04;
+}
+
+.lc-tab-off {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.lc-tab-off:hover {
+  background: none;
+  color: #c3c8d0;
+}
+
+.lc-tab-badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #2e7d32;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+/* --- Exit banner ----------------------------------------------------------*/
+
+.lc-exit-banner {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 13px 17px;
+  border: 1px solid #e09a9a;
+  border-left: 4px solid #b42318;
+  border-radius: 8px;
+  background: #fff5f5;
+  color: #7f1d1d;
+  font-size: 0.87rem;
+  flex-wrap: wrap;
+}
+
+/* --- Forms ----------------------------------------------------------------*/
+
+.lc-panel-form,
+.lc-new {
+  display: grid;
+  gap: 12px;
+  width: min(560px, 100%);
+  padding: 16px 18px;
+  border: 1px solid #e0e4e8;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.07);
+  text-align: left;
+}
+
+.lc-form-title {
+  margin: 0;
+  font-size: 0.94rem;
+  font-weight: 850;
+}
+
+.lc-field {
+  display: grid;
+  gap: 5px;
+}
+
+.lc-field > span {
+  color: var(--portal-muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.lc-field input,
+.lc-field select,
+.lc-field textarea {
+  width: 100%;
+  min-height: 38px;
+  padding: 9px 11px;
+  border: 1px solid #d9e0ea;
+  border-radius: 6px;
+  background: #fff;
+  color: #111;
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+.lc-field textarea {
+  resize: vertical;
+}
+
+.lc-field input:focus-visible,
+.lc-field select:focus-visible,
+.lc-field textarea:focus-visible {
+  border-color: var(--portal-gold);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(201, 147, 43, 0.18);
+}
+
+.lc-field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.lc-form-actions {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.lc-error {
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid rgba(138, 31, 31, 0.34);
+  border-radius: 6px;
+  background: #fff0f0;
+  color: #5e1111;
+  font-size: 0.85rem;
+}
+
+/* --- Exit choices ---------------------------------------------------------*/
+
+.lc-exit-choices {
+  display: grid;
+  gap: 8px;
+}
+
+.lc-exit-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 1px solid #e3e8ee;
+  border-radius: 8px;
+  background: #fbfcfd;
+  cursor: pointer;
+}
+
+.lc-exit-choice-on {
+  border-color: var(--portal-gold);
+  background: #fffaf0;
+}
+
+.lc-exit-choice > span {
+  display: grid;
+  gap: 2px;
+}
+
+.lc-exit-choice strong {
+  font-size: 0.87rem;
+}
+
+.lc-exit-choice span span {
+  color: var(--portal-muted);
+  font-size: 0.79rem;
+}
+
+/* --- History --------------------------------------------------------------*/
+
+.lc-history {
+  display: grid;
+  gap: 13px;
+  margin: 0;
+  padding: 0 0 0 16px;
+  border-left: 2px solid #e3e8ee;
+  list-style: none;
+}
+
+.lc-history-row {
+  position: relative;
+  font-size: 0.87rem;
+}
+
+.lc-history-row::before {
+  content: "";
+  position: absolute;
+  top: 5px;
+  left: -21px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #cbd5e1;
+}
+
+.lc-history-skip::before,
+.lc-history-back::before,
+.lc-history-reopen::before { background: var(--portal-gold); }
+.lc-history-exit::before   { background: #b42318; }
+
+.lc-history-meta {
+  display: block;
+  margin-top: 2px;
+  color: var(--portal-muted);
+  font-size: 0.77rem;
+}
+
+.lc-history-reason {
+  margin: 5px 0 0;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+/* --- Index ----------------------------------------------------------------*/
+
+.lc-index {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
+  gap: 18px;
+  align-items: start;
+  margin-top: 16px;
+}
+
+.lc-index-main {
+  display: grid;
+  gap: 16px;
+}
+
+.lc-step-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+
+.lc-step-group-head h2 {
+  margin: 0;
+  font-size: 1.02rem;
+}
+
+.lc-step-num {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: #111;
+  color: var(--portal-gold-bright);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.lc-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 11px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lc-card {
+  display: grid;
+  gap: 3px;
+  padding: 13px 15px;
+  border: 1px solid #e0e4e8;
+  border-radius: 9px;
+  background: #fff;
+  color: #111;
+  transition: border-color 160ms ease, transform 160ms ease;
+}
+
+.lc-card:hover {
+  border-color: rgba(201, 147, 43, 0.55);
+  transform: translateY(-1px);
+}
+
+.lc-card-closed {
+  background: #fbfcfd;
+  opacity: 0.85;
+}
+
+.lc-card-meta {
+  color: var(--portal-muted);
+  font-size: 0.78rem;
+}
+
+.lc-backlink a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--portal-muted);
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+@media (max-width: 960px) {
+  .lc-index {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lc-actions-wrap {
+    justify-items: start;
+    width: 100%;
+  }
+}
+
+/* ===== End Client Lifecycle ============================================== */
