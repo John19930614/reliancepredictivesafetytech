@@ -166,6 +166,29 @@ describe("portal module access", () => {
     expect(canAccessEmployeePath("super_admin", "archived", "/employee/talent-engine", [])).toBe(false);
   });
 
+  it("resolves the grant tracker from its path and puts it in the Command group", () => {
+    expect(getPortalModuleForPath("/employee/grants")?.key).toBe("grant_tracker");
+    expect(getPortalModuleForPath("/employee/grants/abc-123")?.key).toBe("grant_tracker");
+    expect(getPortalModuleForPath("/employee/grants/")?.key).toBe("grant_tracker");
+    expect(portalModuleCatalog.find((module) => module.key === "grant_tracker")?.group).toBe("Command");
+  });
+
+  it("gates the grant tracker on an explicit grant because it exposes funding strategy and fees", () => {
+    expect(canAccessEmployeePath("employee", "active", "/employee/grants", ["grant_tracker"])).toBe(true);
+    // Owner roles keep full visibility without an explicit grant.
+    expect(canAccessEmployeePath("super_admin", "active", "/employee/grants", [])).toBe(true);
+    // An active employee without the grant does not see it.
+    expect(canAccessEmployeePath("employee", "active", "/employee/grants", ["dashboard"])).toBe(false);
+    // The grant does not survive archiving the account.
+    expect(canAccessEmployeePath("employee", "archived", "/employee/grants", ["grant_tracker"])).toBe(false);
+    expect(canAccessEmployeePath("super_admin", "archived", "/employee/grants", [])).toBe(false);
+  });
+
+  it("keeps the grant tracker out of the default employee grant", () => {
+    expect(defaultEmployeePortalModuleKeys).not.toContain("grant_tracker");
+    expect(canAccessEmployeePath("employee", "active", "/employee/grants", defaultEmployeePortalModuleKeys)).toBe(false);
+  });
+
   it("keeps the talent engine out of the default employee grant", () => {
     expect(defaultEmployeePortalModuleKeys).not.toContain("ehs_talent_engine");
     expect(canAccessEmployeePath("employee", "active", "/employee/talent-engine", defaultEmployeePortalModuleKeys)).toBe(false);

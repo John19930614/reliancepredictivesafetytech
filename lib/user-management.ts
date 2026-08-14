@@ -97,6 +97,7 @@ export const portalModuleCatalog = [
   { key: "reports", label: "Reports", group: "Command", pathPrefixes: ["/employee/reports"] },
   { key: "finance", label: "Finance Center", group: "Command", pathPrefixes: ["/employee/finance"] },
   { key: "payroll_tracker", label: "Payroll Tracker", group: "Command", pathPrefixes: ["/employee/payroll"] },
+  { key: "grant_tracker", label: "Grant Tracker", group: "Command", pathPrefixes: ["/employee/grants"] },
   { key: "operations_database", label: "Operations Database", group: "Command", pathPrefixes: ["/employee/operations"] },
   { key: "startup_checklist", label: "Startup Checklist", group: "Command", pathPrefixes: ["/employee/checklist"] },
   { key: "demo_showcase", label: "Demo Showcase", group: "Commercial", pathPrefixes: ["/employee/demo-showcase"] },
