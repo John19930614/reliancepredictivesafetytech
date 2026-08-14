@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { AlertTriangle, CircleDollarSign, ExternalLink, Hourglass, Layers } from "lucide-react";
 import { GrantCreateForm } from "@/components/grants/GrantCreateForm";
+import { GrantFeePaidToggle } from "@/components/grants/GrantFeePaidToggle";
 import { GrantStatusBadge } from "@/components/grants/GrantStatusBadge";
+import { GrantStatusEditor } from "@/components/grants/GrantStatusEditor";
 import { getGrantTrackerAccess } from "@/lib/grants/access";
 import { grantStatusRank, grantStatuses, isGrantTerminalStatus } from "@/lib/grants/statuses";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
@@ -77,7 +79,7 @@ function daysBetween(fromIso: string, toIso: string): number {
 
 export default async function GrantsPage({ searchParams }: { searchParams: Promise<GrantsSearchParams> }) {
   const params = await searchParams;
-  const { supabase, canRead, canManage } = await getGrantTrackerAccess();
+  const { supabase, canRead, canManage, canEditClosed } = await getGrantTrackerAccess();
 
   if (!supabase) {
     return <section className="portal-card empty-state">Supabase is not configured yet.</section>;
@@ -355,7 +357,11 @@ export default async function GrantsPage({ searchParams }: { searchParams: Promi
                           </td>
                           <td>{row.agency ?? "—"}</td>
                           <td>
-                            <GrantStatusBadge status={row.status} />
+                            {canManage && (!closed || canEditClosed) ? (
+                              <GrantStatusEditor grantId={row.id} status={row.status} />
+                            ) : (
+                              <GrantStatusBadge status={row.status} />
+                            )}
                           </td>
                           <td>
                             {row.next_action ?? row.requirements ?? "—"}
@@ -379,7 +385,11 @@ export default async function GrantsPage({ searchParams }: { searchParams: Promi
                             ) : (
                               <>
                                 {money2.format(fee)}
-                                <div className="table-subtext">{row.fee_paid ? "paid" : "unpaid"}</div>
+                                {canManage ? (
+                                  <GrantFeePaidToggle grantId={row.id} feePaid={row.fee_paid} />
+                                ) : (
+                                  <div className="table-subtext">{row.fee_paid ? "paid" : "unpaid"}</div>
+                                )}
                               </>
                             )}
                           </td>
