@@ -76,13 +76,20 @@ export function CurrentStepCard({
   function run(action: () => Promise<{ ok: boolean; error?: string }>) {
     setError(null);
     startTransition(async () => {
-      const result = await action();
-      if (result.ok) {
-        setOverrideOpen(false);
-        setReason("");
-        router.refresh();
-      } else {
-        setError(result.error ?? "Could not move this client.");
+      try {
+        const result = await action();
+        if (result.ok) {
+          setOverrideOpen(false);
+          setReason("");
+          router.refresh();
+        } else {
+          setError(result.error ?? "Could not move this client.");
+        }
+      } catch {
+        // A server action can reject outright (a dropped connection, a thrown
+        // read). Without this the card — which exists to tell the operator what
+        // happened — shows nothing at all and the button just stops responding.
+        setError("Something went wrong reaching the server. Try again in a moment.");
       }
     });
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProposalLineItem, ProposalTotals } from "@/lib/proposals/pricing";
-import { addDays, buildDraftInvoice, defaultNetDays, isEmptyDraft } from "./draft";
+import { addDays, buildDraftInvoice, defaultNetDays, isEmptyDraft, netDaysFromPaymentTerms } from "./draft";
 
 function line(over: Partial<ProposalLineItem> = {}): ProposalLineItem {
   return {
@@ -108,15 +108,17 @@ describe("buildDraftInvoice — full", () => {
     expect(draft.lineItems[0].description).toBe("Platform Services");
   });
 
-  // A quantity of zero would divide by zero deriving the unit price.
+  // A quantity of zero would divide by zero deriving the unit price. The stored
+  // price is preferred over that division, so the row keeps the rate the client
+  // agreed to rather than a figure invented from a rounded total.
   it("survives a zero-quantity row without producing Infinity", () => {
     const draft = buildDraftInvoice({
-      totals: totals({ lineItems: [line({ qty: 0, amount: 500 })], subtotal: 500, total: 500 }),
+      totals: totals({ lineItems: [line({ qty: 0, price: 1500, amount: 500 })], subtotal: 500, total: 500 }),
       kind: "full",
       issueDate: ISSUE,
     });
     expect(draft.lineItems[0].quantity).toBe(1);
-    expect(draft.lineItems[0].unitAmount).toBe(500);
+    expect(draft.lineItems[0].unitAmount).toBe(1500);
     expect(Number.isFinite(draft.lineItems[0].unitAmount)).toBe(true);
   });
 
@@ -198,5 +200,74 @@ describe("isEmptyDraft", () => {
       issueDate: ISSUE,
     });
     expect(isEmptyDraft(draft)).toBe(true);
+  });
+});
+
+describe("netDaysFromPaymentTerms", () => {
+  it("reads the generator's own options", () => {
+    expect(netDaysFromPaymentTerms("Net 15 from invoice date")).toBe(15);
+    expect(netDaysFromPaymentTerms("Net 30 from invoice date")).toBe(30);
+    expect(netDaysFromPaymentTerms("Due upon receipt")).toBe(0);
+  });
+
+  // The field is free text, and real proposals use it that way.
+  it("reads a net figure out of free text", () => {
+    expect(netDaysFromPaymentTerms("Net 45 on invoice, 20% due at acceptance")).toBe(45);
+    expect(netDaysFromPaymentTerms("net7")).toBe(7);
+  });
+
+  // "Due upon receipt, Net 30 thereafter" means due on receipt.
+  it("prefers due-on-receipt over a later net figure", () => {
+    expect(netDaysFromPaymentTerms("Due upon receipt, Net 30 thereafter")).toBe(0);
+  });
+
+  it("falls back to the default rather than guessing", () => {
+    for (const value of ["50% deposit / 50% at launch", "Monthly subscription billing", "", null, undefined]) {
+      expect(netDaysFromPaymentTerms(value), String(value)).toBe(defaultNetDays);
+    }
+  });
+
+  // A typo must not date an invoice years into the future.
+  it("ignores an implausible figure", () => {
+    expect(netDaysFromPaymentTerms("Net 999")).toBe(defaultNetDays);
+  });
+});
+
+describe("line pricing keeps the agreed unit price", () => {
+  // computeProposalTotals rounds `amount` to cents, so lineTotal/quantity does
+  // NOT recover the agreed price: 3 x $0.655 stores 1.97, and 1.97/3 rounds to
+  // 0.66 — a price the client never agreed to, multiplying back to 1.98.
+  it("uses the stored price rather than dividing the rounded total", () => {
+    const draft = buildDraftInvoice({
+      totals: totals({
+        lineItems: [line({ name: "Mileage", unit: "Mile", qty: 3, price: 0.655, amount: 1.97 })],
+        subtotal: 1.97,
+        total: 1.97,
+      }),
+      kind: "full",
+      issueDate: ISSUE,
+    });
+    expect(draft.lineItems[0].unitAmount).toBe(0.66);
+    expect(draft.lineItems[0].lineTotal).toBe(1.97);
+  });
+
+  it("falls back to the derived figure when the row carries no price", () => {
+    const draft = buildDraftInvoice({
+      totals: totals({ lineItems: [line({ qty: 2, price: 0, amount: 300 })], subtotal: 300, total: 300 }),
+      kind: "full",
+      issueDate: ISSUE,
+    });
+    expect(draft.lineItems[0].unitAmount).toBe(150);
+  });
+
+  // A quantity between 0 and 0.005 rounds to zero, which violates the
+  // `quantity > 0` CHECK and fails the whole line write.
+  it("never stores a quantity that rounds to zero", () => {
+    const draft = buildDraftInvoice({
+      totals: totals({ lineItems: [line({ qty: 0.004, price: 0, amount: 500 })], subtotal: 500, total: 500 }),
+      kind: "full",
+      issueDate: ISSUE,
+    });
+    expect(draft.lineItems[0].quantity).toBeGreaterThan(0);
   });
 });

@@ -49,6 +49,15 @@ export interface ClientWorkflowFacts {
   proposals: readonly ProposalFact[];
   invoices: readonly InvoiceFact[];
   requiredDocuments: readonly DocumentRequirementFact[];
+  /**
+   * False when the requirements could not be read at all (table absent from the
+   * schema cache, or the read was filtered to nothing).
+   *
+   * Needed because "no outstanding documents" and "no idea what the documents
+   * are" are the same empty list, and only one of them should open a gate. See
+   * the Active Company case below.
+   */
+  requiredDocumentsKnown: boolean;
   hasPrimaryContact: boolean;
 }
 
@@ -256,11 +265,17 @@ function requirementsFor(stage: LifecycleStage, facts: ClientWorkflowFacts): Sta
         },
         {
           code: "required_documents",
-          label:
-            outstanding.length > 0
+          // Unknown requirements do NOT satisfy this. An unreadable list and a
+          // genuinely empty one arrive here as the same empty array, and every
+          // other gate in this file fails closed when its evidence is missing —
+          // this one guards the strongest claim the system makes ("we are live
+          // under contract for this company"), so it must not be the exception.
+          label: !facts.requiredDocumentsKnown
+            ? "Confirm the documents required for active status (the requirement list could not be read)"
+            : outstanding.length > 0
               ? `File the documents required for active status (${outstanding.map((d) => d.title).join(", ")})`
               : "File the documents required for active status",
-          satisfied: outstanding.length === 0,
+          satisfied: facts.requiredDocumentsKnown && outstanding.length === 0,
         },
       ];
     }

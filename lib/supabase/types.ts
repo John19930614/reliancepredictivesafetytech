@@ -1077,6 +1077,7 @@ export type Database = {
           postal_code: string | null
           proposal_seq: number
           source: string | null
+          stage_changed_at: string | null
           state: string | null
           status: string
           updated_at: string | null
@@ -1101,6 +1102,7 @@ export type Database = {
           postal_code?: string | null
           proposal_seq?: number
           source?: string | null
+          stage_changed_at?: string | null
           state?: string | null
           status?: string
           updated_at?: string | null
@@ -1125,6 +1127,7 @@ export type Database = {
           postal_code?: string | null
           proposal_seq?: number
           source?: string | null
+          stage_changed_at?: string | null
           state?: string | null
           status?: string
           updated_at?: string | null

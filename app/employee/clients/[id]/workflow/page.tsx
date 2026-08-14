@@ -89,11 +89,21 @@ export default async function ClientWorkflowPage({ params }: PageProps) {
     return <section className="portal-card empty-state">The client workflow is not visible for this account.</section>;
   }
 
-  const { data: client } = await supabase
+  // stage_changed_at is new in the same migration as client_invoices. Selecting
+  // a column that does not exist makes PostgREST return 42703 with data: null,
+  // which would render as notFound() — reporting the client as nonexistent and
+  // taking the whole page down, rather than the graceful degradation the rest of
+  // this route is built for. Fall back to the pre-migration column set instead.
+  const baseColumns = "id, name, lifecycle_stage, status, owner, company_type, updated_at";
+  const full = await supabase
     .from("company_clients")
-    .select("id, name, lifecycle_stage, status, owner, company_type, stage_changed_at, updated_at")
+    .select(`${baseColumns}, stage_changed_at`)
     .eq("id", id)
     .maybeSingle();
+
+  const { data: client } = full.error
+    ? await supabase.from("company_clients").select(baseColumns).eq("id", id).maybeSingle()
+    : full;
 
   if (!client) notFound();
 
@@ -148,7 +158,11 @@ export default async function ClientWorkflowPage({ params }: PageProps) {
         ? (historyResult.data as TransitionRow[])
         : [];
 
-  const held = daysSince(client.stage_changed_at ?? client.updated_at);
+  // Null on rows that predate the column, and on the pre-migration fallback
+  // above — updated_at is the closest honest answer in both cases.
+  const held = daysSince(
+    (client as { stage_changed_at?: string | null }).stage_changed_at ?? client.updated_at,
+  );
 
   return (
     <>

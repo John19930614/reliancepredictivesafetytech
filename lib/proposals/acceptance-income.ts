@@ -186,14 +186,41 @@ async function advanceClientStage(db: LooseClient, clientId: string): Promise<bo
   const current = (client.lifecycle_stage as string | null) ?? "";
   if (isAtOrPastWon(current)) return false;
 
+  const movedAt = new Date().toISOString();
+
   const { data: updated } = await db
     .from("company_clients")
-    .update({ lifecycle_stage: wonLifecycleStage })
+    .update({ lifecycle_stage: wonLifecycleStage, stage_changed_at: movedAt })
     .eq("id", clientId)
     // Conditional on what was read, so this cannot overwrite a stage someone
     // set by hand between the read and the write.
     .eq("lifecycle_stage", current)
     .select("id");
 
-  return Array.isArray(updated) && updated.length > 0;
+  if (!Array.isArray(updated) || updated.length === 0) return false;
+
+  // Record the move in the workflow's own history. This path writes
+  // lifecycle_stage directly — acceptance IS the evidence, so it is allowed to
+  // skip the gates — but without a row here the client workflow page reports
+  // "No stage moves recorded yet" for a client whose stage demonstrably moved,
+  // and the automated mover is exactly the one a reviewer would look for.
+  // Best-effort, like everything else in this module: the acceptance is the
+  // business event and must not fail over its own bookkeeping.
+  const { error: transitionError } = await db.from("client_stage_transitions").insert({
+    client_id: clientId,
+    from_stage: current || null,
+    to_stage: wonLifecycleStage,
+    was_override: false,
+    override_reason: null,
+    blocked_reasons: [],
+    // No session on two of the three acceptance paths, so there is no user to
+    // name. The audit event carries the actor where one exists.
+    changed_by: null,
+    changed_at: movedAt,
+  });
+  if (transitionError) {
+    console.error("Could not record the acceptance stage transition.", transitionError);
+  }
+
+  return true;
 }

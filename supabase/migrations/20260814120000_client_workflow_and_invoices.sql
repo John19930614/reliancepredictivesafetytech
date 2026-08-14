@@ -37,11 +37,17 @@
 /* 1. How long has this client been where they are                            */
 /* -------------------------------------------------------------------------- */
 
+-- NULLABLE, and deliberately WITHOUT a default. `add column ... not null default
+-- now()` would stamp the migration's own timestamp onto every existing row, so
+-- a client parked on Legal Review for eight months would report "0 days on this
+-- step" the morning after deploy and count up from there forever. Left null,
+-- every reader falls back to updated_at, which is the closest honest answer for
+-- rows that predate the column.
 alter table public.company_clients
-  add column if not exists stage_changed_at timestamptz not null default now();
+  add column if not exists stage_changed_at timestamptz;
 
 comment on column public.company_clients.stage_changed_at is
-  'When lifecycle_stage last changed. Set by the advance/override server actions, not by a trigger, so a bulk backfill of another column cannot reset every clock.';
+  'When lifecycle_stage last changed. Set by the code paths that write lifecycle_stage, not by a trigger, so a bulk backfill of another column cannot reset every clock. Null on rows that predate the column — readers fall back to updated_at.';
 
 /* -------------------------------------------------------------------------- */
 /* 2. Stage transition history                                                */
@@ -64,7 +70,12 @@ create table if not exists public.client_stage_transitions (
   -- its meaning after the underlying checklist is later completed.
   blocked_reasons  jsonb not null default '[]'::jsonb,
   changed_by       uuid references auth.users(id) on delete set null,
-  changed_at       timestamptz not null default now()
+  changed_at       timestamptz not null default now(),
+
+  -- A forced move without a stated reason is the one row shape this table must
+  -- never hold: its whole purpose is answering "why was this step skipped?".
+  constraint client_stage_transitions_override_has_reason
+    check (not was_override or override_reason is not null)
 );
 
 create index if not exists client_stage_transitions_client_idx
@@ -76,13 +87,22 @@ create index if not exists client_stage_transitions_override_idx
 
 alter table public.client_stage_transitions enable row level security;
 
+drop policy if exists "Employees can read stage transitions" on public.client_stage_transitions;
 create policy "Employees can read stage transitions"
   on public.client_stage_transitions for select to authenticated
   using (public.is_company_portal_employee());
 
+-- changed_by is pinned to the caller, exactly as client_proposal_approvals pins
+-- decided_by: without it an employee could POST a clean was_override = false
+-- row, or attribute a forced move to a colleague, and the history would be
+-- worth nothing precisely where it matters most.
+drop policy if exists "Employees can record stage transitions" on public.client_stage_transitions;
 create policy "Employees can record stage transitions"
   on public.client_stage_transitions for insert to authenticated
-  with check (public.is_company_portal_employee());
+  with check (
+    public.is_company_portal_employee()
+    and changed_by = (select auth.uid())
+  );
 
 -- No UPDATE and no DELETE policy: the history is appended to, never edited.
 -- Same posture as client_proposal_approvals.
@@ -117,6 +137,12 @@ create table if not exists public.client_invoices (
   invoice_number  text not null unique,
   status          text not null default 'draft'
                     check (status in ('draft', 'issued', 'paid', 'void')),
+  -- WHAT this invoice bills. Persisted rather than left in the notes text so
+  -- the duplicate guard below can be a database constraint: "full" already
+  -- includes the deposit, so raising deposit AND full bills the client 200% of
+  -- the contract, and free-text notes cannot be checked for that.
+  kind            text not null default 'full'
+                    check (kind in ('deposit', 'full', 'balance')),
   issue_date      date,
   due_date        date,
   currency        text not null default 'USD' check (char_length(currency) = 3),
@@ -152,6 +178,13 @@ create index if not exists client_invoices_proposal_idx
 create index if not exists client_invoices_status_idx
   on public.client_invoices (status);
 
+-- The duplicate-billing backstop. A contract may carry at most one live invoice
+-- of each kind; a voided one releases the slot so a mistake can be re-raised.
+-- The application checks this too, but the application is not the only caller.
+create unique index if not exists client_invoices_one_live_per_kind
+  on public.client_invoices (proposal_id, kind)
+  where proposal_id is not null and status <> 'void';
+
 create table if not exists public.client_invoice_line_items (
   id           uuid primary key default gen_random_uuid(),
   invoice_id   uuid not null references public.client_invoices(id) on delete cascade,
@@ -175,17 +208,26 @@ create or replace function public.allocate_client_invoice_number()
 returns trigger
 language plpgsql
 security definer
-set search_path = public, pg_catalog
+-- pg_catalog FIRST. Naming it explicitly removes the implicit priority it
+-- normally has, so `public, pg_catalog` would let a public.lpad() shadow the
+-- builtin and run as the definer. This is the function that mints financial
+-- identifiers; it resolves its builtins before anything a caller could create.
+set search_path = pg_catalog, public
 as $$
 declare
   v_year integer;
   v_seq  integer;
 begin
-  -- An explicit number (a migration, a backfill, an import) is respected as-is.
-  if new.invoice_number is not null then
-    return new;
-  end if;
-
+  -- The number is ALWAYS allocated here, never accepted from the caller.
+  --
+  -- The proposal-number allocator this is modelled on honours a supplied value
+  -- so a backfill can keep historical numbers. Copying that here would be a
+  -- denial-of-service: RLS lets any employee insert, so squatting a number just
+  -- ahead of the counter makes every later insert collide on the unique index,
+  -- and the failed statement rolls the counter increment back with it — wedging
+  -- invoice creation for the rest of the year, on a counter table nobody has a
+  -- policy to read or repair. There is no invoice history to import, so the
+  -- hatch buys nothing and costs that.
   v_year := extract(year from coalesce(new.issue_date, current_date))::integer;
 
   insert into public.client_invoice_counters (year, last_seq)
@@ -224,42 +266,112 @@ for each row execute function public.set_updated_at();
 alter table public.client_invoices enable row level security;
 alter table public.client_invoice_line_items enable row level security;
 
+-- THE POLICIES ARE THE ENFORCEMENT, NOT THE UI.
+--
+-- lib/pipeline/policy.ts restricts issuing, paying and voiding to admins, and
+-- the server actions honour that — but those checks run in Node. Every signed-in
+-- employee holds a real Supabase session (lib/supabase/client.ts), and the sales
+-- board already writes company_clients straight from the browser, so a
+-- hand-crafted PostgREST call is a given rather than a hypothesis. Written the
+-- obvious way — read/insert/update all on is_company_portal_employee() — any
+-- employee could PATCH an invoice to paid, re-price one the client has already
+-- seen, or POST a fabricated issued invoice and thereby open the Invoicing gate
+-- on their own. These policies are the backstop, in the words of
+-- 20260811120000_proposal_maker_checker.sql, that "keeps a hand-crafted
+-- PostgREST call from writing an approval it could not obtain through the UI".
+
+drop policy if exists "Employees can read invoices" on public.client_invoices;
 create policy "Employees can read invoices"
   on public.client_invoices for select to authenticated
   using (public.is_company_portal_employee());
 
-create policy "Employees can create invoices"
+-- Raising a DRAFT is ordinary work, so every portal role may do it — but only
+-- as a draft, and only in their own name. Issuing is a separate act below.
+drop policy if exists "Employees can create draft invoices" on public.client_invoices;
+create policy "Employees can create draft invoices"
   on public.client_invoices for insert to authenticated
-  with check (public.is_company_portal_employee());
+  with check (
+    public.is_company_portal_employee()
+    and status = 'draft'
+    and issued_at is null
+    and paid_at is null
+    and created_by = (select auth.uid())
+  );
 
-create policy "Employees can update invoices"
+-- Issuing asks a client for money; paying asserts it arrived; voiding retires a
+-- numbered record. All three are admin-only in the application, and now here.
+drop policy if exists "Employees can update invoices" on public.client_invoices;
+drop policy if exists "Admins can settle invoices" on public.client_invoices;
+create policy "Admins can settle invoices"
   on public.client_invoices for update to authenticated
-  using (public.is_company_portal_employee())
-  with check (public.is_company_portal_employee());
+  using (public.is_company_portal_admin())
+  with check (public.is_company_portal_admin());
 
--- Deleting an invoice destroys a numbered financial record; voiding is the
--- supported route and keeps the number spent. Admins only, matching the
--- delete-is-admin posture on company_files and the docusign envelope table.
+-- Deleting destroys a numbered financial record; voiding is the supported route
+-- and keeps the number spent. The one exception is the creator discarding their
+-- own untouched draft, which is what the rollback path in
+-- createInvoiceFromProposal needs when the line write fails — without it that
+-- rollback silently does nothing for a non-admin and strands an invoice holding
+-- a spent number with no lines behind it.
+drop policy if exists "Admins can delete invoices" on public.client_invoices;
 create policy "Admins can delete invoices"
   on public.client_invoices for delete to authenticated
-  using (public.is_company_portal_admin());
+  using (
+    public.is_company_portal_admin()
+    or (status = 'draft' and created_by = (select auth.uid()) and public.is_company_portal_employee())
+  );
 
+drop policy if exists "Employees can read invoice lines" on public.client_invoice_line_items;
 create policy "Employees can read invoice lines"
   on public.client_invoice_line_items for select to authenticated
   using (public.is_company_portal_employee());
 
+/*
+ * Lines may only be written while their invoice is still a draft. Once it is
+ * issued the document has been seen by the client, and a line edit would change
+ * what it says while client_invoices.total stayed put — or empty an issued
+ * invoice entirely, leaving the "spent number and a total nothing explains"
+ * state createInvoiceFromProposal goes out of its way to avoid.
+ */
+drop policy if exists "Employees can create invoice lines" on public.client_invoice_line_items;
 create policy "Employees can create invoice lines"
   on public.client_invoice_line_items for insert to authenticated
-  with check (public.is_company_portal_employee());
+  with check (
+    public.is_company_portal_employee()
+    and exists (
+      select 1 from public.client_invoices i
+      where i.id = invoice_id and i.status = 'draft'
+    )
+  );
 
+drop policy if exists "Employees can update invoice lines" on public.client_invoice_line_items;
 create policy "Employees can update invoice lines"
   on public.client_invoice_line_items for update to authenticated
-  using (public.is_company_portal_employee())
-  with check (public.is_company_portal_employee());
+  using (
+    public.is_company_portal_employee()
+    and exists (
+      select 1 from public.client_invoices i
+      where i.id = invoice_id and i.status = 'draft'
+    )
+  )
+  with check (
+    public.is_company_portal_employee()
+    and exists (
+      select 1 from public.client_invoices i
+      where i.id = invoice_id and i.status = 'draft'
+    )
+  );
 
+drop policy if exists "Employees can delete invoice lines" on public.client_invoice_line_items;
 create policy "Employees can delete invoice lines"
   on public.client_invoice_line_items for delete to authenticated
-  using (public.is_company_portal_employee());
+  using (
+    public.is_company_portal_employee()
+    and exists (
+      select 1 from public.client_invoices i
+      where i.id = invoice_id and i.status = 'draft'
+    )
+  );
 
 /* -------------------------------------------------------------------------- */
 /* 5. Ledger link                                                             */

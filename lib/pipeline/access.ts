@@ -8,6 +8,12 @@ export interface PipelineAccess extends PipelineRoleFlags {
   supabase: any;
   userId: string | null;
   role: string | null;
+  /**
+   * Who the activity feed names. company_sales_activities.owner is a person —
+   * app/m/actions.ts writes user.email there — so the workflow needs it too;
+   * writing the role string instead makes every stage move read "employee".
+   */
+  userEmail: string | null;
 }
 
 const denied: PipelineRoleFlags = {
@@ -23,7 +29,7 @@ const denied: PipelineRoleFlags = {
 export async function getPipelineAccess(): Promise<PipelineAccess> {
   const supabase = await createClient();
   if (!supabase) {
-    return { supabase: null, userId: null, role: null, ...denied };
+    return { supabase: null, userId: null, role: null, userEmail: null, ...denied };
   }
 
   const {
@@ -31,7 +37,7 @@ export async function getPipelineAccess(): Promise<PipelineAccess> {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return { supabase, userId: null, role: null, ...denied };
+    return { supabase, userId: null, role: null, userEmail: null, ...denied };
   }
 
   // Deliberately NOT .maybeSingle(), for the reason documented in
@@ -54,5 +60,5 @@ export async function getPipelineAccess(): Promise<PipelineAccess> {
 
   const flags = resolvePipelineRoleFlags(role, rows.length > 0);
 
-  return { supabase, userId: user.id, role, ...flags };
+  return { supabase, userId: user.id, role, userEmail: user.email ?? null, ...flags };
 }

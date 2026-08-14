@@ -22,8 +22,8 @@ import { getPipelineAccess } from "@/lib/pipeline/access";
 import { evaluateStageGate, describeBlockers } from "@/lib/pipeline/gates";
 import { loadClientWorkflowFacts } from "@/lib/pipeline/facts";
 import { checkOverrideReason } from "@/lib/pipeline/policy";
-import { isLifecycleStage, nextStage, stageDetail } from "@/lib/pipeline/stages";
-import { buildDraftInvoice, isEmptyDraft, type InvoiceKind } from "@/lib/invoices/draft";
+import { isLifecycleStage, nextStage } from "@/lib/pipeline/stages";
+import { buildDraftInvoice, isEmptyDraft, netDaysFromPaymentTerms, type InvoiceKind } from "@/lib/invoices/draft";
 import { isGeneratorState } from "@/lib/proposals/generator-state";
 import { computeProposalTotals } from "@/lib/proposals/pricing";
 
@@ -58,6 +58,31 @@ interface ClientRow {
   owner: string | null;
 }
 
+/**
+ * Loads the facts and evaluates the gate, turning a read failure into a result
+ * rather than an exception.
+ *
+ * loadClientWorkflowFacts re-throws anything that is not a missing relation, and
+ * it does so inside a Promise.all, so one transient error on any of six tables
+ * rejects the whole thing. Without this the rejection escapes the server action
+ * entirely and the step card — which is built around showing the operator a
+ * message — shows nothing at all. The read happens strictly before the write, so
+ * a failure here can never leave a stage half-moved.
+ */
+async function readGateFacts(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  client: ClientRow,
+): Promise<{ ok: boolean; gate?: ReturnType<typeof evaluateStageGate>; error?: string }> {
+  try {
+    const { facts } = await loadClientWorkflowFacts(supabase, client);
+    return { ok: true, gate: evaluateStageGate(facts) };
+  } catch (caught) {
+    console.error("Could not read the client workflow facts.", caught);
+    return { ok: false, error: "Could not check this client's outstanding steps just now. Try again in a moment." };
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* Stage movement                                                             */
 /* -------------------------------------------------------------------------- */
@@ -71,7 +96,7 @@ interface ClientRow {
  * be un-ticked between render and click.
  */
 export async function advanceClientStage(clientId: string): Promise<WorkflowActionResult> {
-  const { supabase, userId, role, canAdvance } = await getPipelineAccess();
+  const { supabase, userId, role, userEmail, canAdvance } = await getPipelineAccess();
   if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
   if (!canAdvance) return { ok: false, error: "You do not have permission to move clients through the pipeline." };
   if (!UUID.test(clientId)) return { ok: false, error: "Malformed client reference." };
@@ -95,8 +120,9 @@ export async function advanceClientStage(clientId: string): Promise<WorkflowActi
     };
   }
 
-  const { facts } = await loadClientWorkflowFacts(supabase, current);
-  const gate = evaluateStageGate(facts);
+  const loaded = await readGateFacts(supabase, current);
+  if (!loaded.ok || !loaded.gate) return { ok: false, error: loaded.error };
+  const gate = loaded.gate;
 
   if (!gate.canAdvance) {
     const outstanding = describeBlockers(gate);
@@ -112,6 +138,7 @@ export async function advanceClientStage(clientId: string): Promise<WorkflowActi
     supabase,
     userId,
     role,
+    userEmail,
     client: current,
     target,
     wasOverride: false,
@@ -130,7 +157,7 @@ export async function advanceClientStage(clientId: string): Promise<WorkflowActi
  * means something after somebody later ticks the boxes.
  */
 export async function overrideClientStage(clientId: string, reason: string): Promise<WorkflowActionResult> {
-  const { supabase, userId, role, canOverride } = await getPipelineAccess();
+  const { supabase, userId, role, userEmail, canOverride } = await getPipelineAccess();
   if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
   if (!canOverride) {
     return { ok: false, error: "Admin role required to move a client past an unfinished step." };
@@ -161,8 +188,9 @@ export async function overrideClientStage(clientId: string, reason: string): Pro
     };
   }
 
-  const { facts } = await loadClientWorkflowFacts(supabase, current);
-  const gate = evaluateStageGate(facts);
+  const loaded = await readGateFacts(supabase, current);
+  if (!loaded.ok || !loaded.gate) return { ok: false, error: loaded.error };
+  const gate = loaded.gate;
 
   // Nothing outstanding: this is an ordinary advance wearing an override's
   // clothes. Recording it as a forced move would put a false entry in the
@@ -172,6 +200,7 @@ export async function overrideClientStage(clientId: string, reason: string): Pro
       supabase,
       userId,
       role,
+      userEmail,
       client: current,
       target,
       wasOverride: false,
@@ -184,6 +213,7 @@ export async function overrideClientStage(clientId: string, reason: string): Pro
     supabase,
     userId,
     role,
+    userEmail,
     client: current,
     target,
     wasOverride: true,
@@ -197,6 +227,7 @@ interface ApplyStageMoveInput {
   supabase: any;
   userId: string;
   role: string | null;
+  userEmail: string | null;
   client: ClientRow;
   target: string;
   wasOverride: boolean;
@@ -245,7 +276,9 @@ async function applyStageMove(input: ApplyStageMoveInput): Promise<WorkflowActio
       ? `Moved past unfinished step. Reason: ${input.overrideReason}`
       : `Advanced from ${client.lifecycle_stage}.`,
     activity_date: movedAt.slice(0, 10),
-    owner: role ?? null,
+    // A person, not a role. company_sales_activities.owner is rendered as a
+    // name across the client record; app/m/actions.ts writes user.email here.
+    owner: input.userEmail,
   });
   if (activityError) {
     console.error("Could not log the client stage change.", activityError);
@@ -302,6 +335,42 @@ export async function createInvoiceFromProposal(
   if (!UUID.test(clientId) || !UUID.test(proposalId)) return { ok: false, error: "Malformed reference." };
   if (!INVOICE_KINDS.has(kind as InvoiceKind)) return { ok: false, error: "Choose a valid invoice type." };
 
+  const requested = kind as InvoiceKind;
+
+  // Nothing stopped an operator raising "Deposit only" and then leaving the
+  // dropdown on its default and raising "Full contract" — and `full` bills the
+  // whole contract INCLUDING the deposit, so that is 200% of the deal across two
+  // valid numbered documents. recordAcceptanceIncome guards the same way against
+  // filing a schedule twice; billing needs it more, not less. The partial unique
+  // index on (proposal_id, kind) is the backstop if this check is bypassed.
+  const { data: liveInvoices } = await supabase
+    .from("client_invoices")
+    .select("kind, invoice_number")
+    .eq("proposal_id", proposalId)
+    .neq("status", "void")
+    .limit(20);
+
+  const live: Array<{ kind: string; invoice_number: string }> = Array.isArray(liveInvoices) ? liveInvoices : [];
+  const clash = live.find((invoice) => invoice.kind === requested);
+  if (clash) {
+    return {
+      ok: false,
+      error: `This proposal already has a ${requested} invoice (${clash.invoice_number}). Void it first if it was raised in error.`,
+    };
+  }
+  if (requested === "full" && live.length > 0) {
+    return {
+      ok: false,
+      error: `This proposal has already been partly billed (${live.map((i) => i.invoice_number).join(", ")}). Raise the balance instead of the full contract.`,
+    };
+  }
+  if (requested !== "full" && live.some((invoice) => invoice.kind === "full")) {
+    return {
+      ok: false,
+      error: "The full contract has already been invoiced for this proposal, so there is nothing further to bill.",
+    };
+  }
+
   const { data: proposal } = await supabase
     .from("client_proposals")
     .select("id, title, proposal_number, client_id, status, form_data, accepted_revision_id")
@@ -336,8 +405,15 @@ export async function createInvoiceFromProposal(
   const issueDate = new Date().toISOString().slice(0, 10);
   const draft = buildDraftInvoice({
     totals: computeProposalTotals(state),
-    kind: kind as InvoiceKind,
+    kind: requested,
     issueDate,
+    // The contract's own payment-terms clause, which the client-facing document
+    // prints verbatim. Without this every invoice silently defaulted to Net 30,
+    // so a proposal reading "Due upon receipt" produced an invoice due in a
+    // month — contradicting the contract it was derived from.
+    netDays: netDaysFromPaymentTerms(
+      typeof state.fields?.paymentTerms === "string" ? state.fields.paymentTerms : null,
+    ),
   });
 
   if (isEmptyDraft(draft)) {
@@ -358,6 +434,7 @@ export async function createInvoiceFromProposal(
       client_id: clientId,
       proposal_id: proposalId,
       status: "draft",
+      kind: draft.kind,
       issue_date: draft.issueDate,
       due_date: draft.dueDate,
       subtotal: draft.subtotal,
@@ -385,8 +462,23 @@ export async function createInvoiceFromProposal(
 
   if (lineError) {
     // An invoice with no lines is worse than no invoice: it carries a spent
-    // number and a total nothing explains. Roll it back.
-    await supabase.from("client_invoices").delete().eq("id", created.id);
+    // number and a total nothing explains. Roll it back — and CHECK that the
+    // rollback happened. PostgREST reports no error for a DELETE that RLS
+    // filtered to zero rows, so an unchecked delete here reported failure to the
+    // operator while leaving the orphan in place.
+    const { data: removed } = await supabase
+      .from("client_invoices")
+      .delete()
+      .eq("id", created.id)
+      .select("id");
+
+    if (!Array.isArray(removed) || removed.length === 0) {
+      return {
+        ok: false,
+        error: `The invoice lines could not be written, and draft ${created.invoice_number} could not be withdrawn. Ask an admin to void it.`,
+      };
+    }
+
     return { ok: false, error: friendlyError(lineError, "Could not write the invoice lines.") };
   }
 
@@ -512,16 +604,4 @@ export async function settleInvoice(
 
   revalidateClient(invoice.client_id);
   return { ok: true };
-}
-
-/**
- * The advance label for a stage, for a client component that should not import
- * the stage table just to render a button.
- *
- * Exported as an async function because a `"use server"` file may only export
- * async functions — a plain const here throws at module evaluation the first
- * time any action in this file runs (see lib/guardrails/use-server-exports).
- */
-export async function getStageAdvanceLabel(stage: string): Promise<string> {
-  return stageDetail(stage)?.advanceLabel ?? "Advance";
 }

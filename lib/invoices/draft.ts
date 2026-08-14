@@ -57,6 +57,38 @@ export interface BuildDraftInvoiceInput {
 /** Standard payment terms when the proposal does not say otherwise. */
 export const defaultNetDays = 30;
 
+/** Longest terms we will read out of free text, so a typo cannot date an invoice years out. */
+const maxNetDays = 365;
+
+/**
+ * Reads payment terms off the proposal's own `paymentTerms` field.
+ *
+ * The generator offers "Net 15 from invoice date", "Net 30 from invoice date",
+ * "Due upon receipt", "50% deposit / 50% at launch" and "Monthly subscription
+ * billing", and the field is free text besides — real proposals carry things
+ * like "Net 45 on invoice, 20% due at acceptance". The client-facing document
+ * prints this clause verbatim, so an invoice that ignored it would contradict
+ * the contract it was derived from, always in the direction that delays cash.
+ *
+ * Anything unrecognised falls back to the default rather than guessing.
+ */
+export function netDaysFromPaymentTerms(terms: string | null | undefined): number {
+  if (typeof terms !== "string") return defaultNetDays;
+  const text = terms.toLowerCase();
+
+  // "Due upon receipt" is checked first: it carries no number, and a proposal
+  // reading "Due upon receipt, Net 30 thereafter" means the former.
+  if (text.includes("upon receipt") || text.includes("on receipt")) return 0;
+
+  const match = /net\s*(\d{1,3})/.exec(text);
+  if (match) {
+    const days = Number.parseInt(match[1], 10);
+    if (Number.isFinite(days) && days >= 0 && days <= maxNetDays) return days;
+  }
+
+  return defaultNetDays;
+}
+
 function round2(value: number): number {
   // Via cents, so 0.1 + 0.2 style drift cannot reach a stored money column.
   return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
@@ -154,16 +186,28 @@ export function buildDraftInvoice(input: BuildDraftInvoiceInput): DraftInvoice {
   }
 
   const lineItems: DraftInvoiceLine[] = totals.lineItems.map((row, index) => {
-    const quantity = row.qty > 0 ? round2(row.qty) : 1;
+    // Guard on the ROUNDED value, which is what gets stored: a quantity between
+    // 0 and 0.005 passes a `row.qty > 0` test and then rounds to zero, which
+    // violates the `quantity > 0` CHECK and fails the whole line write.
+    const rounded = round2(row.qty);
+    const quantity = rounded > 0 ? rounded : 1;
     const lineTotal = round2(row.amount);
+
+    // The AGREED unit price, not lineTotal/quantity. `amount` is already rounded
+    // to cents by computeProposalTotals, so dividing it back out loses the true
+    // price: three lines at the IRS $0.655 mileage rate store an amount of 1.97,
+    // and 1.97/3 re-rounds to 0.66 — a unit price the client never agreed to
+    // that multiplies back to 1.98. Falls back to the derived figure only when
+    // the row carries no usable price.
+    const agreed = round2(row.price);
+    const unitAmount = agreed > 0 ? agreed : round2(lineTotal / quantity);
+
     return {
       // The unit travels with the stored price, so a repriced catalog cannot
       // relabel an invoice already raised (same reasoning as ProposalLineItem).
       description: [row.name, row.unit ? `(per ${row.unit})` : ""].filter(Boolean).join(" "),
       quantity,
-      // Derived from the stored amount rather than the catalog price, so the
-      // line always multiplies back to the amount the client agreed to.
-      unitAmount: round2(lineTotal / quantity),
+      unitAmount,
       lineTotal,
       sortOrder: (index + 1) * 10,
     };

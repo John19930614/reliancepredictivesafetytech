@@ -48,7 +48,7 @@ type SalesPipelineManagerProps = {
   demoRequests: DemoRequest[];
 };
 
-const negotiatingStages = new Set(["Proposal Sent", "Legal Review", "Contract Sent", "Signed / Won", "Invoicing"]);
+const negotiatingStages = new Set(["Proposal Sent", "Legal Review", "Contract Sent", "Signed / Won"]);
 // Widened to string: lifecycle_stage is free text in the database, so the
 // lookup has to accept a value that is not a known stage and simply miss.
 const liveStages = new Set<string>(pipelineLiveStages);
@@ -203,7 +203,13 @@ export function SalesPipelineManager({ initialClients, demoRequests }: SalesPipe
     setClients((current) => current.map((item) => (item.id === client.id ? { ...item, lifecycle_stage } : item)));
     const supabase = createClient();
     if (supabase) {
-      const { error } = await supabase.from("company_clients").update({ lifecycle_stage }).eq("id", client.id);
+      // stage_changed_at travels with every lifecycle_stage write. Without it
+      // the workflow view's "N days on this step" quietly means "days since the
+      // last move made through the workflow page", which is not what it says.
+      const { error } = await supabase
+        .from("company_clients")
+        .update({ lifecycle_stage, stage_changed_at: new Date().toISOString() })
+        .eq("id", client.id);
       if (error) {
         console.error(error);
         setClients((current) => current.map((item) => (item.id === client.id ? { ...item, lifecycle_stage: previousStage } : item)));

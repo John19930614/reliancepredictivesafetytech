@@ -80,6 +80,10 @@ function createSupabaseMock(routes: Record<string, Route>) {
         record.filters.push([column, value]);
         return api;
       },
+      neq(column: string, value: unknown) {
+        record.filters.push([`neq:${column}`, value]);
+        return api;
+      },
       order: () => api,
       limit: () => api,
       maybeSingle: () => Promise.resolve(resolve(record)),
@@ -114,6 +118,7 @@ function signIn(role: string | null, supabase: unknown) {
     supabase,
     userId: "user-1",
     role,
+    userEmail: "dana@example.com",
     ...flags,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
@@ -142,6 +147,7 @@ function facts(over: Partial<ClientWorkflowFacts> = {}): ClientWorkflowFacts {
     proposals: [],
     invoices: [],
     requiredDocuments: [],
+    requiredDocumentsKnown: true,
     hasPrimaryContact: false,
     ...over,
   };
@@ -270,6 +276,9 @@ describe("advanceClientStage", () => {
     // Compare-and-set on the stage we read, so a concurrent move is refused
     // rather than silently overwritten.
     expect(update?.filters).toContainEqual(["lifecycle_stage", "Signed / Won"]);
+
+    const activity = findCall(supabase, "company_sales_activities", "insert");
+    expect(activity?.payload).toMatchObject({ owner: "dana@example.com" });
 
     const transition = findCall(supabase, "client_stage_transitions", "insert");
     expect(transition?.payload).toMatchObject({
@@ -507,6 +516,7 @@ describe("createInvoiceFromProposal", () => {
   it("raises a draft invoice with lines, and audits it as billing", async () => {
     const supabase = createSupabaseMock({
       "client_proposals:select": { data: proposalRow() },
+      "client_invoices:select": { data: [] },
       "client_invoices:insert": { data: { id: INVOICE_ID, invoice_number: "RPS-INV-2026-0001" } },
       "client_invoice_line_items:insert": {},
     });
@@ -560,7 +570,10 @@ describe("createInvoiceFromProposal", () => {
   });
 
   it("tells the operator to raise a full invoice when there is no deposit", async () => {
-    const supabase = createSupabaseMock({ "client_proposals:select": { data: proposalRow() } });
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposalRow() },
+      "client_invoices:select": { data: [] },
+    });
     signIn("employee", supabase);
 
     const result = await createInvoiceFromProposal(CLIENT_ID, PROPOSAL_ID, "deposit");
@@ -573,6 +586,7 @@ describe("createInvoiceFromProposal", () => {
   it("bills only the deposit when the contract carries one", async () => {
     const supabase = createSupabaseMock({
       "client_proposals:select": { data: proposalRow({ form_data: generatorStateWithDeposit }) },
+      "client_invoices:select": { data: [] },
       "client_invoices:insert": { data: { id: INVOICE_ID, invoice_number: "RPS-INV-2026-0003" } },
       "client_invoice_line_items:insert": {},
     });
@@ -601,6 +615,7 @@ describe("createInvoiceFromProposal", () => {
         }),
       },
       "client_proposal_revisions:select": { data: { form_data: generatorState } },
+      "client_invoices:select": { data: [] },
       "client_invoices:insert": { data: { id: INVOICE_ID, invoice_number: "RPS-INV-2026-0004" } },
       "client_invoice_line_items:insert": {},
     });
@@ -625,9 +640,10 @@ describe("createInvoiceFromProposal", () => {
   it("rolls the invoice back when the line write fails", async () => {
     const supabase = createSupabaseMock({
       "client_proposals:select": { data: proposalRow() },
+      "client_invoices:select": { data: [] },
       "client_invoices:insert": { data: { id: INVOICE_ID, invoice_number: "RPS-INV-2026-0002" } },
       "client_invoice_line_items:insert": { error: { message: "boom" } },
-      "client_invoices:delete": {},
+      "client_invoices:delete": { data: [{ id: INVOICE_ID }] },
     });
     signIn("employee", supabase);
 
@@ -637,6 +653,97 @@ describe("createInvoiceFromProposal", () => {
     const rollback = findCall(supabase, "client_invoices", "delete");
     expect(rollback?.filters).toContainEqual(["id", INVOICE_ID]);
     expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("records what was billed, so the duplicate guard has something to check", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposalRow() },
+      "client_invoices:select": { data: [] },
+      "client_invoices:insert": { data: { id: INVOICE_ID, invoice_number: "RPS-INV-2026-0009" } },
+      "client_invoice_line_items:insert": {},
+    });
+    signIn("employee", supabase);
+
+    await createInvoiceFromProposal(CLIENT_ID, PROPOSAL_ID, "full");
+
+    expect(findCall(supabase, "client_invoices", "insert")?.payload).toMatchObject({ kind: "full" });
+  });
+
+  // "full" bills the whole contract INCLUDING the deposit, so deposit + full is
+  // 200% of the deal across two valid numbered documents.
+  it("refuses a second invoice of the same kind", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposalRow() },
+      "client_invoices:select": { data: [{ kind: "full", invoice_number: "RPS-INV-2026-0001" }] },
+    });
+    signIn("employee", supabase);
+
+    const result = await createInvoiceFromProposal(CLIENT_ID, PROPOSAL_ID, "full");
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("RPS-INV-2026-0001");
+    expect(findCall(supabase, "client_invoices", "insert")).toBeUndefined();
+  });
+
+  it("points at the balance when a deposit has already been billed", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposalRow() },
+      "client_invoices:select": { data: [{ kind: "deposit", invoice_number: "RPS-INV-2026-0002" }] },
+    });
+    signIn("employee", supabase);
+
+    const result = await createInvoiceFromProposal(CLIENT_ID, PROPOSAL_ID, "full");
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("balance");
+    expect(findCall(supabase, "client_invoices", "insert")).toBeUndefined();
+  });
+
+  it("refuses a deposit once the full contract has been billed", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposalRow() },
+      "client_invoices:select": { data: [{ kind: "full", invoice_number: "RPS-INV-2026-0003" }] },
+    });
+    signIn("employee", supabase);
+
+    expect((await createInvoiceFromProposal(CLIENT_ID, PROPOSAL_ID, "deposit")).ok).toBe(false);
+  });
+
+  // The guard reads only non-void invoices, so a mistake can be re-raised.
+  it("scopes the duplicate check to this proposal and skips voided invoices", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposalRow() },
+      "client_invoices:select": { data: [] },
+      "client_invoices:insert": { data: { id: INVOICE_ID, invoice_number: "RPS-INV-2026-0010" } },
+      "client_invoice_line_items:insert": {},
+    });
+    signIn("employee", supabase);
+
+    expect((await createInvoiceFromProposal(CLIENT_ID, PROPOSAL_ID, "full")).ok).toBe(true);
+
+    const read = supabase.calls.find((c) => c.table === "client_invoices" && c.op === "select");
+    expect(read?.filters).toContainEqual(["proposal_id", PROPOSAL_ID]);
+    expect(read?.filters).toContainEqual(["neq:status", "void"]);
+  });
+
+  // DELETE on an invoice is admin-only, and PostgREST reports no error for a
+  // delete RLS filtered to zero rows. Unchecked, the rollback silently left an
+  // orphan holding a spent number while telling the operator it had failed.
+  it("says so when the rollback could not remove the draft", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposalRow() },
+      "client_invoices:select": { data: [] },
+      "client_invoices:insert": { data: { id: INVOICE_ID, invoice_number: "RPS-INV-2026-0011" } },
+      "client_invoice_line_items:insert": { error: { message: "boom" } },
+      "client_invoices:delete": { data: [] },
+    });
+    signIn("employee", supabase);
+
+    const result = await createInvoiceFromProposal(CLIENT_ID, PROPOSAL_ID, "full");
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("RPS-INV-2026-0011");
+    expect(result.error).toContain("void");
   });
 });
 

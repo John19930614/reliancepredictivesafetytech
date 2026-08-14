@@ -78,12 +78,17 @@ export function InvoicePanel({
     setError(null);
     setNotice(null);
     startTransition(async () => {
-      const result = await action();
-      if (result.ok) {
-        if (success) setNotice(success);
-        router.refresh();
-      } else {
-        setError(result.error ?? "Could not complete that.");
+      try {
+        const result = await action();
+        if (result.ok) {
+          if (success) setNotice(success);
+          router.refresh();
+        } else {
+          setError(result.error ?? "Could not complete that.");
+        }
+      } catch {
+        // Never leave a money action looking like it silently did nothing.
+        setError("Something went wrong reaching the server. Try again in a moment.");
       }
     });
   }

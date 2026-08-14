@@ -10,6 +10,7 @@ function facts(over: Partial<ClientWorkflowFacts> = {}): ClientWorkflowFacts {
     proposals: [],
     invoices: [],
     requiredDocuments: [],
+    requiredDocumentsKnown: true,
     hasPrimaryContact: false,
     ...over,
   };
@@ -264,6 +265,23 @@ describe("Active Company — going live is a claim that has to be backed", () =>
       }),
     );
     expect(result.canAdvance).toBe(true);
+  });
+
+  // "No outstanding documents" and "no idea what the documents are" arrive here
+  // as the same empty array. Only one of them should open the gate — this is the
+  // one gate that used to fail OPEN when its evidence could not be read.
+  it("stays shut when the requirement list could not be read at all", () => {
+    const result = evaluateStageGate(
+      facts({
+        stage: "Active Company",
+        checklist: approval,
+        requiredDocuments: [],
+        requiredDocumentsKnown: false,
+      }),
+    );
+    expect(result.canAdvance).toBe(false);
+    expect(result.blockers.map((b) => b.code)).toContain("required_documents");
+    expect(result.blockers.find((b) => b.code === "required_documents")?.label).toContain("could not be read");
   });
 });
 

@@ -135,6 +135,10 @@ export async function loadClientWorkflowFacts(
       supabase
         .from("company_document_requirements")
         .select("id, title, category, lifecycle_stage, required_for_active")
+        // Ordered so the bound below truncates deterministically rather than
+        // dropping an arbitrary requirement — an omitted one reads as satisfied.
+        .order("lifecycle_stage", { ascending: true })
+        .order("title", { ascending: true })
         .limit(requirementLimit),
     ),
     readList<{ requirement_id: string | null; title: string | null; category: string | null; lifecycle_stage: string | null }>(
@@ -173,6 +177,9 @@ export async function loadClientWorkflowFacts(
       proposals: proposalFacts,
       invoices: invoiceFacts,
       requiredDocuments: documentFacts,
+      // The seeds define ~25 requirements, so an empty list means the read
+      // failed or the seed never ran — not that nothing is required.
+      requiredDocumentsKnown: !requirements.missing && requirements.rows.length > 0,
       hasPrimaryContact: contacts.rows.some((contact) => Boolean(contact.is_primary)),
     },
     invoices: invoices.rows,
