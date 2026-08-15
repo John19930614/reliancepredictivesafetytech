@@ -30,6 +30,7 @@
 --   drop function if exists public.guard_client_invoice_total();
 --   drop trigger if exists lock_company_slug on public.company_clients;
 --   drop function if exists public.lock_company_slug();
+--   drop function if exists public.company_slug_locked(uuid);
 --   -- restore the two allocators verbatim from their original migrations:
 --   --   public.allocate_client_proposal_number()  <- 20260809200000 section 2
 --   --   public.allocate_client_invoice_number()   <- 20260814120000 section 3
@@ -91,6 +92,7 @@ comment on column public.company_clients.company_slug is
 create or replace function public.lock_company_slug()
 returns trigger
 language plpgsql
+set search_path = pg_catalog, public
 as $$
 begin
   if old.company_slug is null then
@@ -140,6 +142,30 @@ alter table public.client_proposal_year_counters enable row level security;
 
 comment on table public.client_proposal_year_counters is
   'Last proposal sequence allocated per client per calendar year. Written only by allocate_client_proposal_number(); no RLS policy by design.';
+
+-- Because that table denies everyone, nothing in the app can ask the question
+-- the UI actually needs: "is this client's slug locked yet?". Without an answer
+-- the form has to guess from proposal numbers and let the trigger correct it,
+-- which shows the wrong control to the user and only tells them after they
+-- submit. This exposes the one boolean, and nothing else about the counters.
+create or replace function public.company_slug_locked(p_client uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = pg_catalog, public
+as $$
+  select exists (
+    select 1 from public.client_proposal_year_counters c
+     where c.client_id = p_client
+  );
+$$;
+
+revoke execute on function public.company_slug_locked(uuid) from public, anon;
+grant execute on function public.company_slug_locked(uuid) to authenticated;
+
+comment on function public.company_slug_locked(uuid) is
+  'True once any proposal number has been allocated for this client, i.e. once company_slug can no longer be changed. Reads the counter table the app is otherwise denied.';
 
 /* -------------------------------------------------------------------------- */
 /* 3. Per-proposal invoice counter                                             */

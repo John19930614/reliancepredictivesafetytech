@@ -18,7 +18,10 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
+import { friendlyError } from "@/lib/friendly-error";
 import { clientCodeRule, isValidClientCode, normalizeClientCode } from "@/lib/proposals/client-codes";
+import { companySlugRule, isValidCompanySlug, normalizeCompanySlug } from "@/lib/proposals/company-slug";
+import { getProposalAccess } from "@/lib/proposals/access";
 
 export interface CompanyActionResult {
   ok: boolean;
@@ -152,6 +155,12 @@ export async function saveCompanyAddress(
  * number: HUN-01). Decision of record from the 2026-08-07 build review:
  * whoever writes the client's first proposal assigns the code.
  *
+ * SUPERSEDED by assignCompanySlug below (decision of record, 2026-08-14) and
+ * no longer reachable from the UI. Kept, not deleted: proposals numbered HUN-01
+ * exist and are quoted back on client POs, so `client_code` still has to be
+ * readable — and a number nobody can explain is worse than an action nobody
+ * calls. New code wants assignCompanySlug.
+ *
  * Once set, the code is immutable here: proposals already numbered under it
  * are documents a client may be quoting back on a PO, and silently switching
  * the moniker would strand their references. The database rejects duplicates
@@ -240,6 +249,177 @@ export async function assignClientCode(
     };
   }
   return { ok: true, assignedCode: normalized, renumbered: typeof renumbered === "number" ? renumbered : 0 };
+}
+
+/**
+ * Assigns — or, while it is still legal to, corrects — the company slug that
+ * prefixes every proposal number for this client: WONDFOUSA-2026-001.
+ *
+ * DECISION OF RECORD (call 2026-08-14) REVERSING the 2026-08-07 build review
+ * that produced assignClientCode above. Code monikers are abandoned because the
+ * full company name makes a record unique AND readable — a human reading an
+ * invoice can tell whose it is without a lookup table.
+ *
+ * IMMUTABLE ONCE USED, not immutable once set. A slug may be corrected freely
+ * right up until this client is issued its first number; after that, changing it
+ * would orphan every proposal and invoice already carrying the old prefix. The
+ * DATABASE owns that rule (lock_company_slug, migration 20260815140000) because
+ * this action is not the only writer — the sales board writes company_clients
+ * straight from the browser — so the trigger's rejection is caught and
+ * translated here rather than pre-empted. The app cannot pre-empt it in any
+ * case: the counter table the trigger consults has RLS on with no policies, by
+ * design, so no signed-in user can read lock state directly.
+ *
+ * EVERY WRITE IS COMPARE-AND-SET. A first assignment demands the column still be
+ * NULL. A correction demands the exact value the caller was looking at when they
+ * decided to change it, passed as `expectedCurrentSlug` — omitting it can only
+ * ever assign, never overwrite. PostgREST reports no error for an UPDATE that
+ * matched zero rows, so both paths ask for the row back and read its absence as
+ * "someone else got there first", not as success.
+ *
+ * ADMIN ONLY, unlike assignClientCode, which gated on nothing but a session.
+ * A slug is a permanent prefix on documents a client signs, and the database
+ * will refuse to let anyone take it back once it is in use.
+ *
+ * Existing DRAFT proposals are renumbered onto the slug by
+ * renumber_client_draft_proposals() — sent, accepted or declined ones keep the
+ * reference the client was quoted, forever.
+ */
+export async function assignCompanySlug(
+  clientId: string,
+  slug: string,
+  /**
+   * The slug the caller believes is stored right now. Omit (or pass "") for
+   * "this company has none yet" — the only case that may create one.
+   */
+  expectedCurrentSlug?: string | null,
+): Promise<CompanyActionResult & { assignedSlug?: string; renumbered?: number }> {
+  if (!UUID.test(clientId)) return { ok: false, error: "Missing company id." };
+
+  // getProposalAccess calls supabase.auth.getUser() first and resolves the
+  // strongest ACTIVE role from user_roles. Reused rather than re-derived: it
+  // already carries the fix for a user holding two role rows, which used to
+  // collapse to "you must be signed in" for someone the database would have
+  // authorised.
+  const { supabase, userId } = await getProposalAccess();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+
+  // Employee, deliberately NOT admin — matching assignClientCode(), which this
+  // supersedes and which gates on requireEmployee().
+  //
+  // Admin-only reads as the safer choice and is the wrong one here. The slug is
+  // assigned from the new-proposal form, before the insert, because the number
+  // is allocated by a BEFORE INSERT trigger; a seller who cannot assign it
+  // cannot number a company's first proposal at all, and the decision of record
+  // (2026-08-07, carried forward on 2026-08-14) is that whoever writes the first
+  // proposal assigns the identifier. Requiring an admin would not protect
+  // anything either: company_clients UPDATE is is_company_portal_employee(), so
+  // any employee can already PATCH this column straight through PostgREST. The
+  // gate that actually matters is lock_company_slug(), which is in the database
+  // and applies to every path.
+
+  const normalized = normalizeCompanySlug(slug);
+  if (!isValidCompanySlug(normalized)) {
+    return { ok: false, error: `That doesn't work as a company slug. ${companySlugRule}` };
+  }
+
+  const { data: company, error: readError } = await supabase
+    .from("company_clients")
+    .select("id, name, company_slug")
+    .eq("id", clientId)
+    .maybeSingle();
+  if (readError) return { ok: false, error: readError.message };
+  if (!company) return { ok: false, error: "That company was not found, or you do not have permission to edit it." };
+
+  const existing = normalizeCompanySlug(company.company_slug as string | null | undefined);
+  if (existing === normalized) {
+    // Already exactly this. Idempotent so a double-submit is not an error.
+    return { ok: true, assignedSlug: existing, renumbered: 0 };
+  }
+
+  const expected = normalizeCompanySlug(expectedCurrentSlug);
+  if (existing !== "" && expected === "") {
+    return {
+      ok: false,
+      error:
+        `This company already uses the slug ${existing}. Open the company record to change it — and it can only be ` +
+        "changed until its first proposal number is issued.",
+    };
+  }
+  if (existing !== "" && expected !== existing) {
+    return {
+      ok: false,
+      error: `The slug changed to ${existing} since this page loaded. Reload and check before changing it.`,
+    };
+  }
+
+  // The compare-and-set. First assignment insists the column is still NULL;
+  // a correction insists on the value the caller was shown.
+  let write = supabase.from("company_clients").update({ company_slug: normalized }).eq("id", clientId);
+  write = existing === "" ? write.is("company_slug", null) : write.eq("company_slug", existing);
+  const { data: updated, error } = await write.select("id").maybeSingle();
+
+  if (error) {
+    const code = (error as { code?: string }).code ?? "";
+    const message = (error as { message?: string }).message ?? "";
+    // 23505 = the partial unique index on company_slug: someone else owns it.
+    if (code === "23505" || /duplicate key value/i.test(message)) {
+      return {
+        ok: false,
+        error: `Someone else owns the slug ${normalized} — another company already numbers its proposals under it. Pick a different one.`,
+      };
+    }
+    // lock_company_slug raises with errcode check_violation, which is the SAME
+    // code the format CHECK uses — so the message, not the code, is what tells
+    // the two apart. Matched on "locked", the word the trigger raises.
+    if (/locked/i.test(message)) {
+      return {
+        ok: false,
+        error:
+          `${existing || normalized} can no longer be changed — proposals have already been numbered under it, and ` +
+          "renaming it would leave those numbers pointing at a company that no longer exists under that name.",
+      };
+    }
+    return { ok: false, error: friendlyError({ code, message }, "Could not save the company slug.") };
+  }
+  if (!updated) {
+    return {
+      ok: false,
+      error: "The slug was not saved — this company may have just been given one. Reload and check.",
+    };
+  }
+
+  // Draft proposals move onto the new numbering immediately, so the document
+  // someone is about to send carries the slug that was just decided.
+  const { data: renumbered, error: renumberError } = await supabase.rpc("renumber_client_draft_proposals", {
+    p_client: clientId,
+  });
+
+  await recordAuditEvent(
+    buildDataAuditEvent(
+      "update",
+      "company_clients",
+      clientId,
+      userId,
+      existing === ""
+        ? `Assigned proposal slug ${normalized} to ${(company.name as string) ?? "a client company"}`
+        : `Changed proposal slug to ${normalized} (was ${existing}) on ${(company.name as string) ?? "a client company"}`,
+      { company_slug: existing === "" ? null : existing },
+      { company_slug: normalized },
+    ),
+  );
+
+  revalidateCompany(clientId);
+
+  if (renumberError) {
+    return {
+      ok: true,
+      assignedSlug: normalized,
+      renumbered: 0,
+      error: `The slug was saved, but existing drafts could not be renumbered: ${renumberError.message}`,
+    };
+  }
+  return { ok: true, assignedSlug: normalized, renumbered: typeof renumbered === "number" ? renumbered : 0 };
 }
 
 export interface CompanyContactInput {

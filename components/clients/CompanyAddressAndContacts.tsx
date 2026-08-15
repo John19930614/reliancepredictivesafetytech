@@ -15,9 +15,9 @@
 // bounds are enforced server-side too.
 
 import { useState, useTransition } from "react";
-import { Hash, MapPin, Plus, Save, Star, Trash2, Users } from "lucide-react";
+import { Hash, Lock, MapPin, Plus, Save, Star, Trash2, Users } from "lucide-react";
 import {
-  assignClientCode,
+  assignCompanySlug,
   deleteCompanyContact,
   saveCompanyAddress,
   saveCompanyContact,
@@ -25,7 +25,13 @@ import {
   type CompanyActionResult,
 } from "@/app/employee/clients/[id]/actions";
 import { formatAddressLines } from "@/lib/proposals/client-contacts";
-import { clientCodeRule, formatClientProposalNumber, suggestClientCode } from "@/lib/proposals/client-codes";
+import {
+  companySlugPattern,
+  companySlugRule,
+  formatProposalNumber,
+  normalizeCompanySlug,
+  suggestCompanySlug,
+} from "@/lib/proposals/company-slug";
 
 export interface CompanyContactRow {
   id: string;
@@ -53,12 +59,21 @@ export function CompanyAddressAndContacts({
   clientId,
   clientName = "",
   clientCode = null,
+  companySlug = null,
+  slugLocked = false,
+  year,
   address,
   contacts,
 }: {
   clientId: string;
   clientName?: string;
+  /** Legacy 2–3 letter moniker (HUN). Displayed read-only; never assigned here now. */
   clientCode?: string | null;
+  companySlug?: string | null;
+  /** True once a proposal has been numbered under the slug — the database will refuse a change. */
+  slugLocked?: boolean;
+  /** Resolved on the server so the example numbers cannot disagree across a hydration boundary. */
+  year: number;
   address: CompanyAddressFields;
   contacts: CompanyContactRow[];
 }) {
@@ -66,8 +81,21 @@ export function CompanyAddressAndContacts({
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  const [savedCode, setSavedCode] = useState((clientCode ?? "").trim().toUpperCase());
-  const [codeDraft, setCodeDraft] = useState(() => savedCode || suggestClientCode(clientName));
+  const legacyCode = normalizeCompanySlug(clientCode);
+  const [savedSlug, setSavedSlug] = useState(() => normalizeCompanySlug(companySlug));
+  const [slugDraft, setSlugDraft] = useState(() => normalizeCompanySlug(companySlug) || suggestCompanySlug(clientName));
+  // Assigning a slug renumbers this company's drafts onto it, which ISSUES
+  // numbers — so the slug the operator just set is locked from that moment, and
+  // the panel must stop offering to change it without waiting for a reload.
+  // Only when something was actually renumbered: a company with no drafts has
+  // had no number issued and its slug is still free to correct.
+  const [lockedByThisSession, setLockedByThisSession] = useState(false);
+
+  // The lock is the database's call, not this component's: the counter table it
+  // reads is closed to every signed-in user, so the page can only report what it
+  // can see (documents already numbered under the slug). If it guesses wrong and
+  // shows the form, the trigger rejects the write and assignCompanySlug says so.
+  const slugIsLocked = (slugLocked || lockedByThisSession) && savedSlug !== "";
 
   const [addressDraft, setAddressDraft] = useState({
     address_line1: address.address_line1 ?? "",
@@ -83,7 +111,11 @@ export function CompanyAddressAndContacts({
 
   const preview = formatAddressLines(addressDraft);
 
-  function run(action: () => Promise<CompanyActionResult>, success: string, after?: () => void) {
+  function run<T extends CompanyActionResult>(
+    action: () => Promise<T>,
+    success: string,
+    after?: (result: T) => void,
+  ) {
     setError("");
     setMessage("");
     startTransition(async () => {
@@ -93,7 +125,7 @@ export function CompanyAddressAndContacts({
         return;
       }
       setMessage(success);
-      after?.();
+      after?.(result);
     });
   }
 
@@ -109,53 +141,110 @@ export function CompanyAddressAndContacts({
       {message ? <div className="success-box portal-alert">{message}</div> : null}
 
       {/* ---------------------------------------------------------------- */}
-      {/* Proposal code                                                    */}
+      {/* Proposal numbering — the company slug                            */}
       {/* ---------------------------------------------------------------- */}
       <h3 style={{ fontSize: "1rem", marginTop: 18 }}>
         <Hash size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />
-        Proposal code
+        Proposal numbering
       </h3>
-      {savedCode ? (
-        <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem", marginTop: 6 }}>
-          Proposals for this company are numbered <strong>{formatClientProposalNumber(savedCode, 1)}</strong>,{" "}
-          {formatClientProposalNumber(savedCode, 2)}, … The code stays fixed once documents are numbered under it.
-        </p>
+
+      {slugIsLocked ? (
+        // Read-only, with the reason. The slug is not "an admin setting someone
+        // forgot to unlock" — documents in the client's hands carry it.
+        <div className="portal-card" style={{ marginTop: 8 }}>
+          <p style={{ marginTop: 0, fontSize: "0.9rem" }}>
+            <Lock size={14} style={{ verticalAlign: "-2px", marginRight: 6 }} />
+            This company&apos;s slug is fixed. Proposals have already been issued under it, and renaming it would leave
+            those numbers pointing at a company that no longer exists under that name.
+          </p>
+          <div className="data-table-wrapper">
+            <table className="data-table">
+              <tbody>
+                <tr>
+                  <th scope="row">Company slug</th>
+                  <td style={{ letterSpacing: "0.08em" }}>
+                    <strong>{savedSlug}</strong>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Proposal numbers</th>
+                  <td>
+                    {formatProposalNumber(savedSlug, year, 1)}, {formatProposalNumber(savedSlug, year, 2)}, … — the
+                    sequence restarts at 001 each January.
+                  </td>
+                </tr>
+                {legacyCode ? (
+                  <tr>
+                    <th scope="row">Legacy code</th>
+                    <td>
+                      <strong>{legacyCode}</strong> — proposals numbered before 14 August 2026 use it ({legacyCode}-01).
+                      Kept so those references stay explicable; nothing new is numbered under it.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            const attempted = codeDraft;
+            const attempted = normalizeCompanySlug(slugDraft);
+            const previous = savedSlug;
             run(
-              () => assignClientCode(clientId, attempted),
-              `Code ${attempted.trim().toUpperCase()} assigned — this company's draft proposals now number from ${formatClientProposalNumber(attempted, 1)}.`,
-              () => setSavedCode(attempted.trim().toUpperCase()),
+              // The third argument is the compare-and-set: "" means "assign,
+              // and only if this company still has none". Passing the value we
+              // rendered means a change cannot silently clobber one somebody
+              // else made while this page sat open.
+              () => assignCompanySlug(clientId, attempted, previous || null),
+              `Slug ${attempted} saved — this company's draft proposals now number from ${formatProposalNumber(attempted, year, 1)}.`,
+              (result) => {
+                setSavedSlug(attempted);
+                setSlugDraft(attempted);
+                if ((result.renumbered ?? 0) > 0) setLockedByThisSession(true);
+              },
             );
           }}
         >
           <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem", marginTop: 6 }}>
-            No code yet. Whoever writes this company&apos;s first proposal assigns it — {clientCodeRule} Numbers then run{" "}
-            {formatClientProposalNumber(codeDraft || "SE", 1)}, {formatClientProposalNumber(codeDraft || "SE", 2)}, … per
-            company.
+            {savedSlug
+              ? "Still editable — no proposal has been numbered under this slug yet. Once one is, it is fixed for good."
+              : "No slug yet."}{" "}
+            {companySlugRule} Numbers then run{" "}
+            {formatProposalNumber(slugDraft || "WONDFOUSA", year, 1)},{" "}
+            {formatProposalNumber(slugDraft || "WONDFOUSA", year, 2)}, … per company per year.
           </p>
-          <div className="form-grid" style={{ gridTemplateColumns: "minmax(120px, 200px) auto", alignItems: "end" }}>
+          <div className="form-grid" style={{ gridTemplateColumns: "minmax(200px, 360px) auto", alignItems: "end" }}>
             <div className="field">
-              <label htmlFor="company-client-code">Code</label>
+              <label htmlFor="company-slug">Company slug</label>
               <input
-                id="company-client-code"
-                value={codeDraft}
-                onChange={(event) => setCodeDraft(event.target.value.toUpperCase())}
-                maxLength={3}
-                pattern="[A-Za-z]{2,3}"
-                title={clientCodeRule}
-                placeholder="e.g. HUN"
-                style={{ textTransform: "uppercase", letterSpacing: "0.12em" }}
+                id="company-slug"
+                value={slugDraft}
+                // Normalized on the way in, not on submit: normalizeCompanySlug
+                // DELETES spaces and punctuation rather than trimming them, so
+                // pasting "Wondfo USA, Inc." must visibly become WONDFOUSAINC
+                // here rather than being silently rewritten after the fact.
+                onChange={(event) => setSlugDraft(normalizeCompanySlug(event.target.value))}
+                maxLength={40}
+                pattern={companySlugPattern.source.replace(/^\^|\$$/g, "")}
+                title={companySlugRule}
+                placeholder="e.g. WONDFOUSA"
+                disabled={isPending}
+                style={{ textTransform: "uppercase", letterSpacing: "0.08em" }}
                 required
               />
             </div>
             <button className="button button-primary" disabled={isPending} type="submit" style={{ justifySelf: "start" }}>
-              <Save size={16} /> Assign code
+              <Save size={16} /> {savedSlug ? "Change slug" : "Assign slug"}
             </button>
           </div>
+          {legacyCode ? (
+            <p style={{ color: "var(--portal-muted)", fontSize: "0.85rem", marginTop: 4 }}>
+              Legacy code <strong>{legacyCode}</strong> — proposals numbered before 14 August 2026 use it ({legacyCode}
+              -01). Read-only, and kept so those references stay explicable.
+            </p>
+          ) : null}
         </form>
       )}
 

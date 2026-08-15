@@ -43,6 +43,10 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
     notFound();
   }
 
+  // company_slug postdates the last Supabase types regen, same untyped read the
+  // page already uses for company_files and company_profiles.
+  const companySlug = ((client as LooseClient).company_slug ?? null) as string | null;
+
   const [
     { data: activities },
     { data: items },
@@ -56,6 +60,7 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
     { data: meetings },
     { data: trainingEvents },
     profileResult,
+    { count: slugNumberedCount },
   ] = await Promise.all([
       supabase.from("company_sales_activities").select("*").eq("client_id", id).order("created_at", { ascending: false }),
       supabase.from("client_onboarding_items").select("*").eq("client_id", id).order("sort_order"),
@@ -111,6 +116,23 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
         )
         .eq("client_id", id)
         .maybeSingle(),
+      // Whether the slug is still changeable. The DATABASE is the authority
+      // (lock_company_slug), but the counter table that trigger consults has RLS
+      // on with no policies, so nothing here can read it. What IS readable is
+      // the consequence: a proposal already numbered under this slug. The panel
+      // renders read-only on that basis, and where the guess is wrong the
+      // trigger rejects the write and assignCompanySlug explains why.
+      //
+      // The slug is CHECK-constrained to [A-Z0-9], so it carries no LIKE
+      // wildcards; escaped anyway rather than trusting a column to stay that way.
+      companySlug
+        ? supabase
+            .from("client_proposals")
+            .select("id", { count: "exact", head: true })
+            .eq("client_id", id)
+            .like("proposal_number", `${companySlug.replace(/[\\%_]/g, (m) => `\\${m}`)}-%`)
+            .then(({ count }) => ({ count: count ?? 0 }))
+        : Promise.resolve({ count: 0 }),
     ]);
 
   // A blank field means "not known", so null must render as an empty box rather
@@ -161,6 +183,11 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
         clientId={id}
         clientName={(client.name ?? "") as string}
         clientCode={(client.client_code ?? null) as string | null}
+        companySlug={companySlug}
+        slugLocked={slugNumberedCount > 0}
+        // Resolved here rather than in the client component so the example
+        // numbers cannot disagree across a hydration boundary at New Year.
+        year={new Date().getFullYear()}
         address={{
           address_line1: (client.address_line1 ?? null) as string | null,
           address_line2: (client.address_line2 ?? null) as string | null,
