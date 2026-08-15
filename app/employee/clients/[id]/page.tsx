@@ -43,6 +43,10 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
     notFound();
   }
 
+  // company_slug postdates the last Supabase types regen, same untyped read the
+  // page already uses for company_files and company_profiles.
+  const companySlug = ((client as LooseClient).company_slug ?? null) as string | null;
+
   const [
     { data: activities },
     { data: items },
@@ -56,6 +60,7 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
     { data: meetings },
     { data: trainingEvents },
     profileResult,
+    { locked: slugLocked },
   ] = await Promise.all([
       supabase.from("company_sales_activities").select("*").eq("client_id", id).order("created_at", { ascending: false }),
       supabase.from("client_onboarding_items").select("*").eq("client_id", id).order("sort_order"),
@@ -111,6 +116,24 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
         )
         .eq("client_id", id)
         .maybeSingle(),
+      // Whether the slug is still changeable. The counter table lock_company_slug
+      // consults has RLS on with no policies, so it cannot be read from here —
+      // company_slug_locked() is a SECURITY DEFINER function that exists to
+      // answer exactly this one boolean and nothing else about the counters.
+      //
+      // Asking the same source the trigger asks is the point. Inferring it
+      // instead — counting proposals numbered under the slug — disagrees with
+      // the trigger whenever those proposals are deleted but the counter rows
+      // remain: the database stays locked while the form offers an edit that
+      // will be rejected on submit.
+      //
+      // Untyped handle: the function postdates the last types regen, the same
+      // convention this file already uses for company_files and company_profiles.
+      companySlug
+        ? (supabase as LooseClient)
+            .rpc("company_slug_locked", { p_client: id })
+            .then(({ data }: { data: unknown }) => ({ locked: data === true }))
+        : Promise.resolve({ locked: false }),
     ]);
 
   // A blank field means "not known", so null must render as an empty box rather
@@ -161,6 +184,11 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
         clientId={id}
         clientName={(client.name ?? "") as string}
         clientCode={(client.client_code ?? null) as string | null}
+        companySlug={companySlug}
+        slugLocked={slugLocked}
+        // Resolved here rather than in the client component so the example
+        // numbers cannot disagree across a hydration boundary at New Year.
+        year={new Date().getFullYear()}
         address={{
           address_line1: (client.address_line1 ?? null) as string | null,
           address_line2: (client.address_line2 ?? null) as string | null,

@@ -350,43 +350,32 @@ export async function createInvoiceFromProposal(
 
   const requested = kind as InvoiceKind;
 
-  // Nothing stopped an operator raising "Deposit only" and then leaving the
-  // dropdown on its default and raising "Full contract" — and `full` bills the
-  // whole contract INCLUDING the deposit, so that is 200% of the deal across two
-  // valid numbered documents. recordAcceptanceIncome guards the same way against
-  // filing a schedule twice; billing needs it more, not less. The partial unique
-  // index on (proposal_id, kind) is the backstop if this check is bypassed.
+  // A task-based proposal bills 6-9+ times over its life, so the old rule —
+  // at most one live invoice per deposit/full/balance — no longer describes the
+  // work. What that rule was really protecting against was billing the same
+  // contract twice: "deposit" plus "full", where full already includes the
+  // deposit, is 200% of the deal across two perfectly valid numbered documents.
+  //
+  // So the ceiling moved from the COUNT to the MONEY: the live invoices against
+  // a proposal may not exceed its contract value. That permits nine invoices and
+  // still refuses to bill the same work twice. The check below is for the error
+  // message; guard_client_invoice_total() in the database is the real backstop,
+  // and it holds the parent row locked so two concurrent raises cannot both pass.
   const { data: liveInvoices } = await supabase
     .from("client_invoices")
-    .select("kind, invoice_number")
+    .select("invoice_number, total")
     .eq("proposal_id", proposalId)
     .neq("status", "void")
-    .limit(20);
+    .limit(100);
 
-  const live: Array<{ kind: string; invoice_number: string }> = Array.isArray(liveInvoices) ? liveInvoices : [];
-  const clash = live.find((invoice) => invoice.kind === requested);
-  if (clash) {
-    return {
-      ok: false,
-      error: `This proposal already has a ${requested} invoice (${clash.invoice_number}). Void it first if it was raised in error.`,
-    };
-  }
-  if (requested === "full" && live.length > 0) {
-    return {
-      ok: false,
-      error: `This proposal has already been partly billed (${live.map((i) => i.invoice_number).join(", ")}). Raise the balance instead of the full contract.`,
-    };
-  }
-  if (requested !== "full" && live.some((invoice) => invoice.kind === "full")) {
-    return {
-      ok: false,
-      error: "The full contract has already been invoiced for this proposal, so there is nothing further to bill.",
-    };
-  }
+  const live: Array<{ invoice_number: string; total: number | string | null }> = Array.isArray(liveInvoices)
+    ? liveInvoices
+    : [];
+  const alreadyInvoiced = live.reduce((sum, invoice) => sum + (Number(invoice.total) || 0), 0);
 
   const { data: proposal } = await supabase
     .from("client_proposals")
-    .select("id, title, proposal_number, client_id, status, form_data, accepted_revision_id")
+    .select("id, title, proposal_number, proposal_value, client_id, status, form_data, accepted_revision_id")
     .eq("id", proposalId)
     .maybeSingle();
 
@@ -415,9 +404,10 @@ export async function createInvoiceFromProposal(
     return { ok: false, error: "This proposal has no saved content, so no invoice could be derived from it." };
   }
 
+  const proposalTotals = computeProposalTotals(state);
   const issueDate = new Date().toISOString().slice(0, 10);
   const draft = buildDraftInvoice({
-    totals: computeProposalTotals(state),
+    totals: proposalTotals,
     kind: requested,
     issueDate,
     // The contract's own payment-terms clause, which the client-facing document
@@ -436,6 +426,32 @@ export async function createInvoiceFromProposal(
         draft.kind === "deposit"
           ? "This proposal has no deposit, so there is nothing to invoice yet. Raise the full invoice instead."
           : "This proposal prices out at zero, so there is nothing to invoice.",
+    };
+  }
+
+  // Mirrors guard_client_invoice_total() so the operator gets a sentence rather
+  // than a raw constraint violation.
+  //
+  // Falls back to the ACCEPTED REVISION'S OWN TOTAL when proposal_value is not
+  // set, and that fallback is doing real work. proposal_value is nullable, is
+  // written straight from the browser on create, and recomputeProposalValue()
+  // leaves it untouched when the total falls outside the validator's range — so
+  // "no value recorded" is a normal state, not an exotic one. Treating it as
+  // unbounded would leave those proposals with no cap at all, while `full` still
+  // bills the whole contract including the deposit. That combination is exactly
+  // the 200%-of-the-deal defect the dropped index used to prevent, and it would
+  // have been off for precisely the proposals nobody had priced carefully.
+  //
+  // The revision total is the better bound anyway: it is what the client
+  // accepted, recomputed server-side, rather than a number someone typed.
+  const contractValue = Number(proposal.proposal_value) || proposalTotals.total || 0;
+  if (contractValue > 0 && alreadyInvoiced + draft.total > contractValue) {
+    return {
+      ok: false,
+      error:
+        `This proposal is valued at ${contractValue.toFixed(2)} and ${alreadyInvoiced.toFixed(2)} has already been invoiced ` +
+        `(${live.map((i) => i.invoice_number).join(", ")}). Adding ${draft.total.toFixed(2)} would bill above the contract. ` +
+        `Void or reprice an existing invoice, or raise the proposal value.`,
     };
   }
 

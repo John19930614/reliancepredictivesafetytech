@@ -22,8 +22,14 @@ interface ProposalListRow {
 interface ClientOption {
   id: string;
   name: string;
-  /** Proposal moniker (HUN); null until assigned. The create form prompts when missing. */
+  /**
+   * Legacy 2–3 letter moniker (HUN). Superseded by company_slug on 2026-08-14
+   * and never assigned again; still selected and shown so proposals numbered
+   * HUN-01 stay explicable.
+   */
   client_code?: string | null;
+  /** Company slug (WONDFOUSA); null until assigned. The create form prompts when missing. */
+  company_slug?: string | null;
 }
 
 interface ProposalsSearchParams {
@@ -95,7 +101,11 @@ export default async function ProposalsPage({
 
     const [{ data: proposals, count }, { data: clients }] = await Promise.all([
       query,
-      supabase.from("company_clients").select("id, name, client_code").order("name").limit(clientOptionLimit),
+      supabase
+        .from("company_clients")
+        .select("id, name, client_code, company_slug")
+        .order("name")
+        .limit(clientOptionLimit),
     ]);
 
     rows = (proposals ?? []) as unknown as ProposalListRow[];
@@ -106,7 +116,7 @@ export default async function ProposalsPage({
     if (clientId && !clientOptions.some((option) => option.id === clientId)) {
       const { data: selected } = await supabase
         .from("company_clients")
-        .select("id, name, client_code")
+        .select("id, name, client_code, company_slug")
         .eq("id", clientId)
         .maybeSingle();
       if (selected) clientOptions = [selected as ClientOption, ...clientOptions];
@@ -135,7 +145,9 @@ export default async function ProposalsPage({
       </div>
 
       <div className="document-grid">
-        <ProposalCreateForm clients={clientOptions} />
+        {/* Resolved on the server so the number preview cannot disagree across a
+            hydration boundary — the allocator stamps the year from created_at. */}
+        <ProposalCreateForm clients={clientOptions} year={new Date().getFullYear()} />
 
         <section>
           <h2 style={{ marginBottom: 12 }}>All proposals</h2>
