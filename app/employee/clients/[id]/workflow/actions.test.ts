@@ -723,14 +723,31 @@ describe("createInvoiceFromProposal", () => {
     expect((await createInvoiceFromProposal(CLIENT_ID, PROPOSAL_ID, "deposit")).ok).toBe(false);
   });
 
-  it("allows the raise when the proposal has no value recorded to bound it", async () => {
-    // Deliberate: refusing every invoice on a proposal whose value was never
-    // filled in is a worse failure than the one being prevented. The database
-    // trigger takes the same position.
+  it("falls back to the accepted revision's own total when no value is recorded", async () => {
+    // proposal_value is nullable, is written straight from the browser, and
+    // recomputeProposalValue() leaves it alone when the total falls outside the
+    // validator's range — so this is a normal state. Treating it as unbounded
+    // would leave exactly the un-priced proposals with no cap while `full`
+    // still bills the whole contract including the deposit.
     const supabase = createSupabaseMock({
       "client_proposals:select": { data: proposalRow({ proposal_value: null }) },
-      "client_invoices:select": { data: [{ invoice_number: "WONDFOUSA-2026-001-01", total: 9999 }] },
-      "client_invoices:insert": { data: { id: INVOICE_ID, invoice_number: "WONDFOUSA-2026-001-02" } },
+      "client_invoices:select": { data: [{ invoice_number: "WONDFOUSA-2026-001-01", total: 3000 }] },
+    });
+    signIn("employee", supabase);
+
+    // The state prices at 3,000 and 3,000 is already billed, so this is refused
+    // on the revision's own total even though the column says nothing.
+    const result = await createInvoiceFromProposal(CLIENT_ID, PROPOSAL_ID, "full");
+
+    expect(result.ok).toBe(false);
+    expect(findCall(supabase, "client_invoices", "insert")).toBeUndefined();
+  });
+
+  it("still raises normally when nothing has been billed and no value is recorded", async () => {
+    const supabase = createSupabaseMock({
+      "client_proposals:select": { data: proposalRow({ proposal_value: null }) },
+      "client_invoices:select": { data: [] },
+      "client_invoices:insert": { data: { id: INVOICE_ID, invoice_number: "WONDFOUSA-2026-001-01" } },
       "client_invoice_line_items:insert": {},
     });
     signIn("employee", supabase);

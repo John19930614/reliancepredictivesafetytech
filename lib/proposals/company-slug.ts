@@ -44,6 +44,13 @@ export const companySlugRule =
  * anyone issued a document in — it is a formatter that was handed garbage, and
  * it must not round-trip as if it were real.
  */
+/**
+ * The prefix the legacy global allocator mints (RPS-YYYY-NNNN), refused as a
+ * company slug by company_clients_company_slug_format so the two schemes can
+ * never produce the same string. Mirrors that CHECK constraint.
+ */
+export const reservedSlug = "RPS";
+
 const proposalNumberPattern = /^([A-Z0-9]{2,40})-([1-9]\d{3})-(\d{3}|[1-9]\d{3,})$/;
 const invoiceSequencePattern = /^(\d{2}|[1-9]\d{2,})$/;
 
@@ -62,7 +69,10 @@ export function normalizeCompanySlug(value: unknown): string {
  * raw string to a column whose CHECK rejects it. Normalize, then validate.
  */
 export function isValidCompanySlug(value: unknown): boolean {
-  return typeof value === "string" && companySlugPattern.test(value);
+  // The reserved-prefix half mirrors company_clients_company_slug_format. Both
+  // halves have to be here: without it the form would accept RPS, offer to save
+  // it, and the database would refuse with a raw constraint violation.
+  return typeof value === "string" && companySlugPattern.test(value) && value !== reservedSlug;
 }
 
 /**
@@ -223,6 +233,14 @@ export function parseProposalNumber(
   const seq = Number(match[3]);
   // "000" satisfies the three-digit field but no document is ever the zeroth.
   if (seq < 1) return null;
+
+  // The leading-zero rule separates the schemes only below sequence 1000: the
+  // legacy global allocator pads to four, so RPS-2026-0007 is refused above but
+  // RPS-2026-1000 is shape-identical to a current-scheme number and would parse
+  // as slug "RPS". No client can hold that slug — the CHECK constraint in
+  // 20260815140000 reserves it, for this exact reason — so a number wearing it
+  // belongs to the legacy scheme however it is shaped.
+  if (match[1] === reservedSlug) return null;
 
   return { slug: match[1], year: Number(match[2]), seq };
 }

@@ -277,9 +277,11 @@ export async function assignClientCode(
  * matched zero rows, so both paths ask for the row back and read its absence as
  * "someone else got there first", not as success.
  *
- * ADMIN ONLY, unlike assignClientCode, which gated on nothing but a session.
- * A slug is a permanent prefix on documents a client signs, and the database
- * will refuse to let anyone take it back once it is in use.
+ * EMPLOYEE, the same gate assignClientCode has — see the note at the role check
+ * below for why admin-only would break the workflow without protecting anything.
+ * A slug is a permanent prefix on documents a client signs, and it is the
+ * database, via lock_company_slug(), that refuses to let anyone take it back
+ * once it is in use.
  *
  * Existing DRAFT proposals are renumbered onto the slug by
  * renumber_client_draft_proposals() — sent, accepted or declined ones keep the

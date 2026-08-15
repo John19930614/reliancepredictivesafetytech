@@ -404,9 +404,10 @@ export async function createInvoiceFromProposal(
     return { ok: false, error: "This proposal has no saved content, so no invoice could be derived from it." };
   }
 
+  const proposalTotals = computeProposalTotals(state);
   const issueDate = new Date().toISOString().slice(0, 10);
   const draft = buildDraftInvoice({
-    totals: computeProposalTotals(state),
+    totals: proposalTotals,
     kind: requested,
     issueDate,
     // The contract's own payment-terms clause, which the client-facing document
@@ -429,11 +430,21 @@ export async function createInvoiceFromProposal(
   }
 
   // Mirrors guard_client_invoice_total() so the operator gets a sentence rather
-  // than a raw constraint violation. A proposal with no value recorded cannot
-  // bound anything, and refusing every such invoice would be a worse failure
-  // than the one being prevented — so an absent value permits the raise, exactly
-  // as the trigger does.
-  const contractValue = Number(proposal.proposal_value) || 0;
+  // than a raw constraint violation.
+  //
+  // Falls back to the ACCEPTED REVISION'S OWN TOTAL when proposal_value is not
+  // set, and that fallback is doing real work. proposal_value is nullable, is
+  // written straight from the browser on create, and recomputeProposalValue()
+  // leaves it untouched when the total falls outside the validator's range — so
+  // "no value recorded" is a normal state, not an exotic one. Treating it as
+  // unbounded would leave those proposals with no cap at all, while `full` still
+  // bills the whole contract including the deposit. That combination is exactly
+  // the 200%-of-the-deal defect the dropped index used to prevent, and it would
+  // have been off for precisely the proposals nobody had priced carefully.
+  //
+  // The revision total is the better bound anyway: it is what the client
+  // accepted, recomputed server-side, rather than a number someone typed.
+  const contractValue = Number(proposal.proposal_value) || proposalTotals.total || 0;
   if (contractValue > 0 && alreadyInvoiced + draft.total > contractValue) {
     return {
       ok: false,

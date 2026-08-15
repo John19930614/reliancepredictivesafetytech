@@ -512,3 +512,23 @@ describe("the scheme end to end", () => {
     );
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* The reserved prefix                                                        */
+/* -------------------------------------------------------------------------- */
+
+describe("the RPS reservation", () => {
+  it("refuses RPS as a slug, mirroring the CHECK constraint", () => {
+    expect(isValidCompanySlug("RPS")).toBe(false);
+    // Only the exact string is reserved — the fallback allocator's prefix.
+    expect(isValidCompanySlug("RPSGROUP")).toBe(true);
+  });
+
+  it("refuses to read a legacy number as a current-scheme one", () => {
+    // Below 1000 the leading zero separates the schemes on its own.
+    expect(parseProposalNumber("RPS-2026-0007")).toBeNull();
+    // At 1000 the shapes are identical and only the reservation separates them.
+    expect(parseProposalNumber("RPS-2026-1000")).toBeNull();
+    expect(parseInvoiceNumber("RPS-2026-1000-01")).toBeNull();
+  });
+});

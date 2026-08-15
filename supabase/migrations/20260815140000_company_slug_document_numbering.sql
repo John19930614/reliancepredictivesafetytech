@@ -28,6 +28,8 @@
 -- ROLLBACK:
 --   drop trigger if exists guard_client_invoice_total on public.client_invoices;
 --   drop function if exists public.guard_client_invoice_total();
+--   drop trigger if exists guard_client_proposal_billing_fields on public.client_proposals;
+--   drop function if exists public.guard_client_proposal_billing_fields();
 --   drop trigger if exists lock_company_slug on public.company_clients;
 --   drop function if exists public.lock_company_slug();
 --   drop function if exists public.company_slug_locked(uuid);
@@ -38,6 +40,10 @@
 --   create unique index if not exists client_invoices_one_live_per_kind
 --     on public.client_invoices (proposal_id, kind)
 --     where proposal_id is not null and status <> 'void';
+--   -- Default FIRST, then NOT NULL: the restored insert paths omit `kind`, so
+--   -- setting NOT NULL without putting the default back fails every one of them.
+--   alter table public.client_invoices alter column kind set default 'full';
+--   update public.client_invoices set kind = 'full' where kind is null;
 --   alter table public.client_invoices alter column kind set not null;
 --   alter table public.client_proposals
 --     drop column if exists legacy_proposal_number,
@@ -89,9 +95,20 @@ comment on column public.company_clients.company_slug is
 -- longer resolve to the company they name. Enforced here rather than in the
 -- action because the action is not the only way to write this table: the sales
 -- board writes company_clients straight from the browser.
+-- SECURITY DEFINER, and it is the difference between this working and being
+-- decoration. client_proposal_year_counters has RLS on with no policies, so an
+-- invoker-rights read of it from `authenticated` returns ZERO ROWS SILENTLY —
+-- RLS filters, it does not raise. An invoker-rights version of this function
+-- therefore finds no counter for any client, concludes nothing is locked, and
+-- permits every change: the guarantee reads correctly and enforces nothing.
+--
+-- The lock question is delegated to company_slug_locked() rather than
+-- re-implemented, so there is exactly one definition of "locked" and the UI and
+-- the trigger cannot drift apart.
 create or replace function public.lock_company_slug()
 returns trigger
 language plpgsql
+security definer
 set search_path = pg_catalog, public
 as $$
 begin
@@ -99,8 +116,7 @@ begin
     return new;
   end if;
   if new.company_slug is distinct from old.company_slug
-     and exists (select 1 from public.client_proposal_year_counters c
-                  where c.client_id = old.id) then
+     and public.company_slug_locked(old.id) then
     raise exception
       'company_slug is locked once the client has been issued a proposal number (% is in use)', old.company_slug
       using errcode = 'check_violation';
@@ -207,13 +223,14 @@ set search_path = pg_catalog, public
 as $$
 declare
   v_slug text;
+  v_code text;
   v_year integer;
   v_seq  integer;
 begin
   v_year := extract(year from coalesce(new.created_at, now()))::integer;
 
   if new.client_id is not null then
-    select company_slug into v_slug
+    select company_slug, client_code into v_slug, v_code
       from public.company_clients
      where id = new.client_id;
 
@@ -234,6 +251,26 @@ begin
       new.proposal_number := v_slug || '-' || v_year::text || '-'
         || lpad(v_seq::text, greatest(3, length(v_seq::text)), '0');
       return new;
+    end if;
+
+    -- No slug, but a legacy client_code: stay on that client's OWN sequence
+    -- rather than dropping to the global one. A client mid-migration would
+    -- otherwise see HUN-01, HUN-02, RPS-2026-0008 — three schemes in one
+    -- account, and their per-client sequence silently abandoned — whenever a
+    -- proposal is created by a path that does not prompt for a slug (template
+    -- create, duplicate, lifecycle). Identical to the 20260809200000 behaviour
+    -- this supersedes, kept until every client carries a slug.
+    if v_code is not null then
+      update public.company_clients
+         set proposal_seq = proposal_seq + 1
+       where id = new.client_id
+      returning proposal_seq into v_seq;
+
+      if v_seq is not null then
+        new.proposal_number := v_code || '-'
+          || lpad(v_seq::text, greatest(2, length(v_seq::text)), '0');
+        return new;
+      end if;
     end if;
   end if;
 
@@ -395,6 +432,80 @@ for each row execute function public.guard_client_invoice_total();
 comment on function public.guard_client_invoice_total() is
   'Refuses an invoice that would take the live invoiced total above the parent proposal value. Replaces client_invoices_one_live_per_kind, which capped the count instead of the money.';
 
+-- The other half of that guard, and without it the first half is porous.
+--
+-- The cap above is bounded by a column in a DIFFERENT table, and
+-- client_proposals_update_employee (20260729120000) grants UPDATE on every
+-- column of client_proposals to any portal employee with no status restriction.
+-- So the ceiling could be raised, invoices raised against it, and the ceiling
+-- put back — leaving live invoices at several times the contract with nothing
+-- in the database ever noticing. The index this replaced was a structural
+-- invariant that could not be defeated by editing a value somewhere else; its
+-- replacement has to be defended on both tables to match.
+--
+-- This also moves two guarantees out of application code and into the database:
+--   * a proposal that is no longer a draft cannot be renumbered. That was a
+--     property of renumber_client_draft_proposals() alone, which meant it held
+--     only for callers who went through it — not for a PostgREST PATCH. A client
+--     holds that number on a document they signed.
+--   * invoice_seq only ever goes up. Resetting it to 0 makes the next invoice
+--     mint a number that already exists, and the resulting unique violation
+--     wedges invoicing for that proposal until the sequence climbs back past
+--     the collisions.
+create or replace function public.guard_client_proposal_billing_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog, public
+as $$
+declare
+  v_live numeric(14, 2);
+begin
+  if new.proposal_number is distinct from old.proposal_number
+     and old.status is distinct from 'draft' then
+    raise exception
+      'proposal % is %, and an issued document''s number cannot change', old.proposal_number, old.status
+      using errcode = 'check_violation',
+            hint = 'Only drafts are renumbered. The client holds this number on the document they were sent.';
+  end if;
+
+  if new.invoice_seq < old.invoice_seq then
+    raise exception 'invoice_seq only moves forward (% -> %)', old.invoice_seq, new.invoice_seq
+      using errcode = 'check_violation',
+            hint = 'Lowering it would re-mint invoice numbers that already exist.';
+  end if;
+
+  -- Only the LOWERING direction is refused. Raising the value is a change order,
+  -- which is legitimate business and is what the invoice guard's own hint tells
+  -- an operator to do.
+  if new.proposal_value is not null
+     and new.proposal_value < coalesce(old.proposal_value, 0) then
+    select coalesce(sum(total), 0) into v_live
+      from public.client_invoices
+     where proposal_id = old.id
+       and status <> 'void';
+
+    if v_live > new.proposal_value then
+      raise exception
+        'live invoices against this proposal already total %, so its value cannot drop to %', v_live, new.proposal_value
+        using errcode = 'check_violation',
+              hint = 'Void or reprice the invoices first.';
+    end if;
+  end if;
+
+  return new;
+end $$;
+
+revoke execute on function public.guard_client_proposal_billing_fields() from public, anon, authenticated;
+
+drop trigger if exists guard_client_proposal_billing_fields on public.client_proposals;
+create trigger guard_client_proposal_billing_fields
+before update on public.client_proposals
+for each row execute function public.guard_client_proposal_billing_fields();
+
+comment on function public.guard_client_proposal_billing_fields() is
+  'Keeps proposal_value from dropping below what is already invoiced, pins the number of a non-draft proposal, and keeps invoice_seq monotonic. The other half of guard_client_invoice_total().';
+
 /* -------------------------------------------------------------------------- */
 /* 6. Renumbering drafts — and only drafts                                     */
 /* -------------------------------------------------------------------------- */
@@ -402,15 +513,21 @@ comment on function public.guard_client_invoice_total() is
 -- Extends the function from 20260809200000 onto the new scheme. Replaced rather
 -- than duplicated so the drafts-only guarantee lives in exactly one place.
 --
--- Unchanged from the original, deliberately: security invoker (so a caller
--- without UPDATE on company_clients cannot renumber), the zero-row bail-out that
--- stops rather than minting duplicates, creation-order processing, and mirroring
--- the new number into form_data.fields.proposalNo so the rendered document and
--- the column agree.
+-- SECURITY DEFINER, changed from the original's invoker rights, and the change
+-- is forced. The original bumped company_clients.proposal_seq, which an employee
+-- may update — that is what made "invoker rights add no authority" true. This
+-- version writes client_proposal_year_counters instead, which has RLS on and no
+-- policies, so an invoker-rights INSERT raises and the RPC fails on its first
+-- draft, every time.
+--
+-- Definer rights mean the RLS that used to authorise the caller no longer runs,
+-- so the check it was doing implicitly is now done explicitly below. Without
+-- that, granting EXECUTE to `authenticated` would let any signed-in user
+-- renumber any client's drafts.
 create or replace function public.renumber_client_draft_proposals(p_client uuid)
 returns integer
 language plpgsql
-security invoker
+security definer
 set search_path = pg_catalog, public
 as $$
 declare
@@ -421,6 +538,13 @@ declare
   v_count  integer := 0;
   r        record;
 begin
+  -- Replaces the authorisation the RLS on company_clients used to perform when
+  -- this ran with invoker rights. Same role set the table's own policies use.
+  if not public.is_company_portal_employee() then
+    raise exception 'not authorised to renumber proposals'
+      using errcode = 'insufficient_privilege';
+  end if;
+
   select company_slug into v_slug
     from public.company_clients
    where id = p_client;
@@ -445,18 +569,20 @@ begin
       set last_seq = public.client_proposal_year_counters.last_seq + 1
     returning last_seq into v_seq;
 
-    if v_seq is null then
-      return v_count;
-    end if;
-
     v_number := v_slug || '-' || v_year::text || '-'
       || lpad(v_seq::text, greatest(3, length(v_seq::text)), '0');
 
+    -- jsonb_typeof, not just `? 'fields'`: the key test passes for an ARRAY
+    -- too, and jsonb_set into '{fields,proposalNo}' on an array raises "path
+    -- element is not an integer" — which would abort the whole RPC and its
+    -- transaction over one malformed row. form_data is persisted, untrusted
+    -- JSON; a row that cannot carry the mirror keeps its number and is skipped
+    -- rather than taking the other drafts down with it.
     update public.client_proposals
        set proposal_number = v_number,
            legacy_proposal_number = coalesce(legacy_proposal_number, r.proposal_number),
            form_data = case
-             when form_data ? 'fields'
+             when jsonb_typeof(form_data -> 'fields') = 'object'
                then jsonb_set(form_data, '{fields,proposalNo}', to_jsonb(v_number), true)
              else form_data
            end
@@ -473,4 +599,4 @@ revoke execute on function public.renumber_client_draft_proposals(uuid) from pub
 grant execute on function public.renumber_client_draft_proposals(uuid) to authenticated;
 
 comment on function public.renumber_client_draft_proposals(uuid) is
-  'Moves a client''s DRAFT proposals onto SLUG-YYYY-NNN in creation order, keeping the previous number in legacy_proposal_number and mirroring the new one into form_data. Never touches a sent, accepted, declined or archived proposal. Runs with the caller''s rights.';
+  'Moves a client''s DRAFT proposals onto SLUG-YYYY-NNN in creation order, keeping the previous number in legacy_proposal_number and mirroring the new one into form_data. Never touches a sent, accepted, declined or archived proposal. SECURITY DEFINER with an explicit is_company_portal_employee() check.';
