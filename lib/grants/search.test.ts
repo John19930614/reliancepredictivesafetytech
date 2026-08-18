@@ -6,7 +6,43 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { buildGrantSearchFilter, escapeLikePattern, quoteOrOperand } from "./search";
+import { buildGrantSearchFilter, escapeLikePattern, grantSearchColumns, quoteOrOperand } from "./search";
+
+/**
+ * Splits an `or` list the way PostgREST does — on TOP-LEVEL commas only, with a
+ * quoted operand treated as opaque. Reimplemented here rather than asserting on
+ * the raw string because the whole defect was a filter that looked fine and
+ * tokenized into fragments.
+ */
+function operands(filter: string | null): string[] {
+  if (filter === null) return [];
+
+  const parts: string[] = [];
+  let current = "";
+  let quoted = false;
+  let escaped = false;
+
+  for (const char of filter) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+    } else if (char === "\\") {
+      current += char;
+      escaped = true;
+    } else if (char === '"') {
+      quoted = !quoted;
+      current += char;
+    } else if (char === "," && !quoted) {
+      parts.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  parts.push(current);
+
+  return parts;
+}
 
 describe("escapeLikePattern", () => {
   it("escapes LIKE wildcards so a literal search stays literal", () => {
@@ -46,13 +82,32 @@ describe("buildGrantSearchFilter", () => {
   it("keeps a comma inside the operand rather than as a separator", () => {
     const filter = buildGrantSearchFilter("Smith, Inc.");
 
-    // Three operands, not four: the comma in the term must not create one.
-    expect(filter?.split('",').length).toBe(3);
-    expect(filter).toContain('name.ilike."%Smith, Inc.%"');
+    expect(operands(filter)).toEqual([
+      'name.ilike."%Smith, Inc.%"',
+      'agency.ilike."%Smith, Inc.%"',
+      'sub_agency.ilike."%Smith, Inc.%"',
+    ]);
   });
 
   it("survives parentheses, which the tokenizer reads as structure", () => {
     expect(buildGrantSearchFilter("SBIR (Phase I)")).toContain('name.ilike."%SBIR (Phase I)%"');
+  });
+
+  // The regression itself. Unquoted, "Smith, Inc." split into SIX operands,
+  // three of them the fragment " Inc.%", which is not a condition at all — the
+  // request failed and the page rendered a full tracker as an empty one.
+  it.each([
+    ["a comma", "Smith, Inc."],
+    ["parentheses", "SBIR (Phase I)"],
+    ["a quote", 'The "Big" Fund'],
+    ["a backslash", "A\\B"],
+  ])("emits exactly one well-formed operand per column for %s", (_label, term) => {
+    const parts = operands(buildGrantSearchFilter(term));
+
+    expect(parts).toHaveLength(grantSearchColumns.length);
+    for (const part of parts) {
+      expect(part).toMatch(/^(name|agency|sub_agency)\.ilike\.".*"$/);
+    }
   });
 
   it("applies the LIKE escape before quoting", () => {
