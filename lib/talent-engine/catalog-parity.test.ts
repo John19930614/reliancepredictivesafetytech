@@ -30,10 +30,10 @@ const sidebarSource = readFileSync(sidebarPath, "utf8");
  * the object-literal `href:` form, so neither is picked up here.
  */
 function sidebarHrefs(): string[] {
-  const start = sidebarSource.indexOf("const navGroups = [");
-  expect(start, "navGroups literal not found in EmployeeSidebar.tsx").toBeGreaterThan(-1);
+  const start = sidebarSource.indexOf("const workspaces = [");
+  expect(start, "workspaces literal not found in EmployeeSidebar.tsx").toBeGreaterThan(-1);
   const end = sidebarSource.indexOf("\n];", start);
-  expect(end, "navGroups literal is not terminated").toBeGreaterThan(start);
+  expect(end, "workspaces literal is not terminated").toBeGreaterThan(start);
 
   const hrefs: string[] = [];
   for (const match of sidebarSource.slice(start, end).matchAll(/href:\s*"([^"]+)"/g)) {
@@ -46,7 +46,7 @@ describe("sidebar nav and the portal module catalog stay in sync", () => {
   const hrefs = sidebarHrefs();
 
   it("reads a plausible number of nav links out of the sidebar", () => {
-    // Guards the parser itself: a refactor that renames navGroups or reformats
+    // Guards the parser itself: a refactor that renames workspaces or reformats
     // the entries would otherwise make every assertion below vacuously pass.
     expect(hrefs.length).toBeGreaterThan(30);
     expect(hrefs).toContain("/employee");

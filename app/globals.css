@@ -569,7 +569,7 @@ textarea {
 
 .portal-shell {
   display: grid;
-  grid-template-columns: 292px minmax(0, 1fr);
+  grid-template-columns: 310px minmax(0, 1fr);
 }
 
 .portal-sidebar {
@@ -10175,4 +10175,269 @@ a.platform-card:hover {
 
 .lc-estimate-drivers span {
   color: var(--portal-muted);
+}
+
+/* ========================================================================= */
+/* ===== Portal shell — workspace rail + contextual sub-nav ================ */
+/* ========================================================================= */
+/* Replaces the single 48-link sidebar. The rail carries six workspaces, each
+   answering one question; the sub-nav shows only that workspace's surfaces.
+   Brand colour comes from the portal variables. Selection is never signalled
+   by colour alone — the active rail item also carries a gold edge marker and
+   aria-current, and the active sub-nav item carries aria-current="page". */
+
+.portal-nav-shell {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  background: #101418;
+  min-height: 100vh;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: 100vh;
+}
+
+.portal-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 8px 18px;
+  background: #101418;
+  overflow-y: auto;
+}
+
+.portal-rail-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  padding: 4px;
+}
+
+.portal-rail-brand img {
+  width: 100%;
+  height: auto;
+  max-width: 52px;
+}
+
+.portal-rail-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 9px 4px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: rgba(255, 255, 255, 0.52);
+  font: inherit;
+  font-size: 0.63rem;
+  font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.portal-rail-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.portal-rail-item.is-active {
+  background: rgba(240, 200, 106, 0.14);
+  color: var(--portal-gold-bright);
+}
+
+.portal-rail-item.is-active::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 11px;
+  bottom: 11px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--portal-gold-bright);
+}
+
+.portal-rail-badge {
+  position: absolute;
+  top: 4px;
+  right: 10px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #b3261e;
+  color: #fff;
+  font-size: 0.58rem;
+  font-weight: 850;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.portal-rail-signout {
+  margin-top: auto;
+  padding-top: 10px;
+}
+
+.portal-rail-signout button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 9px 4px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: rgba(255, 255, 255, 0.45);
+  font: inherit;
+  font-size: 0.63rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.portal-rail-signout button:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.portal-subnav {
+  background: #171d24;
+  border-right: 1px solid rgba(0, 0, 0, 0.25);
+  padding: 16px 11px 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.portal-subnav-head {
+  padding: 0 8px 13px;
+  border-bottom: 1px solid rgba(240, 200, 106, 0.16);
+  margin-bottom: 8px;
+}
+
+.portal-subnav-head strong {
+  display: block;
+  font-size: 0.98rem;
+  font-weight: 800;
+  color: #fff;
+}
+
+.portal-subnav-head p {
+  margin: 3px 0 0;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.42);
+  line-height: 1.35;
+}
+
+.portal-subnav-group {
+  padding: 13px 8px 5px;
+  font-size: 0.6rem;
+  font-weight: 850;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: rgba(240, 200, 106, 0.7);
+}
+
+.portal-subnav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.82rem;
+  font-weight: 550;
+  text-decoration: none;
+  transition: background 130ms ease, color 130ms ease;
+}
+
+.portal-subnav-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.portal-subnav-item.is-active {
+  background: rgba(240, 200, 106, 0.15);
+  color: var(--portal-gold-bright);
+  font-weight: 750;
+}
+
+.portal-subnav-badge {
+  margin-left: auto;
+  border-radius: 999px;
+  background: #b3261e;
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 850;
+  padding: 1px 6px;
+}
+
+.portal-subnav-foot {
+  margin-top: auto;
+  padding: 16px 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.portal-subnav-foot strong {
+  display: block;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.75);
+  line-height: 1.3;
+}
+
+.portal-subnav-foot p {
+  margin: 3px 0 0;
+  font-size: 0.66rem;
+  color: rgba(255, 255, 255, 0.38);
+}
+
+@media (max-width: 900px) {
+  .portal-nav-shell {
+    grid-template-columns: 1fr;
+    position: static;
+    max-height: none;
+    min-height: 0;
+  }
+
+  .portal-rail {
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 8px;
+  }
+
+  .portal-rail-brand,
+  .portal-subnav-foot {
+    display: none;
+  }
+
+  .portal-rail-item {
+    min-width: 72px;
+  }
+
+  .portal-rail-item.is-active::before {
+    left: 11px;
+    right: 11px;
+    top: auto;
+    bottom: -6px;
+    width: auto;
+    height: 3px;
+    border-radius: 3px 3px 0 0;
+  }
+
+  .portal-rail-signout {
+    margin-top: 0;
+    padding-top: 0;
+  }
+
+  .portal-subnav {
+    max-height: 40vh;
+  }
 }

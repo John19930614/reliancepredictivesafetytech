@@ -1,17 +1,18 @@
-// The commercial half of the sidebar reads as the funnel a deal travels.
+// The navigation is seven workspaces, and this file exists to stop a link
+// disappearing into one of them.
 //
 // This guards a REGROUPING, which is the kind of change that loses a link
-// without anything failing: nine items under one heading became nine items
-// under five, and a link dropped on the way would simply stop appearing. The
-// module stays reachable by URL, the catalog parity suite still passes because
-// it only checks the links that ARE there, and nobody notices until someone
-// asks where Proposals went.
+// without anything failing: fifty links under nine org-chart headings became
+// fifty-two under seven workspaces, and a link dropped on the way would simply
+// stop appearing. The module stays reachable by URL, the catalog parity suite
+// still passes because it only checks the links that ARE there, and nobody
+// notices until someone asks where Proposals went.
 //
-// So the assertions below are about two things: every commercial link survived
-// the split exactly once, and the four funnel headings appear in the order a
-// deal actually moves through them. Access is not in scope here and cannot be —
-// canAccessEmployeePath resolves from the path prefix, and a heading is not
-// part of that.
+// So the assertions below are about two things: every link that existed before
+// the regroup still exists exactly once, and no heading became load-bearing for
+// access. Access cannot be asserted from a heading — canAccessEmployeePath
+// resolves from the path prefix — so the last test pins module resolution
+// instead, which is the thing that actually decides who can reach what.
 //
 // Reads the source rather than importing it: EmployeeSidebar is a "use client"
 // component pulling in next/image, next/link and a server-action module, none
@@ -24,99 +25,147 @@ import { getPortalModuleForPath } from "@/lib/user-management";
 
 const sidebarSource = readFileSync(join(process.cwd(), "components", "EmployeeSidebar.tsx"), "utf8");
 
-/** The navGroups literal, as `{ label, hrefs }` in declaration order. */
-function navGroups(): Array<{ label: string; hrefs: string[] }> {
-  const start = sidebarSource.indexOf("const navGroups = [");
-  expect(start, "navGroups literal not found").toBeGreaterThan(-1);
+/** The workspaces literal, as `{ key, hrefs }` in declaration order. */
+function workspaces(): Array<{ key: string; hrefs: string[] }> {
+  const start = sidebarSource.indexOf("const workspaces = [");
+  expect(start, "workspaces literal not found").toBeGreaterThan(-1);
   const end = sidebarSource.indexOf("\n];", start);
-  expect(end, "navGroups literal is not terminated").toBeGreaterThan(start);
+  expect(end, "workspaces literal is not terminated").toBeGreaterThan(start);
   const body = sidebarSource.slice(start, end);
 
-  const groups: Array<{ label: string; hrefs: string[] }> = [];
-  // Split on the group labels themselves, so an href is attributed to the
-  // heading it actually sits under rather than to position in the file.
-  const labels = [...body.matchAll(/label:\s*"([^"]+)",\s*\n\s*items:\s*\[/g)];
-  labels.forEach((match, index) => {
+  const result: Array<{ key: string; hrefs: string[] }> = [];
+  // Split on the workspace keys themselves, so an href is attributed to the
+  // workspace it actually sits under rather than to position in the file.
+  const keys = [...body.matchAll(/^\s{4}key:\s*"([^"]+)",$/gm)];
+  keys.forEach((match, index) => {
     const from = match.index! + match[0].length;
-    const to = index + 1 < labels.length ? labels[index + 1].index! : body.length;
+    const to = index + 1 < keys.length ? keys[index + 1].index! : body.length;
     const hrefs = [...body.slice(from, to).matchAll(/href:\s*"([^"]+)"/g)].map((href) => href[1]);
-    groups.push({ label: match[1], hrefs });
+    result.push({ key: match[1], hrefs });
   });
-  return groups;
+  return result;
 }
 
-describe("the commercial sidebar reads as a funnel", () => {
-  const groups = navGroups();
-  const labels = groups.map((group) => group.label);
+/**
+ * Every href the org-chart sidebar carried before the regroup. Hard-coded on
+ * purpose: reading it from git would make the test pass by construction, and
+ * this list is exactly the thing a careless edit is allowed to shrink.
+ */
+const linksBeforeTheRegroup = [
+  "/employee",
+  "/m",
+  "/employee/ai",
+  "/employee/website-operations",
+  "/employee/work",
+  "/employee/parking-lots",
+  "/employee/expenses",
+  "/employee/reports",
+  "/employee/finance",
+  "/employee/payroll",
+  "/employee/grants",
+  "/employee/operations",
+  "/employee/checklist",
+  "/employee/inbox",
+  "/employee/demo-showcase",
+  "/employee/lifecycle",
+  "/employee/sales",
+  "/employee/proposals",
+  "/employee/proposals/templates",
+  "/employee/active-companies",
+  "/employee/talent-engine",
+  "/employee/mail",
+  "/employee/company-tree",
+  "/employee/hr-onboarding",
+  "/employee/training",
+  "/employee/performance",
+  "/employee/hr-documents",
+  "/employee/time-cards",
+  "/employee/time-off",
+  "/employee/calendar",
+  "/employee/documents",
+  "/employee/files",
+  "/employee/document-builder",
+  "/employee/legal-issues",
+  "/employee/legal-register",
+  "/employee/required-documents",
+  "/employee/launch-gate",
+  "/employee/users",
+  "/employee/settings",
+  "/employee/platform/sprint",
+  "/employee/platform/releases",
+  "/employee/platform/qa",
+  "/employee/platform/metrics",
+  "/employee/platform/docs",
+  "/employee/platform/packages",
+  "/employee/platform/billing",
+  "/employee/platform/audit",
+  "/employee/platform/ai-services",
+  "/employee/platform/infrastructure",
+  "/employee/platform/dev-command",
+];
 
-  it("parses the groups it is asserting about", () => {
+describe("the workspace rail keeps every link the org-chart sidebar had", () => {
+  const parsed = workspaces();
+  const keys = parsed.map((workspace) => workspace.key);
+  const allHrefs = parsed.flatMap((workspace) => workspace.hrefs);
+
+  it("parses the workspaces it is asserting about", () => {
     // Guards the parser: a reformat that broke the regex would otherwise make
     // every assertion below vacuously pass.
-    expect(groups.length).toBeGreaterThan(5);
-    expect(labels).toContain("Command");
-    expect(groups.every((group) => group.hrefs.length > 0)).toBe(true);
+    expect(parsed.length).toBe(7);
+    expect(parsed.every((workspace) => workspace.hrefs.length > 0)).toBe(true);
   });
 
-  it("carries the four funnel headings", () => {
-    for (const label of ["Leads", "Opportunities", "Contracts", "Accounts"]) {
-      expect(labels, `${label} is missing from the sidebar`).toContain(label);
-    }
-  });
-
-  // Contracts before Accounts is the whole point: a company becomes an account
-  // because a contract was signed, not the other way round.
-  it("orders them the way a deal travels", () => {
-    const funnel = labels.filter((label) => ["Leads", "Opportunities", "Contracts", "Accounts"].includes(label));
-    expect(funnel).toEqual(["Leads", "Opportunities", "Contracts", "Accounts"]);
-  });
-
-  it("puts each commercial module under the stage it belongs to", () => {
-    const find = (label: string) => groups.find((group) => group.label === label)?.hrefs ?? [];
-
-    expect(find("Leads")).toEqual(["/employee/inbox", "/employee/demo-showcase"]);
-    expect(find("Opportunities")).toEqual(["/employee/lifecycle", "/employee/sales"]);
-    expect(find("Contracts")).toEqual(["/employee/proposals", "/employee/proposals/templates"]);
-    expect(find("Accounts")).toEqual(["/employee/active-companies"]);
+  it("carries the seven workspaces in the order the rail shows them", () => {
+    expect(keys).toEqual(["today", "revenue", "talent", "people", "governance", "operations", "platform"]);
   });
 
   // The failure this file exists for: a regroup that silently drops a link.
-  it("kept every commercial link, exactly once", () => {
-    const commercial = [
-      "/employee/inbox",
-      "/employee/demo-showcase",
-      "/employee/lifecycle",
-      "/employee/sales",
-      "/employee/proposals",
-      "/employee/proposals/templates",
-      "/employee/active-companies",
-      "/employee/talent-engine",
-      "/employee/mail",
-    ];
-    const all = groups.flatMap((group) => group.hrefs);
-
-    for (const href of commercial) {
-      expect(all.filter((candidate) => candidate === href), `${href} should appear exactly once`).toHaveLength(1);
+  it("kept every previous link, exactly once", () => {
+    for (const href of linksBeforeTheRegroup) {
+      expect(allHrefs.filter((candidate) => candidate === href), `${href} should appear exactly once`).toHaveLength(1);
     }
   });
 
-  // Talent Engine is a staffing vertical and Mail is a mailbox. Filing either
-  // under Leads or Accounts would make that heading mean less, not more.
-  it("leaves what the funnel does not describe under Commercial", () => {
-    expect(groups.find((group) => group.label === "Commercial")?.hrefs).toEqual([
-      "/employee/talent-engine",
-      "/employee/mail",
-    ]);
+  it("lists no link twice anywhere on the rail", () => {
+    expect(allHrefs.length).toBe(new Set(allHrefs).size);
   });
 
-  // Regrouping is presentation. If a heading had become load-bearing for
-  // access, moving a link between headings would change who can reach it.
-  it("changes no module resolution — every funnel link maps to the same module as before", () => {
+  // Both of these had a working page and no way to reach it except by typing
+  // the URL. They are the only additions the regroup is allowed to make.
+  it("surfaces the two pages that had no link at all", () => {
+    expect(allHrefs).toContain("/employee/proposals/bio");
+    expect(allHrefs).toContain("/employee/invoices");
+    expect(new Set(allHrefs)).toEqual(new Set([...linksBeforeTheRegroup, "/employee/proposals/bio", "/employee/invoices"]));
+  });
+
+  it("files the commercial surfaces under Revenue", () => {
+    const revenue = parsed.find((workspace) => workspace.key === "revenue")?.hrefs ?? [];
+
+    for (const href of ["/employee/sales", "/employee/lifecycle", "/employee/active-companies", "/employee/proposals", "/employee/invoices", "/employee/grants", "/employee/finance"]) {
+      expect(revenue, `${href} belongs under Revenue`).toContain(href);
+    }
+  });
+
+  // Regrouping is presentation. If a workspace had become load-bearing for
+  // access, moving a link between workspaces would change who can reach it.
+  it("changes no module resolution — every link maps to the module it always did", () => {
     expect(getPortalModuleForPath("/employee/inbox")?.key).toBe("request_inbox");
     expect(getPortalModuleForPath("/employee/demo-showcase")?.key).toBe("demo_showcase");
     expect(getPortalModuleForPath("/employee/lifecycle")?.key).toBe("client_lifecycle");
     expect(getPortalModuleForPath("/employee/sales")?.key).toBe("sales_pipeline");
     expect(getPortalModuleForPath("/employee/proposals")?.key).toBe("client_proposals");
     expect(getPortalModuleForPath("/employee/proposals/templates")?.key).toBe("client_proposals");
+    expect(getPortalModuleForPath("/employee/proposals/bio")?.key).toBe("client_proposals");
     expect(getPortalModuleForPath("/employee/active-companies")?.key).toBe("active_companies");
+    expect(getPortalModuleForPath("/employee/grants")?.key).toBe("grant_tracker");
+  });
+
+  // The ledger is new, so this is the one resolution the regroup does add. It
+  // rides the finance module deliberately: portal_user_module_access has a
+  // CHECK constraint enumerating the allowed keys, so a key of its own would
+  // be ungrantable until a migration caught up.
+  it("puts the invoice ledger behind the finance module", () => {
+    expect(getPortalModuleForPath("/employee/invoices")?.key).toBe("finance");
   });
 });
