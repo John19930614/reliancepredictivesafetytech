@@ -1485,4 +1485,48 @@ describe("loadInvoiceLines", () => {
     expect(result.lines?.[0].quantity).toBe(12);
     expect(result.lines?.[0].unitAmount).toBe(105);
   });
+
+  // The panel seeds its details form from these. Before they were returned the
+  // form opened blank on every field, and saving it wrote those blanks back —
+  // clearing the consultant, the job, the terms, the reference and the preparer
+  // from a document the client renders.
+  it("returns the stored document fields so the details form can open on them", async () => {
+    const supabase = createInvoiceEditMock({
+      invoice: {
+        consultant_name: "R. Alvarez",
+        job_name: "Refinery turnaround",
+        payment_terms: "Due upon receipt",
+        client_agreement_ref: "MSA-4417",
+        prepared_by: "J. Haldemann",
+      },
+    });
+    signIn("admin", supabase);
+
+    const result = await loadInvoiceLines(INVOICE_ID);
+
+    expect(result.details).toEqual({
+      consultantName: "R. Alvarez",
+      jobName: "Refinery turnaround",
+      paymentTerms: "Due upon receipt",
+      clientAgreementRef: "MSA-4417",
+      preparedBy: "J. Haldemann",
+    });
+  });
+
+  // A column that is null, or absent because the environment is a migration
+  // behind, reads as an empty box rather than the string "null".
+  it("reads absent document fields as empty strings", async () => {
+    const supabase = createInvoiceEditMock({ invoice: { consultant_name: null } });
+    signIn("admin", supabase);
+
+    const result = await loadInvoiceLines(INVOICE_ID);
+
+    expect(result.details).toEqual({
+      consultantName: "",
+      jobName: "",
+      paymentTerms: "",
+      clientAgreementRef: "",
+      preparedBy: "",
+    });
+  });
 });

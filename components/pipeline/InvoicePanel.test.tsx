@@ -37,11 +37,24 @@ vi.mock("@/app/employee/clients/[id]/workflow/actions", () => ({
   updateInvoiceDetails: vi.fn(async () => ({ ok: true })),
 }));
 
-import { loadInvoiceLines, updateDraftInvoiceLines } from "@/app/employee/clients/[id]/workflow/actions";
+import {
+  loadInvoiceLines,
+  updateDraftInvoiceLines,
+  updateInvoiceDetails,
+} from "@/app/employee/clients/[id]/workflow/actions";
 import { InvoicePanel, type InvoiceView } from "./InvoicePanel";
 
 const loadMock = vi.mocked(loadInvoiceLines);
 const saveMock = vi.mocked(updateDraftInvoiceLines);
+const detailsMock = vi.mocked(updateInvoiceDetails);
+
+const storedDetails = {
+  consultantName: "R. Alvarez",
+  jobName: "Refinery turnaround — confined space",
+  paymentTerms: "Due upon receipt",
+  clientAgreementRef: "MSA-4417",
+  preparedBy: "J. Haldemann",
+};
 
 const CLIENT_ID = "11111111-1111-4111-8111-111111111111";
 const INVOICE_ID = "33333333-3333-4333-8333-333333333333";
@@ -297,5 +310,78 @@ describe("InvoicePanel editing permissions", () => {
     await user.click(screen.getByRole("button", { name: /lines/i }));
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/do not have permission/i));
+  });
+});
+
+
+/**
+ * The defect these cover: the details form opened on EMPTY boxes because the
+ * panel was never sent what was stored. updateInvoiceDetails reads an empty box
+ * as "cleared", so saving the form — to change the tax, say — silently wiped the
+ * consultant, the job name, the payment terms, the agreement reference and the
+ * preparer from a document the client renders.
+ */
+describe("InvoicePanel invoice details", () => {
+  async function openDetails() {
+    const user = userEvent.setup();
+    withLines([seatLine], { details: storedDetails, taxAmount: 25 });
+    renderPanel();
+
+    await user.click(screen.getByRole("button", { name: /lines/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /edit invoice details/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /edit invoice details/i }));
+
+    return user;
+  }
+
+  it("opens the form on what is stored, not on blanks", async () => {
+    await openDetails();
+
+    expect(screen.getByLabelText(/consultant/i)).toHaveValue(storedDetails.consultantName);
+    expect(screen.getByLabelText(/job name/i)).toHaveValue(storedDetails.jobName);
+    expect(screen.getByLabelText(/payment terms/i)).toHaveValue(storedDetails.paymentTerms);
+    expect(screen.getByLabelText(/client agreement/i)).toHaveValue(storedDetails.clientAgreementRef);
+    expect(screen.getByLabelText(/prepared by/i)).toHaveValue(storedDetails.preparedBy);
+    expect(screen.getByLabelText(/^tax$/i)).toHaveValue(25);
+  });
+
+  it("does not wipe the stored fields when only the tax is changed", async () => {
+    const user = await openDetails();
+
+    const tax = screen.getByLabelText(/^tax$/i);
+    await user.clear(tax);
+    await user.type(tax, "40");
+    await user.click(screen.getByRole("button", { name: /save details/i }));
+
+    await waitFor(() => expect(detailsMock).toHaveBeenCalled());
+    expect(detailsMock).toHaveBeenCalledWith(
+      INVOICE_ID,
+      expect.objectContaining({ ...storedDetails, taxAmount: 40 }),
+    );
+  });
+
+  it("still clears a field the operator actually empties", async () => {
+    const user = await openDetails();
+
+    await user.clear(screen.getByLabelText(/consultant/i));
+    await user.click(screen.getByRole("button", { name: /save details/i }));
+
+    await waitFor(() => expect(detailsMock).toHaveBeenCalled());
+    expect(detailsMock).toHaveBeenCalledWith(
+      INVOICE_ID,
+      expect.objectContaining({ consultantName: "", jobName: storedDetails.jobName }),
+    );
+  });
+
+  it("falls back to blanks when the server sends no details", async () => {
+    const user = userEvent.setup();
+    withLines([seatLine]);
+    renderPanel();
+
+    await user.click(screen.getByRole("button", { name: /lines/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /edit invoice details/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /edit invoice details/i }));
+
+    expect(screen.getByLabelText(/consultant/i)).toHaveValue("");
   });
 });

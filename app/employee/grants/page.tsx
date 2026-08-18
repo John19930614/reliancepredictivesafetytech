@@ -5,6 +5,7 @@ import { GrantFeePaidToggle } from "@/components/grants/GrantFeePaidToggle";
 import { GrantStatusBadge } from "@/components/grants/GrantStatusBadge";
 import { GrantStatusEditor } from "@/components/grants/GrantStatusEditor";
 import { getGrantTrackerAccess } from "@/lib/grants/access";
+import { buildGrantSearchFilter } from "@/lib/grants/search";
 import { grantStatusRank, grantStatuses, isGrantTerminalStatus } from "@/lib/grants/statuses";
 import { isMissingSchemaRelationError } from "@/lib/supabase/errors";
 
@@ -44,14 +45,6 @@ const maxSearchLength = 120;
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const money2 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
-
-/**
- * `%` and `_` are LIKE wildcards. Escaping them keeps the search literal, the
- * same helper app/employee/proposals/page.tsx uses.
- */
-function escapeLikePattern(value: string): string {
-  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
-}
 
 function toNumber(value: number | string | null): number | null {
   if (value === null) return null;
@@ -101,9 +94,9 @@ export default async function GrantsPage({ searchParams }: { searchParams: Promi
     )
     .limit(rowLimit);
 
-  if (search) {
-    const pattern = `%${escapeLikePattern(search)}%`;
-    query = query.or(`name.ilike.${pattern},agency.ilike.${pattern},sub_agency.ilike.${pattern}`);
+  const searchFilter = buildGrantSearchFilter(search);
+  if (searchFilter) {
+    query = query.or(searchFilter);
   }
   if (statusFilter) {
     query = query.eq("status", statusFilter);
@@ -127,6 +120,26 @@ export default async function GrantsPage({ searchParams }: { searchParams: Promi
         </div>
         <section className="portal-card empty-state">
           The Grant Tracker is not set up in Supabase yet. Apply the latest database migrations and try again.
+        </section>
+      </>
+    );
+  }
+
+  // Any OTHER error would otherwise fall through to `rows = []` and render as
+  // "No grants match these filters" — a full tracker reported as an empty one.
+  // A read that failed has to say so rather than answer the question wrongly.
+  if (error) {
+    return (
+      <>
+        <div className="portal-topline">
+          <div>
+            <span className="eyebrow">Grant Tracker</span>
+            <h1>Funding pursuit tracker</h1>
+          </div>
+        </div>
+        <section className="portal-card empty-state" role="alert">
+          The grant list could not be read. Clear the filters and try again — if it keeps happening, the search terms
+          may need escaping.
         </section>
       </>
     );
