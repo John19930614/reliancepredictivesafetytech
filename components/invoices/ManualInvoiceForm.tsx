@@ -229,7 +229,17 @@ export function ManualInvoiceForm({ clients }: { clients: ClientOption[] }) {
 
       <div className="wf-invoice-form">
         <div className="data-table-wrapper">
-          <table className="data-table">
+          <table className="data-table invoice-line-table">
+            <colgroup>
+              <col className="invoice-col-item" />
+              <col className="invoice-col-date" />
+              <col className="invoice-col-qty" />
+              <col className="invoice-col-basis" />
+              <col className="invoice-col-unit" />
+              <col className="invoice-col-price" />
+              <col className="invoice-col-amount" />
+              <col className="invoice-col-remove" />
+            </colgroup>
             <caption className="table-subtext">
               A flat fee ignores its quantity; every other basis multiplies. Amounts here are a preview — the server
               recomputes them.

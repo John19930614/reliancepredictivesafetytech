@@ -329,7 +329,7 @@ export default async function InvoiceLedgerPage() {
           : ""}
       </p>
 
-      <div className="document-grid">
+      <div className="invoice-workspace">
         {canDraftInvoice ? <ManualInvoiceForm clients={clients} /> : null}
 
         <section>
