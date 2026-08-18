@@ -33,6 +33,7 @@ import {
   settleInvoice,
   updateDraftInvoiceLines,
   updateInvoiceDetails,
+  type InvoiceDetailsView,
   type InvoiceLineView,
 } from "@/app/employee/clients/[id]/workflow/actions";
 import {
@@ -114,7 +115,17 @@ interface LoadedLines {
   lines: InvoiceLineView[];
   taxAmount: number;
   editable: boolean;
+  /** What is stored on the invoice header, so the details form opens on it. */
+  details: InvoiceDetailsView;
 }
+
+const emptyDetails: InvoiceDetailsView = {
+  consultantName: "",
+  jobName: "",
+  paymentTerms: "",
+  clientAgreementRef: "",
+  preparedBy: "",
+};
 
 function toDraft(line: InvoiceLineView): LineDraft {
   return {
@@ -201,7 +212,12 @@ export function InvoicePanel({
       const lines = result.lines;
       setLoaded((current) => ({
         ...current,
-        [invoiceId]: { lines, taxAmount: result.taxAmount ?? 0, editable: Boolean(result.editable) },
+        [invoiceId]: {
+          lines,
+          taxAmount: result.taxAmount ?? 0,
+          editable: Boolean(result.editable),
+          details: result.details ?? emptyDetails,
+        },
       }));
       setLineDrafts((current) => {
         const next = { ...current };
@@ -652,12 +668,12 @@ export function InvoicePanel({
                             className="button button-neutral button-sm"
                             disabled={pending}
                             onClick={() =>
+                              // Seeded from what is STORED. Opening this form
+                              // on blanks and saving it cleared every one of
+                              // these columns, because an empty box is read as
+                              // "cleared" by updateInvoiceDetails.
                               setDetailsDraft({
-                                consultantName: "",
-                                jobName: "",
-                                paymentTerms: "",
-                                clientAgreementRef: "",
-                                preparedBy: "",
+                                ...entry.details,
                                 taxAmount: String(entry.taxAmount),
                               })
                             }

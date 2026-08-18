@@ -33,6 +33,12 @@ export function GrantStatusEditor({ grantId, status }: { grantId: string; status
 
       if (!result.ok) {
         setError(result.error ?? "Could not update status.");
+        // Back to the status the row ACTUALLY has. Leaving the select on the
+        // rejected target showed a state the database never accepted, and
+        // because a controlled <select> fires no change event when the value
+        // it already holds is re-picked, the operator could not even retry
+        // without reloading the page.
+        setDraftStatus(status);
         return;
       }
 

@@ -827,12 +827,44 @@ export interface InvoiceLineView {
   lineTotal: number;
 }
 
+/**
+ * The header fields the printed invoice carries, in the shape the edit form
+ * holds them. Returned by loadInvoiceLines so the panel can SEED its details
+ * form from what is stored.
+ *
+ * Without this the form opened blank on every field, and because
+ * updateInvoiceDetails reads an empty string as "cleared", saving it wiped the
+ * consultant, the job name, the payment terms, the agreement reference and the
+ * preparer from a document the client renders. A form that cannot show what is
+ * stored must not be allowed to overwrite it.
+ */
+export interface InvoiceDetailsView {
+  consultantName: string;
+  jobName: string;
+  paymentTerms: string;
+  clientAgreementRef: string;
+  preparedBy: string;
+}
+
 export interface InvoiceLinesResult extends WorkflowActionResult {
   lines?: InvoiceLineView[];
   taxAmount?: number;
   subtotal?: number;
   total?: number;
   editable?: boolean;
+  details?: InvoiceDetailsView;
+}
+
+/** Empty-string rather than null, because the form fields are text inputs. */
+function toDetailsView(row: Record<string, unknown>): InvoiceDetailsView {
+  const text = (value: unknown): string => (typeof value === "string" ? value : "");
+  return {
+    consultantName: text(row.consultant_name),
+    jobName: text(row.job_name),
+    paymentTerms: text(row.payment_terms),
+    clientAgreementRef: text(row.client_agreement_ref),
+    preparedBy: text(row.prepared_by),
+  };
 }
 
 /**
@@ -850,11 +882,30 @@ export async function loadInvoiceLines(invoiceId: string): Promise<InvoiceLinesR
   if (!canRead) return { ok: false, error: "You do not have permission to view invoices." };
   if (!UUID.test(invoiceId)) return { ok: false, error: "Malformed invoice reference." };
 
-  const { data: invoiceRow, error: invoiceError } = await supabase
-    .from("client_invoices")
-    .select("id, status, subtotal, total, tax_amount")
-    .eq("id", invoiceId)
-    .maybeSingle();
+  // The document columns are read so the panel can seed its details form from
+  // what is stored. An environment whose migrations are one behind still gets a
+  // working panel — the same posture the line-item insert takes — it just has
+  // no details to seed, which is exactly true there.
+  const readInvoice = await (async () => {
+    const wide = await supabase
+      .from("client_invoices")
+      .select(
+        "id, status, subtotal, total, tax_amount, consultant_name, job_name, payment_terms, client_agreement_ref, prepared_by",
+      )
+      .eq("id", invoiceId)
+      .maybeSingle();
+
+    if (wide.error && isSchemaBehindError(wide.error)) {
+      return supabase
+        .from("client_invoices")
+        .select("id, status, subtotal, total, tax_amount")
+        .eq("id", invoiceId)
+        .maybeSingle();
+    }
+    return wide;
+  })();
+
+  const { data: invoiceRow, error: invoiceError } = readInvoice;
 
   if (invoiceError && isSchemaBehindError(invoiceError)) return { ok: false, error: SCHEMA_BEHIND };
   if (invoiceError) return { ok: false, error: friendlyError(invoiceError, "Could not read this invoice.") };
@@ -872,6 +923,7 @@ export async function loadInvoiceLines(invoiceId: string): Promise<InvoiceLinesR
     // The panel greys the inputs on this; the action refuses on its own copy of
     // the same two facts, so a stale `true` here buys nobody anything.
     editable: invoiceRow.status === "draft" && isAdmin,
+    details: toDetailsView(invoiceRow),
   };
 }
 
