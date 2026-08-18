@@ -440,7 +440,13 @@ export function InvoicePanel({
                                 const draft = lineDrafts[line.id];
                                 return (
                                   <tr key={line.id}>
-                                    <td>{line.description}</td>
+                                    {/* pre-line, because a description may now
+                                        carry a heading and its detail on two
+                                        lines (lib/invoices/manual.ts). HTML
+                                        collapses the break by default, so this
+                                        panel would show one line where the PDF
+                                        and the Word file both show two. */}
+                                    <td style={{ whiteSpace: "pre-line" }}>{line.description}</td>
                                     <td>
                                       {editable ? (
                                         <input

@@ -67,10 +67,13 @@ function clean(value: string): string {
 
 function textRun(
   text: string,
-  options: { bold?: boolean; italics?: boolean; color?: string; size?: number } = {},
+  options: { bold?: boolean; italics?: boolean; color?: string; size?: number; break?: number } = {},
 ): TextRun {
   return new TextRun({
     text: clean(text),
+    // A <w:br/> ahead of this run's text. Set only by para() for the second and
+    // later lines of a multi-line value; see the note there.
+    break: options.break,
     bold: options.bold,
     italics: options.italics,
     color: options.color ?? INK,
@@ -78,6 +81,27 @@ function textRun(
   });
 }
 
+/**
+ * One paragraph, and ONE RUN PER LINE of `text`.
+ *
+ * A line-item description now carries a heading and its detail —
+ *
+ *   Training
+ *   Biosafety Training: Classroom and Practical.
+ *
+ * — and a "\n" inside a single w:t is swallowed by Word: the file opens with
+ * the heading run into the sentence beside it, disagreeing with the PDF, which
+ * draws the break. The break has to be its own element, so each line after the
+ * first is a run carrying `break: 1` (a <w:br/> ahead of its text).
+ *
+ * ONE PARAGRAPH, not one per line, on purpose. Splitting a description across
+ * paragraphs would apply the document's paragraph spacing between the heading
+ * and its detail and let Word break the two apart across a page; a run break
+ * keeps them one block of text in one table cell, which is what the row is.
+ *
+ * Single-line text — every other field on the document — produces exactly the
+ * one run it always did.
+ */
 function para(
   text: string,
   options: {
@@ -91,11 +115,15 @@ function para(
     border?: IParagraphOptions["border"];
   } = {},
 ): Paragraph {
+  // clean() keeps the newline and collapses everything else, so this is the
+  // model's own line structure rather than anything invented here.
+  const lines = clean(text).split("\n");
+
   return new Paragraph({
     alignment: options.alignment,
     border: options.border,
     spacing: { before: options.spacingBefore ?? 0, after: options.spacingAfter ?? 60 },
-    children: [textRun(text, options)],
+    children: lines.map((line, index) => textRun(line, { ...options, break: index === 0 ? undefined : 1 })),
   });
 }
 

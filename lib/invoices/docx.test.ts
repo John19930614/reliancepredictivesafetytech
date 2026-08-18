@@ -199,6 +199,52 @@ describe("renderInvoiceDocx", () => {
     expect(text).not.toContain("HOURS");
   });
 
+  it("writes each line of a multi-line description as its own run, broken not merged", async () => {
+    // The exact two the business asked for. A "\n" inside one w:t is swallowed
+    // by Word — the file would open with the heading run into the sentence
+    // beside it while the PDF drew the break, and the two documents would
+    // disagree about the same invoice.
+    const xml = readArchiveEntry(
+      await renderInvoiceDocx(
+        modelFor({
+          lines: [
+            line({ description: "Training\nBiosafety Training: Classroom and Practical." }),
+            line({ description: "Audit\n4-Hour Audit. Audit report submitted" }),
+          ],
+        }),
+      ),
+      "word/document.xml",
+    );
+
+    // Each line is its own <w:t>: no run carries the newline through.
+    const runs = [...xml.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)].map(([, run]) => run);
+    expect(runs).toContain("Training");
+    expect(runs).toContain("Biosafety Training: Classroom and Practical.");
+    expect(runs).toContain("Audit");
+    expect(runs).toContain("4-Hour Audit. Audit report submitted");
+    expect(xml).not.toContain("Training\nBiosafety");
+
+    // The two halves stay in ONE paragraph, separated by a <w:br/> — not split
+    // across paragraphs, which would let Word break the row's own text apart
+    // and space it like two entries.
+    const paragraphs = [...xml.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)].map(([block]) => block);
+    const descriptionParagraph = paragraphs.find((block) => block.includes("Biosafety Training"));
+    expect(descriptionParagraph).toBeDefined();
+    expect(descriptionParagraph).toContain("Training");
+    expect(descriptionParagraph).toMatch(/<w:br\s*\/?>/);
+  });
+
+  it("leaves a single-line value as the one run it always was", async () => {
+    // Every other field on the document is one line, and nothing about it
+    // changed: no stray breaks in the party blocks or the totals.
+    const xml = readArchiveEntry(await renderInvoiceDocx(modelFor()), "word/document.xml");
+    const paragraphs = [...xml.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)].map(([block]) => block);
+    const preparedBy = paragraphs.find((block) => block.includes("Invoice Prepared By"));
+
+    expect(preparedBy).toBeDefined();
+    expect(preparedBy).not.toMatch(/<w:br\s*\/?>/);
+  });
+
   it("lays out on US Letter with no table running past the margin", async () => {
     // The `docx` package defaults to A4. Taking that default while the geometry
     // is written for Letter is what made every full-width proposal table overhang

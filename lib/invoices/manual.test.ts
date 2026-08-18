@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { maxInvoiceAmount, maxLineDescriptionLength, maxLineQuantity, maxLineUnitAmount } from "./draft";
-import { maxManualInvoiceLines, validateManualInvoice, type NewManualInvoiceInput, type NewManualInvoiceLine } from "./manual";
+import {
+  maxInvoiceAmount,
+  maxLineDescriptionLength,
+  maxLineDescriptionLines,
+  maxLineQuantity,
+  maxLineUnitAmount,
+} from "./draft";
+import {
+  maxManualInvoiceLines,
+  normaliseLineDescription,
+  validateManualInvoice,
+  type NewManualInvoiceInput,
+  type NewManualInvoiceLine,
+} from "./manual";
 
 const now = new Date("2026-03-10T09:30:00Z");
 
@@ -221,6 +233,110 @@ describe("validateManualInvoice — issue date", () => {
 
   it("rejects a date that does not exist on the calendar", () => {
     expect(reject({ issueDate: "2026-02-30" })).toContain("Give the issue date as YYYY-MM-DD.");
+  });
+});
+
+describe("validateManualInvoice — the proposal an invoice bills against", () => {
+  it("carries no proposal by default, which is what keeps the manual numbering", () => {
+    // A null proposal is what makes allocate_client_invoice_number() fall back
+    // to {SLUG}-{YYYY}-INV-{NN} and what makes guard_client_invoice_total()
+    // stand down. It is the normal case for this form, not an error.
+    expect(accept().proposalId).toBeNull();
+  });
+
+  it("passes a chosen proposal through, trimmed", () => {
+    expect(accept({ proposalId: " 8d1f0f3a-2b4c-4d5e-8f60-1a2b3c4d5e6f " }).proposalId).toBe(
+      "8d1f0f3a-2b4c-4d5e-8f60-1a2b3c4d5e6f",
+    );
+  });
+
+  it("reads a blank or absent proposal as none rather than as an error", () => {
+    expect(accept({ proposalId: "" }).proposalId).toBeNull();
+    expect(accept({ proposalId: "   " }).proposalId).toBeNull();
+    expect(accept({ proposalId: null }).proposalId).toBeNull();
+  });
+
+  it("does not judge whether the proposal is real or whose it is", () => {
+    // Deliberate: that is a database question, and answering it here would put
+    // a route-shaped rule in a pure module. The server action checks the
+    // pairing before it inserts — see app/employee/invoices/actions.test.ts.
+    expect(accept({ proposalId: "not-a-uuid" }).proposalId).toBe("not-a-uuid");
+  });
+});
+
+describe("normaliseLineDescription", () => {
+  it("keeps the heading and its detail as two lines", () => {
+    expect(normaliseLineDescription("Training\nBiosafety Training: Classroom and Practical.")).toBe(
+      "Training\nBiosafety Training: Classroom and Practical.",
+    );
+  });
+
+  it("folds CRLF to LF", () => {
+    // A stray \r reaches pdf-lib's drawText as a character it cannot encode,
+    // which throws and takes the whole download down.
+    expect(normaliseLineDescription("Audit\r\n4-Hour Audit. Audit report submitted")).toBe(
+      "Audit\n4-Hour Audit. Audit report submitted",
+    );
+    expect(normaliseLineDescription("Audit\r4-Hour Audit")).toBe("Audit\n4-Hour Audit");
+  });
+
+  it("collapses the whitespace inside a line without eating the breaks", () => {
+    expect(normaliseLineDescription("  Training \n Biosafety\tTraining:   Classroom  ")).toBe(
+      "Training\nBiosafety Training: Classroom",
+    );
+  });
+
+  it("strips blank lines from both ends and keeps the ones between", () => {
+    expect(normaliseLineDescription("\n\nTraining\n\nDetail\n \n\n")).toBe("Training\n\nDetail");
+  });
+
+  it("returns nothing for whitespace or a non-string", () => {
+    expect(normaliseLineDescription("  \n\t \n ")).toBe("");
+    expect(normaliseLineDescription(null)).toBe("");
+    expect(normaliseLineDescription(42)).toBe("");
+  });
+});
+
+describe("validateManualInvoice — multi-line descriptions", () => {
+  it("stores the two the business asked for exactly as typed", () => {
+    const value = accept({
+      lines: [
+        line({ description: "Training\nBiosafety Training: Classroom and Practical." }),
+        line({ description: "Audit\r\n4-Hour Audit. Audit report submitted" }),
+      ],
+    });
+
+    expect(value.lines[0].description).toBe("Training\nBiosafety Training: Classroom and Practical.");
+    expect(value.lines[1].description).toBe("Audit\n4-Hour Audit. Audit report submitted");
+  });
+
+  it("refuses a description that is only whitespace, newlines included", () => {
+    expect(reject({ lines: [line({ description: "\n\n   \n" })] })).toContain("Line 1: add a description.");
+  });
+
+  it("accepts a description at the line cap and refuses one past it", () => {
+    const atCap = Array.from({ length: maxLineDescriptionLines }, (_, index) => `Line ${index + 1}`).join("\n");
+    expect(accept({ lines: [line({ description: atCap })] }).lines[0].description).toBe(atCap);
+
+    expect(reject({ lines: [line({ description: `${atCap}\nOne too many` })] })).toContain(
+      `Line 1: keep the description to ${maxLineDescriptionLines} lines or fewer.`,
+    );
+  });
+
+  it("counts the blank lines between blocks against the cap", () => {
+    // They print, so they take space on the sheet like any other line.
+    const withGaps = Array.from({ length: maxLineDescriptionLines }, () => "Detail").join("\n\n");
+    expect(reject({ lines: [line({ description: withGaps })] })).toContainEqual(
+      expect.stringContaining("lines or fewer"),
+    );
+  });
+
+  it("still applies the character cap to a multi-line description", () => {
+    // The column CHECK counts every character, newlines included.
+    const long = Array.from({ length: 4 }, () => "x".repeat(150)).join("\n");
+    expect(reject({ lines: [line({ description: long })] })).toContainEqual(
+      expect.stringContaining("keep the description under"),
+    );
   });
 });
 

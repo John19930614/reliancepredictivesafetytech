@@ -46,6 +46,17 @@ const invoiceLimit = 500;
 /** Clients offered in the new-invoice dropdown. */
 const clientLimit = 500;
 
+/**
+ * Proposals offered in the "billing against" dropdown, across ALL clients.
+ *
+ * Read in one query and filtered by client in the browser rather than fetched
+ * per selection: this page is a server component, so a per-client read would
+ * mean a round trip through a server action every time the operator changes the
+ * client — for a list that is a few hundred rows in total. Newest first, so the
+ * cut falls on proposals nobody is likely to be raising a first invoice against.
+ */
+const proposalLimit = 600;
+
 interface InvoiceRow {
   id: string;
   client_id: string;
@@ -61,6 +72,30 @@ interface InvoiceRow {
 interface ClientOption {
   id: string;
   name: string;
+  /**
+   * The company slug (WONDFOUSA); null until someone assigns it. Carried into
+   * the form because a manual invoice is numbered {SLUG}-{YYYY}-INV-{NN} off
+   * it, so a client without one cannot be invoiced until it is set — and the
+   * form has to know that before the operator fills the whole thing in.
+   */
+  company_slug?: string | null;
+}
+
+/**
+ * One proposal an invoice may be billed against.
+ *
+ * `proposal_number` is what the invoice number is built from
+ * ({PROPOSAL}-{NN}), and `proposal_value` is the ceiling
+ * guard_client_invoice_total() will start enforcing once this proposal is
+ * named — both are shown in the option so the choice is made with the two
+ * consequences visible rather than after the fact.
+ */
+interface ProposalOption {
+  id: string;
+  client_id: string;
+  title: string;
+  proposal_number: string | null;
+  proposal_value: number | string | null;
 }
 
 function toNumber(value: number | string | null): number {
@@ -190,7 +225,7 @@ export default async function InvoiceLedgerPage() {
 
   const { canDraftInvoice } = resolvePipelineRoleFlags(role?.role, role?.account_status === "active");
 
-  const [{ data: invoiceData, error: invoiceError }, { data: clientData }] = await Promise.all([
+  const [{ data: invoiceData, error: invoiceError }, { data: clientData }, { data: proposalData }] = await Promise.all([
     // Untyped handle: client_invoices postdates the last Supabase types regen,
     // the same escape hatch lib/pipeline/access.ts uses for every write to it.
     (supabase as LooseClient)
@@ -198,7 +233,19 @@ export default async function InvoiceLedgerPage() {
       .select("id, client_id, invoice_number, status, currency, total, issue_date, due_date, created_at")
       .order("created_at", { ascending: false })
       .limit(invoiceLimit),
-    supabase.from("company_clients").select("id, name").order("name").limit(clientLimit),
+    supabase.from("company_clients").select("id, name, company_slug").order("name").limit(clientLimit),
+    // Declined and archived proposals are left out: they are not contracts
+    // anyone is billing against, and offering one is how an invoice ends up
+    // filed under work the client turned down. A draft or in-review proposal
+    // IS offered — the work sometimes starts before the paperwork lands, and
+    // the contract-value guard still bounds what can be billed against it.
+    supabase
+      .from("client_proposals")
+      .select("id, client_id, title, proposal_number, proposal_value")
+      .in("status", ["draft", "in_review", "sent", "accepted"])
+      .not("proposal_number", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(proposalLimit),
   ]);
 
   // A missing table degrades the page rather than throwing, the same posture as
@@ -240,7 +287,17 @@ export default async function InvoiceLedgerPage() {
   }
 
   const rows: InvoiceRow[] = Array.isArray(invoiceData) ? invoiceData : [];
-  const clients: ClientOption[] = Array.isArray(clientData) ? (clientData as ClientOption[]) : [];
+  // Cast through unknown: company_slug postdates the last Supabase types regen,
+  // so the generated row type does not know the column the select asks for. Same
+  // escape hatch as LooseClient above, kept to this one value.
+  const clients: ClientOption[] = Array.isArray(clientData) ? (clientData as unknown as ClientOption[]) : [];
+  // A failed or missing proposal read degrades to "no proposals to bill
+  // against", which is a state the form already handles — an invoice with no
+  // proposal behind it is the normal case here, so it must not take the page
+  // down or block billing.
+  const proposals: ProposalOption[] = Array.isArray(proposalData)
+    ? (proposalData as unknown as ProposalOption[])
+    : [];
   const clientNames = new Map(clients.map((client) => [client.id, client.name]));
 
   const today = new Date().toISOString().slice(0, 10);
@@ -330,7 +387,13 @@ export default async function InvoiceLedgerPage() {
       </p>
 
       <div className="invoice-workspace">
-        {canDraftInvoice ? <ManualInvoiceForm clients={clients} /> : null}
+        {/* The year the counter will use for a manual invoice raised today —
+            the allocator takes it from coalesce(issue_date, current_date). Read
+            on the server so the number preview cannot disagree with the number
+            actually minted because a browser clock is wrong. */}
+        {canDraftInvoice ? (
+          <ManualInvoiceForm clients={clients} proposals={proposals} year={new Date().getFullYear()} />
+        ) : null}
 
         <section>
           <h2 style={{ marginBottom: 12 }}>All invoices</h2>

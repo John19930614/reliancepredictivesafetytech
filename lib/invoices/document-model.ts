@@ -27,6 +27,14 @@
 //   applies to a persisted generator state. Nothing reaches a renderer as NaN,
 //   Infinity, undefined, or an object where a string was expected.
 
+// The ONE import, and it is a bound rather than behaviour: how many lines a
+// description may print is a fact about the field, and the form validator
+// (lib/invoices/manual.ts) rejects against this same constant. Two numbers that
+// had to agree and did not would mean this module silently truncating a
+// description the operator had just been told was acceptable. draft.ts is pure
+// and does no I/O, so importing it costs this module nothing it promised above.
+import { maxLineDescriptionLines } from "./draft";
+
 /* -------------------------------------------------------------------------- */
 /* Input contract                                                              */
 /*                                                                             */
@@ -131,11 +139,16 @@ export interface InvoiceDocumentInput {
 export const missingValue = "—";
 
 /**
- * Cap on the lines in a party block.
+ * Cap on the lines in a PARTY BLOCK — the letterhead and the TO block.
  *
  * The firm and TO blocks sit at the top of a one-page document. A malformed
  * JSONB array of a thousand strings would push the line-item table off the
  * sheet, so the block is bounded; a real postal address needs four lines.
+ *
+ * It has nothing to do with a line-item description and is never applied to
+ * one: blockLines() below is called on addressLines and on nothing else. A
+ * multi-line description is bounded by maxLineDescriptionLines, which is the
+ * same cap the form validates against — see descriptionText().
  */
 export const maxBlockLines = 8;
 
@@ -150,9 +163,13 @@ function toText(value: unknown): string {
  * Trimmed text with control characters stripped.
  *
  * Newlines and tabs are collapsed to spaces rather than escaped: every field
- * here occupies ONE cell or ONE line of a fixed layout, and a stray newline
- * inside a description would silently restructure the table in the DOCX while
- * doing nothing in the PDF.
+ * that goes through HERE occupies ONE cell or ONE line of a fixed layout, and a
+ * stray newline in one of them would silently restructure the table.
+ *
+ * THE ONE EXCEPTION is a line-item description, which is deliberately allowed
+ * to run to several lines and goes through descriptionText() instead. Nothing
+ * else does — a two-line consultant name or payment-terms cell is a broken
+ * value, not a layout choice.
  */
 function clean(value: unknown): string {
   // eslint-disable-next-line no-control-regex
@@ -163,6 +180,46 @@ function clean(value: unknown): string {
 function text(value: unknown, fallback = ""): string {
   const cleaned = clean(value);
   return cleaned === "" ? fallback : cleaned;
+}
+
+/**
+ * A line-item description, with its LINE BREAKS INTACT.
+ *
+ * The one multi-line field on the document. An operator bills
+ *
+ *   Training
+ *   Biosafety Training: Classroom and Practical.
+ *
+ * as one line item, and the heading is what the client's eye lands on. Both
+ * renderers know how to draw the break (lib/invoices/pdf.ts wraps each
+ * paragraph in the DESCRIPTION column; lib/invoices/docx.ts emits one run per
+ * line with a <w:br/> between). Flattening it here — which is what clean() did
+ * until descriptions became multi-line — would throw that shape away before
+ * either of them saw it, and neither could get it back.
+ *
+ * Still fully coerced, because a persisted invoice is untrusted input: every
+ * other control character goes, each line's internal whitespace collapses, and
+ * blank lines are trimmed off both ends. The line COUNT is bounded at the same
+ * maxLineDescriptionLines the form validates against, so a legitimate
+ * description can never be truncated here — only one that got past the
+ * validator, by hand or from an older row, and that would print as a row tall
+ * enough to break the one-page layout.
+ */
+function descriptionText(value: unknown, fallback = ""): string {
+  const lines = toText(value)
+    .replace(/\r\n?/g, "\n")
+    // Every control character EXCEPT the newline (\u000A). Written as two
+    // ranges rather than a negated class so the intent is legible.
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u0009\u000B-\u001F\u007F]+/g, " ")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim());
+
+  while (lines.length > 0 && lines[0] === "") lines.shift();
+  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+
+  const description = lines.slice(0, maxLineDescriptionLines).join("\n");
+  return description === "" ? fallback : description;
 }
 
 /** Number coercion that can never yield NaN or Infinity. */
@@ -569,7 +626,7 @@ export function buildInvoiceDocumentModel(input: InvoiceDocumentInput): InvoiceD
       // A line with no single service date leaves the cell EMPTY rather than
       // printing a dash in every row of a flat-fee invoice.
       dateLabel: formatInvoiceDate(line?.serviceDate, ""),
-      description: text(line?.description, missingValue),
+      description: descriptionText(line?.description, missingValue),
       unitPriceLabel: formatInvoiceMoney(line?.unitPrice, currency),
       quantityLabel: formatQuantity(line?.quantity),
       lineTotalLabel: formatInvoiceMoney(lineTotal, currency),

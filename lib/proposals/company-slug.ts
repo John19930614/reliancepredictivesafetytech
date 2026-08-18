@@ -16,11 +16,21 @@
 // exactly as it is, because the numbers it minted are printed on documents
 // clients already hold and must remain explicable.
 //
-//   PROPOSAL   {SLUG}-{YYYY}-{NNN}   WONDFOUSA-2026-001
-//   INVOICE    {PROPOSAL}-{NN}       WONDFOUSA-2026-001-01
+//   PROPOSAL         {SLUG}-{YYYY}-{NNN}      WONDFOUSA-2026-001
+//   INVOICE          {PROPOSAL}-{NN}          WONDFOUSA-2026-001-01
+//   MANUAL INVOICE   {SLUG}-{YYYY}-INV-{NN}   WONDFOUSA-2026-INV-01
 //
 // One proposal carries many invoices, so an invoice number is its parent's
 // number plus a suffix — the parent is always readable off the child.
+//
+// A MANUAL invoice has no parent to hang off — it bills a callout, not a
+// contract — so it is numbered off the client's slug directly, on its own
+// per-client, per-year sequence. The literal INV field is what keeps it apart:
+// it occupies exactly the position a proposal's sequence occupies, and a
+// sequence is always digits, so the two shapes can never meet. That is also why
+// a manual invoice is NOT numbered {SLUG}-{YYYY}-{NNN} off some shared counter:
+// the first person to read WONDFOUSA-2026-004 off an invoice would go looking
+// for a proposal of that number, and there would never be one.
 //
 // The parsers refuse every legacy shape (HUN-01, RPS-2026-0007,
 // RPS-INV-2026-0001) on purpose; see parseProposalNumber.
@@ -53,6 +63,22 @@ export const reservedSlug = "RPS";
 
 const proposalNumberPattern = /^([A-Z0-9]{2,40})-([1-9]\d{3})-(\d{3}|[1-9]\d{3,})$/;
 const invoiceSequencePattern = /^(\d{2}|[1-9]\d{2,})$/;
+
+/**
+ * SLUG-YYYY-INV-NN, the manual invoice — one with no proposal behind it.
+ *
+ * The sequence field carries the same two-digit-or-wider rule as
+ * `invoiceSequencePattern` above and for the same reason, and the year field the
+ * same 1000-9999 rule as `proposalNumberPattern`.
+ *
+ * The literal INV sits where a proposal number's sequence sits, and that field
+ * is digits in every scheme this module reads. So no manual invoice number can
+ * ever be read as a proposal number, and no proposal number — nor an invoice
+ * raised against one, which is a proposal number plus a two-digit tail — can
+ * ever be read as a manual one. Do not relax INV into an optional or
+ * case-insensitive field; it is carrying the whole separation.
+ */
+const manualInvoiceNumberPattern = /^([A-Z0-9]{2,40})-([1-9]\d{3})-INV-(\d{2}|[1-9]\d{2,})$/;
 
 /** Uppercases and strips everything outside A-Z0-9; "" for non-strings. Does NOT validate. */
 export function normalizeCompanySlug(value: unknown): string {
@@ -133,6 +159,26 @@ export function formatProposalNumber(slug: string, year: number, seq: number): s
  */
 export function formatInvoiceNumber(proposalNumber: string, seq: number): string {
   return `${normalizeDocumentNumber(proposalNumber)}-${sequenceDigits(seq, 2)}`;
+}
+
+/**
+ * SLUG-YYYY-INV-NN, the sequence zero-padded to two digits — a manual invoice,
+ * raised against a client with no proposal behind it.
+ *
+ * Same padding rule as formatInvoiceNumber (two wide, GROWN past it, never
+ * truncated) because it is allocated by the same
+ * lpad(…, greatest(2, length(…)), '0') in allocate_client_invoice_number().
+ * Same year rule as formatProposalNumber, for the same reason: a clipped year
+ * is a wrong year, and a year the caller lost must produce a number that
+ * visibly fails to resolve.
+ *
+ * The slug is normalized, not validated. A client with no slug has no manual
+ * invoice number — the caller must obtain one first, which is what
+ * allocate_client_invoice_number() now raises rather than falling back to the
+ * global RPS-INV scheme, whose numbers say nothing about whose invoice it is.
+ */
+export function formatManualInvoiceNumber(slug: string, year: number, seq: number): string {
+  return `${normalizeCompanySlug(slug)}-${yearDigits(year)}-INV-${sequenceDigits(seq, 2)}`;
 }
 
 /**
@@ -278,4 +324,39 @@ export function parseInvoiceNumber(
   if (seq < 1) return null;
 
   return { proposalNumber, seq };
+}
+
+/**
+ * SLUG-YYYY-INV-NN back into its parts, or null.
+ *
+ * Refuses every legacy shape, exactly as the two parsers above do:
+ *   HUN-01              — the 2026-08-07 per-client code, no year field
+ *   RPS-2026-0007       — the global proposal scheme
+ *   RPS-INV-2026-0001   — the RETIRED global manual-invoice allocator. Note how
+ *                         close it sits: same four fields, same INV, and it is
+ *                         refused because INV is in the wrong one. The year has
+ *                         to be the SECOND field, which is the whole reason the
+ *                         new shape puts the slug first — a manual invoice now
+ *                         names its client where the old one named the vendor.
+ * A rejected number is not a broken number; it belongs to a scheme this module
+ * does not own, and the caller should say so.
+ */
+export function parseManualInvoiceNumber(
+  value: unknown,
+): { slug: string; year: number; seq: number } | null {
+  if (typeof value !== "string") return null;
+
+  const match = manualInvoiceNumberPattern.exec(value.trim().toUpperCase());
+  if (!match) return null;
+
+  const seq = Number(match[3]);
+  // "00" satisfies the two-digit field but no invoice is ever the zeroth.
+  if (seq < 1) return null;
+
+  // Same reservation, same reason as parseProposalNumber: no client can hold
+  // the slug RPS (company_clients_company_slug_format refuses it), so a number
+  // wearing it was never minted by this scheme however it is shaped.
+  if (match[1] === reservedSlug) return null;
+
+  return { slug: match[1], year: Number(match[2]), seq };
 }

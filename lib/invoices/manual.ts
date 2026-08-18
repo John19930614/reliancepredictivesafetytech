@@ -16,6 +16,13 @@
 // lineTotalFor/invoiceTotalsFrom that price a proposal-derived invoice — so a
 // manual invoice and a generated one cannot disagree about what a line is worth.
 //
+// A PROPOSAL MAY STILL BE NAMED. Typing the lines by hand and billing against
+// a contract are separate decisions, and the second one is optional here: an
+// operator who knows which proposal this work sits under says so, and gets the
+// {PROPOSAL}-{NN} number and the contract-value ceiling that come with it. What
+// this module never does is let the browser decide that a proposal belongs to a
+// client — see NewManualInvoiceInput.proposalId.
+//
 // PURE and side-effect free, in the same spirit as draft.ts: no Supabase, no
 // clock. `now` is a parameter so the due-date derivation is testable.
 
@@ -26,6 +33,7 @@ import {
   lineTotalFor,
   maxInvoiceAmount,
   maxLineDescriptionLength,
+  maxLineDescriptionLines,
   maxLineQuantity,
   maxLineUnitAmount,
   maxLineUnitLength,
@@ -49,6 +57,21 @@ export interface NewManualInvoiceLine {
 
 export interface NewManualInvoiceInput {
   clientId: string;
+  /**
+   * The proposal this invoice bills against, or null when it bills none.
+   *
+   * OPTIONAL, and the choice changes two things the operator is relying on.
+   * With it set, allocate_client_invoice_number() numbers the invoice
+   * {PROPOSAL_NUMBER}-{NN} instead of {SLUG}-{YYYY}-INV-{NN}, and
+   * guard_client_invoice_total() starts refusing invoices that would take the
+   * live total above the proposal's value. Both are wanted.
+   *
+   * Only SHAPED here — trimmed, and blank read as "none". Whether the proposal
+   * exists and belongs to this client is a database question, so it is asked
+   * where the database is (app/employee/invoices/actions.ts), for the same
+   * reason the company slug is checked there.
+   */
+  proposalId?: string | null;
   /** ISO 4217, three characters — the column CHECK is char_length = 3. */
   currency: string;
   /** YYYY-MM-DD. Empty means "today", resolved from the `now` argument. */
@@ -81,6 +104,8 @@ export interface NormalisedManualInvoiceLine {
 /** The invoice as it will be written. Every money figure is derived here. */
 export interface NormalisedManualInvoice {
   clientId: string;
+  /** null when this invoice bills no proposal. See NewManualInvoiceInput. */
+  proposalId: string | null;
   currency: string;
   issueDate: string;
   dueDate: string;
@@ -146,6 +171,56 @@ function orNull(value: string): string | null {
 }
 
 /**
+ * A line description as it will be STORED, newlines and all.
+ *
+ * A description carries a heading and its detail —
+ *
+ *   Training
+ *   Biosafety Training: Classroom and Practical.
+ *
+ * — so unlike every other field on this form it is not flattened onto one line.
+ * What is done to it:
+ *
+ *   CRLF -> LF          A Windows browser and a cell pasted out of Word both
+ *                       arrive as \r\n, and a stray \r reaches pdf-lib's
+ *                       drawText as a character Helvetica cannot encode — which
+ *                       THROWS, taking the whole download down rather than
+ *                       printing oddly.
+ *   per-line collapse   Runs of spaces and tabs inside a line become one space,
+ *                       exactly as text() does for every other field. The
+ *                       newline is the only whitespace that survives as itself.
+ *   ends trimmed        Blank lines at the top and bottom are what a textarea
+ *                       collects from an Enter pressed on the way out. They
+ *                       would print as an empty row on the client's invoice and
+ *                       spend the line budget below. Blank lines BETWEEN two
+ *                       blocks of text are KEPT — that gap was typed on purpose.
+ *
+ * A description of nothing but whitespace normalises to "", which the caller
+ * reports as a missing description rather than storing a blank the column CHECK
+ * (char_length(btrim(description)) >= 1) would refuse anyway.
+ */
+export function normaliseLineDescription(value: unknown): string {
+  if (typeof value !== "string") return "";
+
+  const lines = value
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    // A negated \S inside the class matches every whitespace EXCEPT the
+    // newline, so this collapses spaces and tabs without eating the breaks.
+    .map((line) => line.replace(/[^\S\n]+/g, " ").trim());
+
+  while (lines.length > 0 && lines[0] === "") lines.shift();
+  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+
+  return lines.join("\n");
+}
+
+/** How many printed lines a normalised description occupies; "" is none. */
+function descriptionLineCount(description: string): number {
+  return description === "" ? 0 : description.split("\n").length;
+}
+
+/**
  * Validates one operator's hand-typed invoice and returns it in the shape the
  * writer stores.
  *
@@ -155,8 +230,11 @@ function orNull(value: string): string | null {
  * "Quantity must be more than zero" against a screen of rows is not actionable.
  *
  * Deliberately silent about the invoice number: the allocate_client_invoice_number()
- * trigger mints RPS-INV-{YYYY}-{NNNN} for a row with no proposal, and a number
- * chosen anywhere else would collide with the counter that owns it.
+ * trigger mints {SLUG}-{YYYY}-INV-{NN} for a row with no proposal, and a number
+ * chosen anywhere else would collide with the counter that owns it. It is also
+ * silent about the company slug that number is built from — that is a fact
+ * about the client, not about what was typed on this form, so it is checked
+ * where the client is read (app/employee/invoices/actions.ts).
  */
 export function validateManualInvoice(input: NewManualInvoiceInput, now: Date): ManualInvoiceCheck {
   const errors: string[] = [];
@@ -167,6 +245,11 @@ export function validateManualInvoice(input: NewManualInvoiceInput, now: Date): 
 
   const clientId = text(input.clientId);
   if (clientId.length === 0) errors.push("Choose the client this invoice is for.");
+
+  // Blank means "no proposal", which is the norm for this form and is what
+  // keeps the {SLUG}-{YYYY}-INV-{NN} numbering and the stood-down contract
+  // guard. It is not an error, so nothing is pushed here.
+  const proposalId = text(input.proposalId);
 
   /* --- Currency ---------------------------------------------------------- */
 
@@ -255,10 +338,16 @@ export function validateManualInvoice(input: NewManualInvoiceInput, now: Date): 
     const at = `Line ${index + 1}`;
     const line = raw && typeof raw === "object" ? raw : ({} as NewManualInvoiceLine);
 
-    const description = text(line.description);
+    // NOT text(): a description may run to several lines, and flattening it
+    // here would silently discard the heading/detail shape the operator typed
+    // and both document writers now render.
+    const description = normaliseLineDescription(line.description);
     if (description.length === 0) errors.push(`${at}: add a description.`);
     if (description.length > maxLineDescriptionLength) {
       errors.push(`${at}: keep the description under ${maxLineDescriptionLength} characters.`);
+    }
+    if (descriptionLineCount(description) > maxLineDescriptionLines) {
+      errors.push(`${at}: keep the description to ${maxLineDescriptionLines} lines or fewer.`);
     }
 
     // Rounded BEFORE the bounds are tested, because the rounded value is what
@@ -336,6 +425,7 @@ export function validateManualInvoice(input: NewManualInvoiceInput, now: Date): 
     ok: true,
     value: {
       clientId,
+      proposalId: orNull(proposalId),
       currency,
       issueDate,
       dueDate,

@@ -108,7 +108,7 @@ function modelFor(overrides: Partial<InvoiceDocumentInput> = {}) {
  * raw bytes; both need the stream decoded first. (Lifted from
  * lib/proposals/pdf.test.ts, which needed the same thing.)
  */
-async function drawnPages(bytes: Uint8Array): Promise<string[]> {
+async function pageOperators(bytes: Uint8Array): Promise<string[]> {
   const doc = await PDFDocument.load(bytes);
 
   return doc.getPages().map((page) => {
@@ -118,7 +118,7 @@ async function drawnPages(bytes: Uint8Array): Promise<string[]> {
         ? contents.asArray().map((ref) => page.node.context.lookup(ref))
         : [contents];
 
-    const operators = streams
+    return streams
       .map((stream) => {
         if (!(stream instanceof PDFRawStream)) return "";
         const raw = Buffer.from(stream.contents);
@@ -129,11 +129,52 @@ async function drawnPages(bytes: Uint8Array): Promise<string[]> {
         }
       })
       .join("\n");
-
-    return [...operators.matchAll(/<([0-9A-Fa-f]*)>\s*Tj/g)]
-      .map(([, hex]) => Buffer.from(hex, "hex").toString("latin1"))
-      .join("\n");
   });
+}
+
+async function drawnPages(bytes: Uint8Array): Promise<string[]> {
+  return (await pageOperators(bytes)).map((operators) =>
+    [...operators.matchAll(/<([0-9A-Fa-f]*)>\s*Tj/g)]
+      .map(([, hex]) => Buffer.from(hex, "hex").toString("latin1"))
+      .join("\n"),
+  );
+}
+
+/**
+ * Every drawn run WITH the position it was drawn at.
+ *
+ * The text alone cannot answer "did this row grow": a renderer that drew three
+ * description lines on top of each other would satisfy every toContain()
+ * assertion in this file and produce an unreadable invoice. pdf-lib emits each
+ * run as `1 0 0 1 X Y Tm` followed by `<hex> Tj`, so the two are paired in
+ * stream order here.
+ */
+async function drawnRuns(bytes: Uint8Array): Promise<Array<{ text: string; x: number; y: number; page: number }>> {
+  const runs: Array<{ text: string; x: number; y: number; page: number }> = [];
+
+  (await pageOperators(bytes)).forEach((operators, page) => {
+    let x = 0;
+    let y = 0;
+    for (const match of operators.matchAll(
+      /1 0 0 1 (-?[\d.]+) (-?[\d.]+) Tm|<([0-9A-Fa-f]*)>\s*Tj/g,
+    )) {
+      if (match[1] !== undefined) {
+        x = Number(match[1]);
+        y = Number(match[2]);
+        continue;
+      }
+      runs.push({ text: Buffer.from(match[3] ?? "", "hex").toString("latin1"), x, y, page });
+    }
+  });
+
+  return runs;
+}
+
+/** The y a given run was drawn at. Throws rather than silently comparing NaN. */
+function yOf(runs: Array<{ text: string; y: number }>, text: string): number {
+  const run = runs.find((entry) => entry.text === text);
+  if (!run) throw new Error(`"${text}" was never drawn. Drawn: ${runs.map((r) => r.text).join(" | ")}`);
+  return run.y;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -183,6 +224,49 @@ describe("wrapText", () => {
     const font = await doc.embedFont(StandardFonts.Helvetica);
     expect(wrapText("", font, 8, 100)).toEqual([]);
     expect(wrapText("   \n  ", font, 8, 100)).toEqual([]);
+  });
+
+  it("breaks on a newline BEFORE it word-wraps", async () => {
+    // The heading/detail shape an operator types into a description. A "\n" is
+    // not a character drawText can encode — it throws on one — so the break has
+    // to become a new drawn line here or be lost entirely.
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+
+    expect(wrapText("Training\nBiosafety Training: Classroom and Practical.", font, 7.8, 206)).toEqual([
+      "Training",
+      "Biosafety Training: Classroom and Practical.",
+    ]);
+    expect(wrapText("Audit\n4-Hour Audit. Audit report submitted", font, 7.8, 206)).toEqual([
+      "Audit",
+      "4-Hour Audit. Audit report submitted",
+    ]);
+  });
+
+  it("word-wraps each paragraph separately rather than reflowing across the break", async () => {
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const lines = wrapText(`Heading\n${"word ".repeat(40)}`, font, 7.8, 100);
+
+    // The heading keeps a line of its own; the paragraph under it wraps.
+    expect(lines[0]).toBe("Heading");
+    expect(lines.length).toBeGreaterThan(2);
+    for (const text of lines) expect(font.widthOfTextAtSize(text, 7.8)).toBeLessThanOrEqual(100);
+  });
+
+  it("keeps a blank line typed between two paragraphs and drops the ones at the ends", async () => {
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    // A gap between blocks was typed on purpose; a blank line at either end is
+    // an Enter on the way out of the box and would print as an empty row.
+    expect(wrapText("\n\nOne\n\nTwo\n\n", font, 8, 200)).toEqual(["One", "", "Two"]);
+  });
+
+  it("treats a CRLF as one break, not two", async () => {
+    // A Windows browser and a cell pasted out of Word both send \r\n.
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    expect(wrapText("Training\r\nBiosafety Training", font, 8, 200)).toEqual(["Training", "Biosafety Training"]);
   });
 });
 
@@ -400,6 +484,82 @@ describe("renderInvoicePdf", () => {
     expect(text).toContain("REFERENCE PROPOSAL NUMBER");
     expect(text).toContain("TOTAL");
     expect(text).toContain("$0.00");
+  });
+
+  it("draws each line of a multi-line description on its own line", async () => {
+    // The exact two descriptions the business asked for, through the model and
+    // out the other side as separate drawn runs — not one run with the break
+    // silently dropped (a "\n" reaching drawText THROWS rather than printing).
+    const model = modelFor({
+      lines: [
+        line({ serviceDate: "2025-10-06", description: "Training\nBiosafety Training: Classroom and Practical." }),
+        line({ serviceDate: "2025-10-20", description: "Audit\n4-Hour Audit. Audit report submitted" }),
+      ],
+    });
+
+    const runs = await drawnRuns(await renderInvoicePdf({ model }));
+    const texts = runs.map((run) => run.text);
+
+    expect(texts).toContain("Training");
+    expect(texts).toContain("Biosafety Training: Classroom and Practical.");
+    expect(texts).toContain("Audit");
+    expect(texts).toContain("4-Hour Audit. Audit report submitted");
+    // The two halves were never run together into one line.
+    expect(texts).not.toContain("Training Biosafety Training: Classroom and Practical.");
+
+    // Same column, stacked: the detail sits BELOW its heading, at the same x.
+    const heading = runs.find((run) => run.text === "Training")!;
+    const detail = runs.find((run) => run.text === "Biosafety Training: Classroom and Practical.")!;
+    expect(detail.x).toBe(heading.x);
+    expect(detail.y).toBeLessThan(heading.y);
+  });
+
+  it("grows the row so a multi-line description cannot overlap the row under it", async () => {
+    // THE assertion that matters. Two invoices identical but for the breaks in
+    // their descriptions; the taller one must push the next row further down,
+    // by at least the height of the lines it gained.
+    const flat = modelFor({
+      lines: [
+        line({ serviceDate: "2025-10-06", description: "Training" }),
+        line({ serviceDate: "2025-10-20", description: "Audit" }),
+      ],
+    });
+    const tall = modelFor({
+      lines: [
+        line({
+          serviceDate: "2025-10-06",
+          description: "Training\nBiosafety Training: Classroom and Practical.\nThird line of detail",
+        }),
+        line({ serviceDate: "2025-10-20", description: "Audit" }),
+      ],
+    });
+
+    const flatRuns = await drawnRuns(await renderInvoicePdf({ model: flat }));
+    const tallRuns = await drawnRuns(await renderInvoicePdf({ model: tall }));
+
+    // The DATE cell of each row is drawn once and identifies the row.
+    const flatGap = yOf(flatRuns, "10/06/2025") - yOf(flatRuns, "10/20/2025");
+    const tallGap = yOf(tallRuns, "10/06/2025") - yOf(tallRuns, "10/20/2025");
+
+    // Two extra description lines at 7.8pt on 1.32 leading is ~20.6pt of extra
+    // row; asserted as "at least two lines' worth" rather than to the point.
+    expect(tallGap).toBeGreaterThanOrEqual(flatGap + 2 * 7.8);
+
+    // And the third line still clears the next row's first cell, which is the
+    // overlap this is really guarding against.
+    expect(yOf(tallRuns, "Third line of detail")).toBeGreaterThan(yOf(tallRuns, "10/20/2025"));
+  });
+
+  it("renders a description at the line cap without throwing or losing the tail", async () => {
+    // Eight lines is maxLineDescriptionLines, the tallest row the validator will
+    // let through. It must still draw, and the last line must still be on a page.
+    const description = Array.from({ length: 8 }, (_, index) => `Detail line ${index + 1}`).join("\n");
+    const bytes = await renderInvoicePdf({ model: modelFor({ lines: [line({ description })] }) });
+
+    expect(Buffer.from(bytes.slice(0, 5)).toString()).toBe("%PDF-");
+    const text = (await drawnPages(bytes)).join("\n");
+    expect(text).toContain("Detail line 1");
+    expect(text).toContain("Detail line 8");
   });
 
   it("carries no file route or localhost URL into the page margin", async () => {

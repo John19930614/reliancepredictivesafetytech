@@ -108,13 +108,12 @@ export function toPdfText(value: string): string {
 }
 
 /**
- * Greedy word wrap.
+ * Greedy word wrap, one paragraph at a time.
  *
  * A single word longer than the column (a long PO number, a URL) is hard-split
  * rather than allowed to overflow into the next column's figures.
  */
-export function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
-  const clean = toPdfText(text).replace(/\s+/g, " ").trim();
+function wrapParagraph(clean: string, font: PDFFont, size: number, maxWidth: number): string[] {
   if (clean === "") return [];
 
   const lines: string[] = [];
@@ -145,6 +144,54 @@ export function wrapText(text: string, font: PDFFont, size: number, maxWidth: nu
   }
 
   if (current !== "") lines.push(current);
+  return lines;
+}
+
+/**
+ * Every drawable line of `text` in a column `maxWidth` wide.
+ *
+ * SPLITS ON THE NEWLINE FIRST, then word-wraps each paragraph. A line-item
+ * description now legitimately carries a heading and its detail —
+ *
+ *   Training
+ *   Biosafety Training: Classroom and Practical.
+ *
+ * — and there is no way to pass that through to pdf-lib as one string: a raw
+ * "\n" inside drawText is not a break, it is a character WinAnsi cannot encode,
+ * and drawText THROWS on it (see toPdfText above) rather than drawing a box.
+ * Collapsing it to a space instead — which is what this function used to do,
+ * via a single /\s+/ — silently ran the heading into the sentence under it.
+ * Breaking it here is the only option that both renders and cannot throw.
+ *
+ * Every caller measures a block's height as `lines.length * lineHeight`, so a
+ * description that breaks makes its own row taller: drawTableRow takes the
+ * max across the row's cells, and the totals and the rule under the row move
+ * down with it. Nothing overlaps and nothing has to know a description is
+ * special.
+ *
+ * A blank line BETWEEN two paragraphs survives as an empty entry — a gap the
+ * operator typed is a gap the client should see — but leading and trailing
+ * blanks are dropped, so whitespace-only input is still no lines at all rather
+ * than an invisible row of height 2.
+ */
+export function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
+  const paragraphs = toPdfText(text)
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((paragraph) => paragraph.replace(/\s+/g, " ").trim());
+
+  const lines: string[] = [];
+  for (const paragraph of paragraphs) {
+    if (paragraph === "") {
+      // Nothing drawn yet means a leading blank, which is not a gap between
+      // anything. Trailing blanks are popped after the loop.
+      if (lines.length > 0) lines.push("");
+      continue;
+    }
+    lines.push(...wrapParagraph(paragraph, font, size, maxWidth));
+  }
+  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+
   return lines;
 }
 

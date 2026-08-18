@@ -248,6 +248,27 @@ export const maxInvoiceAmount = 100_000_000;
 /** Matches the column CHECK: char_length(btrim(description)) between 1 and 500. */
 export const maxLineDescriptionLength = 500;
 
+/**
+ * How many printed lines one description may carry.
+ *
+ * A description now holds a heading and its detail —
+ *
+ *   Training
+ *   Biosafety Training: Classroom and Practical.
+ *
+ * — which is what the operator types and what both document writers render.
+ * The COUNT is capped as well as the length because the two bound different
+ * failures: 500 characters spread over 400 newlines satisfies the column CHECK
+ * and still prints a row half a page tall, which shoves the totals block off
+ * the sheet and turns a one-page bill into three. Eight is generous for a
+ * heading plus detail and keeps the tallest possible row inside the geometry
+ * lib/invoices/pdf.ts is sized for.
+ *
+ * There is deliberately no matching column CHECK: the database bounds the TEXT,
+ * and how tall that text prints is a layout fact this codebase owns.
+ */
+export const maxLineDescriptionLines = 8;
+
 /** Matches the column CHECK on client_invoice_line_items.unit. */
 export const maxLineUnitLength = 60;
 

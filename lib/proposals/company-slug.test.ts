@@ -3,10 +3,12 @@ import {
   companySlugPattern,
   companySlugRule,
   formatInvoiceNumber,
+  formatManualInvoiceNumber,
   formatProposalNumber,
   isValidCompanySlug,
   normalizeCompanySlug,
   parseInvoiceNumber,
+  parseManualInvoiceNumber,
   parseProposalNumber,
   suggestCompanySlug,
 } from "./company-slug";
@@ -530,5 +532,264 @@ describe("the RPS reservation", () => {
     // At 1000 the shapes are identical and only the reservation separates them.
     expect(parseProposalNumber("RPS-2026-1000")).toBeNull();
     expect(parseInvoiceNumber("RPS-2026-1000-01")).toBeNull();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Manual invoices — SLUG-YYYY-INV-NN, no proposal behind them                 */
+/* -------------------------------------------------------------------------- */
+
+describe("formatManualInvoiceNumber", () => {
+  it("puts the client's slug first and the literal INV where a proposal sequence would sit", () => {
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, 1)).toBe("WONDFOUSA-2026-INV-01");
+    expect(formatManualInvoiceNumber("STAFFELECTRIC", 2027, 3)).toBe("STAFFELECTRIC-2027-INV-03");
+  });
+
+  it("zero-pads the sequence to two digits", () => {
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, 1)).toBe("WONDFOUSA-2026-INV-01");
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, 9)).toBe("WONDFOUSA-2026-INV-09");
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, 10)).toBe("WONDFOUSA-2026-INV-10");
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, 99)).toBe("WONDFOUSA-2026-INV-99");
+  });
+
+  it("grows past 99 instead of truncating", () => {
+    // lpad(v_seq::text, greatest(2, length(v_seq::text)), '0') in
+    // allocate_client_invoice_number(). A bare two-char pad turns 100 into "10"
+    // — a second invoice claiming an issued invoice's number.
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, 100)).toBe("WONDFOUSA-2026-INV-100");
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, 1000)).toBe("WONDFOUSA-2026-INV-1000");
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, 100)).not.toBe(
+      formatManualInvoiceNumber("WONDFOUSA", 2026, 10),
+    );
+  });
+
+  it("normalizes the slug it is given", () => {
+    expect(formatManualInvoiceNumber("wondfo usa", 2026, 1)).toBe("WONDFOUSA-2026-INV-01");
+    expect(formatManualInvoiceNumber(" Wondfo-USA ", 2026, 1)).toBe("WONDFOUSA-2026-INV-01");
+  });
+
+  it("never emits a zero, negative or non-numeric sequence", () => {
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, 0)).toBe("WONDFOUSA-2026-INV-01");
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, -3)).toBe("WONDFOUSA-2026-INV-01");
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, 2.9)).toBe("WONDFOUSA-2026-INV-02");
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, NaN)).toBe("WONDFOUSA-2026-INV-01");
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, Infinity)).toBe("WONDFOUSA-2026-INV-01");
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, undefined as unknown as number)).toBe(
+      "WONDFOUSA-2026-INV-01",
+    );
+  });
+
+  it("emits an unparseable year rather than a plausible wrong one", () => {
+    for (const badYear of [NaN, undefined as unknown as number, 0, -2026]) {
+      const number = formatManualInvoiceNumber("WONDFOUSA", badYear, 1);
+      expect(number).toBe("WONDFOUSA-0000-INV-01");
+      expect(parseManualInvoiceNumber(number)).toBeNull();
+    }
+  });
+
+  it("produces a number the parser refuses when the slug was never valid", () => {
+    // The case that matters in practice: a client with no company_slug. The
+    // action refuses before it gets here and the allocator raises, but if
+    // either were bypassed the number would visibly fail to resolve rather
+    // than quietly naming nobody.
+    for (const badSlug of ["", "A", emoji, "!!", "RPS"]) {
+      expect(parseManualInvoiceNumber(formatManualInvoiceNumber(badSlug, 2026, 1))).toBeNull();
+    }
+    expect(parseManualInvoiceNumber(formatManualInvoiceNumber(null as unknown as string, 2026, 1))).toBeNull();
+  });
+});
+
+describe("parseManualInvoiceNumber", () => {
+  it("reads back what formatManualInvoiceNumber wrote", () => {
+    const cases: Array<[string, number, number]> = [
+      ["WONDFOUSA", 2026, 1],
+      ["WONDFOUSA", 2026, 9],
+      ["WONDFOUSA", 2026, 10],
+      ["WONDFOUSA", 2026, 99],
+      ["WONDFOUSA", 2026, 100],
+      ["HUNZINGERCONSTRUCTION", 2026, 1000],
+      ["STAFFELECTRIC", 2027, 7],
+      ["3M", 2026, 1],
+      ["Z".repeat(40), 9999, 42],
+    ];
+    for (const [slug, year, seq] of cases) {
+      expect(parseManualInvoiceNumber(formatManualInvoiceNumber(slug, year, seq))).toEqual({
+        slug,
+        year,
+        seq,
+      });
+    }
+  });
+
+  it("accepts the grown sequence band without a leading zero", () => {
+    expect(parseManualInvoiceNumber("WONDFOUSA-2026-INV-100")).toEqual({
+      slug: "WONDFOUSA",
+      year: 2026,
+      seq: 100,
+    });
+    expect(parseManualInvoiceNumber("WONDFOUSA-2026-INV-1000")).toEqual({
+      slug: "WONDFOUSA",
+      year: 2026,
+      seq: 1000,
+    });
+  });
+
+  it("refuses the legacy schemes so the two can never be confused", () => {
+    // RPS-INV-2026-0001 — the RETIRED global allocator, and the reason this
+    // shape exists at all. Four fields and an INV, like the new one, but the
+    // INV is in the second position and the year in the third: it names the
+    // vendor where the new shape names the client.
+    expect(parseManualInvoiceNumber("RPS-INV-2026-0001")).toBeNull();
+    expect(parseManualInvoiceNumber("RPS-INV-2026-01")).toBeNull();
+    expect(parseManualInvoiceNumber("WONDFOUSA-INV-2026-01")).toBeNull();
+    // RPS is reserved as a slug, so no client can ever hold it.
+    expect(parseManualInvoiceNumber("RPS-2026-INV-01")).toBeNull();
+    expect(parseManualInvoiceNumber("RPS-2026-INV-1000")).toBeNull();
+    // HUN-01 — the 2026-08-07 per-client code, and an invoice against one.
+    expect(parseManualInvoiceNumber("HUN-01")).toBeNull();
+    expect(parseManualInvoiceNumber("HUN-01-01")).toBeNull();
+    // The global proposal scheme, and an invoice raised against one.
+    expect(parseManualInvoiceNumber("RPS-2026-0007")).toBeNull();
+    expect(parseManualInvoiceNumber("RPS-2026-0007-01")).toBeNull();
+  });
+
+  it("refuses a zeroth invoice, an impossible year and a malformed tail", () => {
+    for (const bad of [
+      "WONDFOUSA-2026-INV-00",
+      "WONDFOUSA-2026-INV-0",
+      "WONDFOUSA-2026-INV-1",
+      // A four-digit zero-padded tail is the legacy sequence shape.
+      "WONDFOUSA-2026-INV-0001",
+      "WONDFOUSA-2026-INV-01-01",
+      "WONDFOUSA-2026-INV-1A",
+      "WONDFOUSA-2026-INV-1.5",
+      "WONDFOUSA-2026-INV-",
+      "WONDFOUSA-2026-INV",
+      "WONDFOUSA-0000-INV-01",
+      "WONDFOUSA-026-INV-01",
+      "WONDFOUSA-20260-INV-01",
+      "-2026-INV-01",
+      "INV-01",
+    ]) {
+      expect(parseManualInvoiceNumber(bad)).toBeNull();
+    }
+  });
+
+  it("refuses anything but the exact literal INV in that field", () => {
+    for (const bad of [
+      "WONDFOUSA-2026-INVOICE-01",
+      "WONDFOUSA-2026-XINV-01",
+      "WONDFOUSA-2026-INVX-01",
+      "WONDFOUSA-2026-IN-01",
+      "WONDFOUSA-2026-IN V-01",
+      "WONDFOUSA-2026--01",
+    ]) {
+      expect(parseManualInvoiceNumber(bad)).toBeNull();
+    }
+  });
+
+  it("refuses malformed and out-of-range slugs", () => {
+    for (const bad of [
+      "W-2026-INV-01",
+      `${"Z".repeat(41)}-2026-INV-01`,
+      "WONDFO USA-2026-INV-01",
+      "WONDFO_USA-2026-INV-01",
+    ]) {
+      expect(parseManualInvoiceNumber(bad)).toBeNull();
+    }
+  });
+
+  it("tolerates surrounding whitespace and casing from a pasted reference", () => {
+    expect(parseManualInvoiceNumber("  wondfousa-2026-inv-01 ")).toEqual({
+      slug: "WONDFOUSA",
+      year: 2026,
+      seq: 1,
+    });
+  });
+
+  it("returns null for hostile input rather than throwing", () => {
+    for (const bad of [...hostileValues, sqlish, htmlish, emoji, longName]) {
+      expect(parseManualInvoiceNumber(bad)).toBeNull();
+    }
+  });
+
+  it("never mints the same string for two different sequences", () => {
+    const numbers = new Set<string>();
+    for (let seq = 1; seq <= 2000; seq += 1) {
+      numbers.add(formatManualInvoiceNumber("WONDFOUSA", 2026, seq));
+    }
+    expect(numbers.size).toBe(2000);
+  });
+
+  it("keeps every year's and every client's sequences apart", () => {
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, 1)).not.toBe(
+      formatManualInvoiceNumber("WONDFOUSA", 2027, 1),
+    );
+    expect(formatManualInvoiceNumber("WONDFOUSA", 2026, 1)).not.toBe(
+      formatManualInvoiceNumber("STAFFELECTRIC", 2026, 1),
+    );
+  });
+});
+
+describe("the three schemes cannot be read as one another", () => {
+  // The property the whole design rests on, asserted in BOTH directions for
+  // every pair. Sequences chosen to cross each padding boundary, because that
+  // is where the shapes come closest.
+  const seqs = [1, 9, 10, 99, 100, 1000];
+
+  it("no manual invoice number parses as a proposal or as a proposal's invoice", () => {
+    for (const year of [2026, 9999]) {
+      for (const seq of seqs) {
+        const manual = formatManualInvoiceNumber("WONDFOUSA", year, seq);
+        expect(parseProposalNumber(manual)).toBeNull();
+        expect(parseInvoiceNumber(manual)).toBeNull();
+        expect(parseManualInvoiceNumber(manual)).not.toBeNull();
+      }
+    }
+  });
+
+  it("no proposal number, and no invoice against one, parses as a manual invoice", () => {
+    for (const year of [2026, 9999]) {
+      for (const seq of seqs) {
+        const proposal = formatProposalNumber("WONDFOUSA", year, seq);
+        expect(parseManualInvoiceNumber(proposal)).toBeNull();
+
+        for (const child of seqs) {
+          const invoice = formatInvoiceNumber(proposal, child);
+          expect(parseManualInvoiceNumber(invoice)).toBeNull();
+          expect(parseInvoiceNumber(invoice)).not.toBeNull();
+        }
+      }
+    }
+  });
+
+  it("mints three distinct strings for the same client, year and sequence", () => {
+    const proposal = formatProposalNumber("WONDFOUSA", 2026, 1);
+    const invoice = formatInvoiceNumber(proposal, 1);
+    const manual = formatManualInvoiceNumber("WONDFOUSA", 2026, 1);
+    expect(new Set([proposal, invoice, manual]).size).toBe(3);
+  });
+
+  it("keeps a client actually slugged INV unambiguous", () => {
+    // Nothing reserves INV as a slug and nothing needs to: the literal sits in
+    // a field a proposal fills with digits, so the shapes still cannot meet.
+    expect(isValidCompanySlug("INV")).toBe(true);
+
+    const proposal = formatProposalNumber("INV", 2026, 1);
+    const invoice = formatInvoiceNumber(proposal, 1);
+    const manual = formatManualInvoiceNumber("INV", 2026, 1);
+
+    expect(proposal).toBe("INV-2026-001");
+    expect(invoice).toBe("INV-2026-001-01");
+    expect(manual).toBe("INV-2026-INV-01");
+
+    expect(parseProposalNumber(proposal)).toEqual({ slug: "INV", year: 2026, seq: 1 });
+    expect(parseInvoiceNumber(invoice)).toEqual({ proposalNumber: proposal, seq: 1 });
+    expect(parseManualInvoiceNumber(manual)).toEqual({ slug: "INV", year: 2026, seq: 1 });
+
+    expect(parseManualInvoiceNumber(proposal)).toBeNull();
+    expect(parseManualInvoiceNumber(invoice)).toBeNull();
+    expect(parseProposalNumber(manual)).toBeNull();
+    expect(parseInvoiceNumber(manual)).toBeNull();
   });
 });

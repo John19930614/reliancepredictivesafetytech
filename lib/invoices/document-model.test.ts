@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { maxLineDescriptionLines } from "./draft";
 import {
   buildInvoiceDocumentModel,
   formatInvoiceDate,
@@ -377,12 +378,13 @@ describe("buildInvoiceDocumentModel", () => {
   });
 
   it("collapses control characters that would restructure a cell", () => {
-    // Every field occupies one cell of a fixed layout. A newline inside a
-    // description would silently split the row in Word while doing nothing in
-    // the PDF, so the two renderers would disagree.
+    // Every field but the line description occupies ONE cell of a fixed layout.
+    // A newline in a party name or a bar cell is a broken value, not a layout
+    // choice, so it is still flattened. The description is the exception —
+    // asserted in its own test below.
     const model = buildInvoiceDocumentModel(
       invoiceInput({
-        lines: [line({ description: "Site walk\nand\tdebrief" })],
+        lines: [line({ description: "Site walk\tand debrief" })],
         billTo: {
           name: "Wondfo\r\nUSA",
           addressLines: ["  ", "1400 Corporate Drive", ""],
@@ -392,10 +394,70 @@ describe("buildInvoiceDocumentModel", () => {
       }),
     );
 
+    // The tab goes; a tab is not a line break, and it would restructure the row.
     expect(model.lines[0].description).toBe("Site walk and debrief");
     expect(model.billTo.name).toBe("Wondfo USA");
     // Blank entries are dropped rather than printed as empty address lines.
     expect(model.billTo.lines).toEqual(["1400 Corporate Drive"]);
+  });
+
+  it("passes a multi-line description through with its breaks intact", () => {
+    // The two the business asked for, verbatim. This is the model's ONLY
+    // multi-line field: both renderers draw the break, and flattening it here
+    // would destroy the shape before either of them saw it.
+    const model = buildInvoiceDocumentModel(
+      invoiceInput({
+        lines: [
+          line({ description: "Training\nBiosafety Training: Classroom and Practical." }),
+          line({ description: "Audit\n4-Hour Audit. Audit report submitted" }),
+        ],
+      }),
+    );
+
+    expect(model.lines[0].description).toBe("Training\nBiosafety Training: Classroom and Practical.");
+    expect(model.lines[1].description).toBe("Audit\n4-Hour Audit. Audit report submitted");
+  });
+
+  it("normalises a description without flattening it", () => {
+    const model = buildInvoiceDocumentModel(
+      invoiceInput({
+        lines: [
+          // CRLF from a Windows browser, a tab and doubled spaces inside a line,
+          // and the blank lines a textarea collects at either end.
+          line({ description: "\n\nTraining\r\nBiosafety\tTraining:  Classroom and Practical.\n\n" }),
+        ],
+      }),
+    );
+
+    expect(model.lines[0].description).toBe("Training\nBiosafety Training: Classroom and Practical.");
+  });
+
+  it("keeps a blank line typed between two blocks of a description", () => {
+    const model = buildInvoiceDocumentModel(
+      invoiceInput({ lines: [line({ description: "Training\n\nBiosafety Training" })] }),
+    );
+    expect(model.lines[0].description).toBe("Training\n\nBiosafety Training");
+  });
+
+  it("bounds a description at the same line count the form validates against", () => {
+    // A description that got past the validator — hand-edited, or written before
+    // the cap existed — must not print as a row tall enough to push the totals
+    // off the sheet. A legitimate description can never reach this: the
+    // validator refuses anything longer first.
+    const model = buildInvoiceDocumentModel(
+      invoiceInput({
+        lines: [line({ description: Array.from({ length: 40 }, (_, index) => `Line ${index + 1}`).join("\n") })],
+      }),
+    );
+
+    const printed = model.lines[0].description.split("\n");
+    expect(printed).toHaveLength(maxLineDescriptionLines);
+    expect(printed[0]).toBe("Line 1");
+  });
+
+  it("still falls back to a dash for a description of nothing but whitespace", () => {
+    const model = buildInvoiceDocumentModel(invoiceInput({ lines: [line({ description: " \n\t\n " })] }));
+    expect(model.lines[0].description).toBe(missingValue);
   });
 
   it("leaves the date cell empty on a line with no single service date", () => {
