@@ -132,17 +132,30 @@ describe("the workspace rail keeps every link the org-chart sidebar had", () => 
   });
 
   // Both of these had a working page and no way to reach it except by typing
-  // the URL. They are the only additions the regroup is allowed to make.
-  it("surfaces the two pages that had no link at all", () => {
-    expect(allHrefs).toContain("/employee/proposals/bio");
-    expect(allHrefs).toContain("/employee/invoices");
-    expect(new Set(allHrefs)).toEqual(new Set([...linksBeforeTheRegroup, "/employee/proposals/bio", "/employee/invoices"]));
+  // the URL. They were the only additions the regroup itself made; every href
+  // added since is tracked here explicitly, so an addition still has to be a
+  // deliberate, one-line edit to this list rather than something the parity
+  // check would let slide silently.
+  const addedSinceTheRegroup = [
+    "/employee/proposals/bio",
+    "/employee/invoices",
+    // The payments ledger: same posture as Invoices immediately above — a new
+    // page riding the existing finance module rather than a module key of its
+    // own. See "puts the payments ledger behind the finance module" below.
+    "/employee/payments",
+  ];
+
+  it("surfaces the pages that had no link at all", () => {
+    for (const href of addedSinceTheRegroup) {
+      expect(allHrefs, `${href} should have a link`).toContain(href);
+    }
+    expect(new Set(allHrefs)).toEqual(new Set([...linksBeforeTheRegroup, ...addedSinceTheRegroup]));
   });
 
   it("files the commercial surfaces under Revenue", () => {
     const revenue = parsed.find((workspace) => workspace.key === "revenue")?.hrefs ?? [];
 
-    for (const href of ["/employee/sales", "/employee/lifecycle", "/employee/active-companies", "/employee/proposals", "/employee/invoices", "/employee/grants", "/employee/finance"]) {
+    for (const href of ["/employee/sales", "/employee/lifecycle", "/employee/active-companies", "/employee/proposals", "/employee/invoices", "/employee/payments", "/employee/grants", "/employee/finance"]) {
       expect(revenue, `${href} belongs under Revenue`).toContain(href);
     }
   });
@@ -167,5 +180,11 @@ describe("the workspace rail keeps every link the org-chart sidebar had", () => 
   // be ungrantable until a migration caught up.
   it("puts the invoice ledger behind the finance module", () => {
     expect(getPortalModuleForPath("/employee/invoices")?.key).toBe("finance");
+  });
+
+  // Same posture as Invoices: the payments ledger rides the finance module
+  // rather than a key of its own.
+  it("puts the payments ledger behind the finance module", () => {
+    expect(getPortalModuleForPath("/employee/payments")?.key).toBe("finance");
   });
 });

@@ -46,6 +46,7 @@ import {
   TestTube2,
   UploadCloud,
   Users,
+  Wallet,
   Zap,
 } from "lucide-react";
 import { logout } from "@/app/employee-login/actions";
@@ -128,6 +129,9 @@ const workspaces = [
           // enumerates the allowed keys, so inventing one here would make it
           // ungrantable until a migration caught up.
           { href: "/employee/invoices", label: "Invoices", icon: ReceiptText, financeOnly: true },
+          // Same reasoning as Invoices immediately above: sits on the finance
+          // module rather than a key of its own.
+          { href: "/employee/payments", label: "Payments", icon: Wallet, financeOnly: true },
           { href: "/employee/grants", label: "Grant Tracker", icon: HandCoins },
           { href: "/employee/reports", label: "Reports", icon: BarChart2 },
         ],
