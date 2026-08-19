@@ -38,6 +38,9 @@ import { parseClientContacts } from "@/lib/proposals/client-contacts";
 import { resolveDocumentExtras } from "@/lib/proposals/team-server";
 import { canShareProposal } from "@/app/employee/proposals/share-link-policy";
 import type { ProposalRevisionRow, ProposalStatus } from "@/lib/proposals/types";
+import { ProposalPaymentsPanel } from "@/components/proposals/ProposalPaymentsPanel";
+import { getStripeConfigStatus } from "@/lib/stripe/config";
+import type { ScheduleInvoice } from "@/components/proposals/ProposalPaymentsInteractive";
 
 /**
  * READ-ONLY document view. The generator lives on /edit, so the edit gate is
@@ -90,7 +93,7 @@ export default async function ProposalDetailPage({
   // proposal page down until the migration lands. Instead the feature degrades:
   // the panel says it is unavailable and everything else keeps working.
   // ---------------------------------------------------------------------------
-  const [acceptanceResult, shareLinkResult, docusignResult] = await Promise.all([
+  const [acceptanceResult, shareLinkResult, docusignResult, invoiceResult] = await Promise.all([
     supabase
       .from("client_proposals")
       .select(
@@ -111,6 +114,16 @@ export default async function ProposalDetailPage({
       )
       .eq("proposal_id", id)
       .order("sent_at", { ascending: false }),
+    // The Payments panel's own data — read here, alongside the panels above,
+    // rather than inside that component: every panel on this page is fed by a
+    // query the page itself runs (ProposalDocusignPanel, ProposalSharePanel),
+    // and client_invoices has carried RLS/columns since 20260814120000, well
+    // before this deploy, so no unapplied-migration tolerance is needed here.
+    supabase
+      .from("client_invoices")
+      .select("id, invoice_number, kind, status, due_date, issue_date, total, currency")
+      .eq("proposal_id", id)
+      .order("created_at", { ascending: true }),
   ]);
 
   // Decision history. Read through the same tolerant helper the send gates use,
@@ -136,6 +149,47 @@ export default async function ProposalDetailPage({
   const acceptanceRow = (acceptanceResult.data ?? null) as Record<string, unknown> | null;
   const shareLinkRows = (shareLinkResult.data ?? []) as Array<Record<string, unknown>>;
   const docusignRows = (docusignResult.data ?? []) as Array<Record<string, unknown>>;
+  const invoiceRows = (invoiceResult.data ?? []) as Array<Record<string, unknown>>;
+
+  const scheduleInvoices: ScheduleInvoice[] = invoiceRows.map((row) => ({
+    id: String(row.id),
+    invoiceNumber: (row.invoice_number ?? null) as string | null,
+    kind: String(row.kind ?? "full"),
+    status: String(row.status ?? "draft"),
+    dueDate: (row.due_date ?? null) as string | null,
+    total: Number(row.total ?? 0),
+    currency: String(row.currency ?? "USD"),
+  }));
+
+  // The "what you're paying for" bullets on the summary card, sourced from the
+  // NEXT DUE invoice's own line items — read in a second query rather than
+  // folded into the batch above because it needs the invoice ids the first
+  // query just returned. Skipped entirely when there is nothing to look up,
+  // both because there is nothing to ask for and to keep this query out of
+  // every proposal that has never been invoiced.
+  let nextDueLineItems: string[] = [];
+  if (scheduleInvoices.length > 0) {
+    const dueCandidate =
+      scheduleInvoices.find((invoice) => invoice.status === "issued") ??
+      scheduleInvoices.find((invoice) => invoice.status === "draft") ??
+      null;
+    if (dueCandidate) {
+      const { data: lineItems } = await supabase
+        .from("client_invoice_line_items")
+        .select("description")
+        .eq("invoice_id", dueCandidate.id)
+        .order("sort_order", { ascending: true });
+      nextDueLineItems = ((lineItems ?? []) as Array<{ description?: string | null }>)
+        .map((row) => (row.description ?? "").split("\n")[0].trim())
+        .filter((line) => line.length > 0);
+    }
+  }
+
+  const stripeStatus = getStripeConfigStatus();
+  // The publishable key is public by definition (NEXT_PUBLIC_*) — read
+  // directly rather than through getStripeConfig(), which throws when Stripe
+  // is not fully configured and this page must still render either way.
+  const stripePublishableKey = (process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "").trim();
 
   // The dropdown is capped, so make sure the company this proposal is actually
   // assigned to is always one of the options — otherwise the select would show
@@ -368,6 +422,19 @@ export default async function ProposalDetailPage({
         defaultRecipientName={primaryRecipient?.name ?? null}
         defaultRecipientEmail={primaryRecipient?.email ?? null}
       />
+
+      {normalized.client_id ? (
+        <ProposalPaymentsPanel
+          clientId={normalized.client_id}
+          invoices={scheduleInvoices}
+          nextDueLineItems={nextDueLineItems}
+          proposalId={normalized.id}
+          proposalSummary={normalized.summary}
+          proposalTitle={normalized.title}
+          stripeConfigured={stripeStatus.configured}
+          stripePublishableKey={stripePublishableKey}
+        />
+      ) : null}
 
       <div style={{ marginTop: 20 }}>
         <ProposalRevisionHistory
