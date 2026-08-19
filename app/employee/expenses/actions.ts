@@ -1,12 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { employeeExpenseCategories, employeeExpenseStatuses } from "@/lib/company-data";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
+import { getAdminClientOrError, requireExpenseReviewer, requireExpenseUser } from "@/lib/expenses/access";
 import type { Database } from "@/lib/supabase/types";
-import { canAccessEmployeePath, hasFullPortalVisibility, isPortalOwnerRole } from "@/lib/user-management";
 
 type EmployeeExpenseReport = Database["public"]["Tables"]["employee_expense_reports"]["Row"];
 type EmployeeExpenseReceipt = Database["public"]["Tables"]["employee_expense_receipts"]["Row"];
@@ -35,97 +32,6 @@ function cleanAmount(value: unknown) {
 
 function isIsoDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
-
-async function getSignedInUser() {
-  const supabase = await createClient();
-
-  if (!supabase) {
-    redirect("/employee-login?message=supabase-required");
-  }
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/employee-login?next=/employee/expenses");
-  }
-
-  return { supabase, user };
-}
-
-function getAdminClientOrError() {
-  const admin = createAdminClient();
-
-  if (!admin) {
-    return { admin: null, error: "Supabase server admin key is required for expense actions." };
-  }
-
-  return { admin, error: null };
-}
-
-async function getExpenseAccess(userId: string) {
-  const { supabase } = await getSignedInUser();
-  const { data: role } = await supabase
-    .from("user_roles")
-    .select("role, account_status")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  const { data: moduleAccess } = hasFullPortalVisibility(role?.role, role?.account_status)
-    ? { data: [] }
-    : await supabase.from("portal_user_module_access").select("module_key").eq("user_id", userId);
-
-  const moduleKeys = (moduleAccess ?? []).map((access) => access.module_key);
-  return {
-    active: role?.account_status === "active",
-    canUseExpenses: canAccessEmployeePath(role?.role, role?.account_status, "/employee/expenses", moduleKeys),
-    isOwner: role?.account_status === "active" && isPortalOwnerRole(role.role),
-  };
-}
-
-async function requireExpenseUser() {
-  const { user } = await getSignedInUser();
-  const access = await getExpenseAccess(user.id);
-
-  if (!access.active || !access.canUseExpenses) {
-    return { user: null, error: "Expense access is required for this account." };
-  }
-
-  return { user, error: null };
-}
-
-async function requireExpenseReviewer() {
-  const { user } = await getSignedInUser();
-  const access = await getExpenseAccess(user.id);
-
-  if (!access.active || !access.canUseExpenses) {
-    return { user: null, error: "Expense access is required for this account." };
-  }
-
-  if (access.isOwner) {
-    return { user, error: null };
-  }
-
-  const { admin, error } = getAdminClientOrError();
-  if (!admin) return { user: null, error };
-
-  const { data, error: financeError } = await admin
-    .from("company_finance_authorized_users")
-    .select("user_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (financeError) {
-    return { user: null, error: financeError.message };
-  }
-
-  if (!data) {
-    return { user: null, error: "Finance authorization is required to review expenses." };
-  }
-
-  return { user, error: null };
 }
 
 function revalidateExpenses() {
