@@ -154,6 +154,72 @@ describe("POST /api/stripe/webhook — checkout.session.completed", () => {
   });
 });
 
+describe("POST /api/stripe/webhook — payment_intent.succeeded", () => {
+  it("marks the payment succeeded and the invoice paid (the embedded Payment Element flow)", async () => {
+    verifyMock.mockReturnValue({
+      id: "evt_5",
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: "pi_embedded_123",
+          payment_method_types: ["card"],
+        },
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    paymentMaybeSingle.mockResolvedValue({
+      data: { id: "payment-2", invoice_id: "invoice-2", status: "pending", stripe_event_id: null },
+      error: null,
+    });
+    invoiceMaybeSingle.mockResolvedValue({
+      data: { id: "invoice-2", invoice_number: "ACME-2026-INV-02", client_id: "client-1", total: 500, currency: "usd" },
+      error: null,
+    });
+
+    const response = await postRaw(JSON.stringify({ id: "evt_5" }));
+    expect(response.status).toBe(200);
+
+    expect(paymentUpdateEq).toHaveBeenCalledWith("id", "payment-2");
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock.mock.calls[0][0].event_type).toBe("data.update");
+    expect(auditMock.mock.calls[0][0].after_state).toMatchObject({ status: "paid", stripe_event_id: "evt_5" });
+  });
+
+  it("is idempotent: a redelivered event for an already-processed payment does not re-flip the invoice", async () => {
+    verifyMock.mockReturnValue({
+      id: "evt_5",
+      type: "payment_intent.succeeded",
+      data: { object: { id: "pi_embedded_123", payment_method_types: ["card"] } },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    paymentMaybeSingle.mockResolvedValue({
+      data: { id: "payment-2", invoice_id: "invoice-2", status: "succeeded", stripe_event_id: "evt_5" },
+      error: null,
+    });
+
+    const response = await postRaw(JSON.stringify({ id: "evt_5" }));
+    expect(response.status).toBe(200);
+    expect(paymentUpdateEq).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges 200 even when no matching payment row is found (e.g. a Checkout-flow intent this handler does not own)", async () => {
+    verifyMock.mockReturnValue({
+      id: "evt_6",
+      type: "payment_intent.succeeded",
+      data: { object: { id: "pi_unknown", payment_method_types: [] } },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    paymentMaybeSingle.mockResolvedValue({ data: null, error: null });
+
+    const response = await postRaw(JSON.stringify({ id: "evt_6" }));
+    expect(response.status).toBe(200);
+    expect(paymentUpdateEq).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /api/stripe/webhook — payment_intent.payment_failed", () => {
   it("marks the payment failed with the reported reason", async () => {
     verifyMock.mockReturnValue({

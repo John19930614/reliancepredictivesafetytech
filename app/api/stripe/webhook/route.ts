@@ -1,5 +1,12 @@
 // POST /api/stripe/webhook — Stripe Connect-style event delivery.
 //
+// Handles both payment flows this codebase creates: checkout.session.completed
+// (the hosted Checkout redirect, app/api/stripe/checkout) and
+// payment_intent.succeeded (the embedded Payment Element on the proposal
+// detail page, lib/stripe/payment-intents.ts) as two independent success
+// paths that both end at the same place — client_invoice_payments marked
+// succeeded, client_invoices marked paid.
+//
 // Shaped exactly like app/api/docusign/connect/route.ts and
 // app/api/training/webhook/route.ts: read the RAW body via request.text()
 // BEFORE any JSON parsing (Stripe's signature is computed over the exact
@@ -126,6 +133,106 @@ async function handleCheckoutSessionCompleted(admin: LooseClient | null, event: 
   });
 }
 
+/**
+ * Marks a payment succeeded for the EMBEDDED (Payment Element) flow, whose
+ * PaymentIntent is created directly rather than through a Checkout Session —
+ * see lib/stripe/payment-intents.ts. Stripe never sends
+ * checkout.session.completed for this flow, only payment_intent.succeeded /
+ * payment_intent.payment_failed, so this is the success counterpart of
+ * handlePaymentIntentFailed below, matched the same way (by
+ * stripe_payment_intent_id) and mirroring handleCheckoutSessionCompleted's
+ * structure otherwise: idempotency-check-by-stripe_event_id, compare-and-set
+ * the invoice to paid, one audit event.
+ *
+ * A Checkout Session payment also produces a PaymentIntent at Stripe, and this
+ * account may eventually subscribe to payment_intent.succeeded for it too —
+ * harmless here either way. If this event arrives BEFORE
+ * checkout.session.completed for that row, stripe_payment_intent_id is still
+ * null and the lookup below simply finds no row (same as any other unknown
+ * intent). If it arrives after, the row is already 'succeeded' and the
+ * idempotency guard below returns without a second invoice flip or audit
+ * event.
+ */
+async function handlePaymentIntentSucceeded(admin: LooseClient | null, event: Stripe.Event): Promise<void> {
+  const intent = event.data.object as Stripe.PaymentIntent;
+  if (!admin) return;
+
+  const { data: payment } = await admin
+    .from("client_invoice_payments")
+    .select("id, invoice_id, status, stripe_event_id")
+    .eq("stripe_payment_intent_id", intent.id)
+    .maybeSingle();
+
+  if (!payment) {
+    console.error("stripe webhook: payment_intent.succeeded for an unknown payment intent", intent.id);
+    return;
+  }
+
+  // Idempotent redelivery: this exact event already moved this row.
+  if (payment.stripe_event_id === event.id) return;
+  // Already settled by an earlier delivery — do not re-run the invoice flip.
+  if (payment.status === "succeeded") return;
+
+  const { error: paymentUpdateError } = await admin
+    .from("client_invoice_payments")
+    .update({
+      status: "succeeded",
+      succeeded_at: new Date().toISOString(),
+      payment_method_type:
+        Array.isArray(intent.payment_method_types) && intent.payment_method_types.length > 0
+          ? intent.payment_method_types[0]
+          : null,
+      stripe_event_id: event.id,
+    })
+    .eq("id", payment.id);
+
+  if (paymentUpdateError) {
+    console.error("stripe webhook: could not mark payment succeeded", paymentUpdateError.message);
+    return;
+  }
+
+  // Only flip the invoice when it is not already paid — the same
+  // compare-and-set handleCheckoutSessionCompleted uses, so two deliveries
+  // racing (or a human settling it by hand in between) cannot both "win" the
+  // transition.
+  const { data: updatedInvoice, error: invoiceUpdateError } = await admin
+    .from("client_invoices")
+    .update({
+      status: "paid",
+      paid_at: new Date().toISOString(),
+      // paid_by stays null — see the identical comment in
+      // handleCheckoutSessionCompleted above; the reasoning is the same.
+    })
+    .eq("id", payment.invoice_id)
+    .neq("status", "paid")
+    .select("id, invoice_number, client_id, total, currency")
+    .maybeSingle();
+
+  if (invoiceUpdateError) {
+    console.error("stripe webhook: could not mark invoice paid", invoiceUpdateError.message);
+    return;
+  }
+
+  // updatedInvoice is null when the invoice was already 'paid' (the .neq
+  // filter matched zero rows) — nothing further to record.
+  if (!updatedInvoice) return;
+
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "update",
+      "client_invoice",
+      updatedInvoice.id,
+      null,
+      `Stripe confirmed payment of ${Number(updatedInvoice.total).toFixed(2)} ${(updatedInvoice.currency ?? "usd").toUpperCase()} ` +
+        `for invoice ${updatedInvoice.invoice_number ?? updatedInvoice.id} (Stripe event ${event.id}); marked paid.`,
+      { status: "issued" },
+      { status: "paid", stripe_event_id: event.id, stripe_payment_intent_id: intent.id, client_id: updatedInvoice.client_id },
+    ),
+    event_category: "billing",
+    actor_role: "system",
+  });
+}
+
 async function handlePaymentIntentFailed(admin: LooseClient | null, event: Stripe.Event): Promise<void> {
   const intent = event.data.object as Stripe.PaymentIntent;
   if (!admin) return;
@@ -201,6 +308,9 @@ export async function POST(request: Request) {
     switch (event.type) {
       case "checkout.session.completed":
         await handleCheckoutSessionCompleted(admin, event);
+        break;
+      case "payment_intent.succeeded":
+        await handlePaymentIntentSucceeded(admin, event);
         break;
       case "payment_intent.payment_failed":
         await handlePaymentIntentFailed(admin, event);
