@@ -26,7 +26,11 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, Pencil, Receipt } from "lucide-react";
+import { FileText, Pencil, Receipt, Trash2 } from "lucide-react";
+// The delete action lives beside createManualInvoice in the invoice ledger's
+// own actions file, not in the workflow's: raising and destroying an invoice
+// are the same subject, and the ledger is the surface that owns it.
+import { deleteInvoice } from "@/app/employee/invoices/actions";
 import {
   createInvoiceFromProposal,
   loadInvoiceLines,
@@ -43,6 +47,7 @@ import {
   type InvoiceLineEdit,
   type QuantityBasis,
 } from "@/lib/invoices/draft";
+import { canDeleteInvoice } from "@/lib/invoices/deletion";
 
 export interface InvoiceView {
   id: string;
@@ -52,6 +57,16 @@ export interface InvoiceView {
   currency: string;
   issue_date: string | null;
   due_date: string | null;
+  /**
+   * When the client was actually asked for money, and who raised the invoice.
+   *
+   * `issue_date` is a plain date the operator can set on a draft, so it says
+   * nothing about whether anyone has seen the document; `issued_at` is stamped
+   * by settleInvoice at the moment of issue and is the only column that does.
+   * Both are here because canDeleteInvoice decides on exactly these two.
+   */
+  issued_at: string | null;
+  created_by: string | null;
 }
 
 export interface InvoiceableProposal {
@@ -66,6 +81,14 @@ interface InvoicePanelProps {
   proposals: InvoiceableProposal[];
   canDraftInvoice: boolean;
   canSettleInvoice: boolean;
+  /**
+   * The signed-in user, and whether they are a portal admin — the two halves of
+   * the actor canDeleteInvoice judges. Passed down rather than looked up here
+   * because this is a client component and CLAUDE.md forbids it reading
+   * Supabase; the server decides the same thing again from its own read.
+   */
+  currentUserId: string | null;
+  isAdmin: boolean;
   /** True when the invoices migration has not been applied yet. */
   unavailable: boolean;
 }
@@ -160,6 +183,8 @@ export function InvoicePanel({
   proposals,
   canDraftInvoice,
   canSettleInvoice,
+  currentUserId,
+  isAdmin,
   unavailable,
 }: InvoicePanelProps) {
   const router = useRouter();
@@ -169,6 +194,12 @@ export function InvoicePanel({
   const [proposalId, setProposalId] = useState(proposals[0]?.id ?? "");
   const [kind, setKind] = useState("full");
 
+  // Which invoice is showing its "are you sure" row. A TWO-STEP CONFIRM in the
+  // component, deliberately not window.confirm: a browser dialog blocks the
+  // whole page, cannot be styled or read by a test, and is suppressed outright
+  // in some embedded contexts — which would turn "delete" into a button that
+  // silently does nothing at all.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [openInvoiceId, setOpenInvoiceId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<Record<string, LoadedLines>>({});
   const [lineDrafts, setLineDrafts] = useState<Record<string, LineDraft>>({});
@@ -353,6 +384,21 @@ export function InvoicePanel({
             // Draft plus admin. The server decides the same thing again from its
             // own read; this only chooses between an input and a figure.
             const editable = invoice.status === "draft" && canSettleInvoice && (entry?.editable ?? true);
+            // The SAME pure check the server action runs, so the panel never
+            // offers a control the action would refuse — and never hides one it
+            // would allow. Employee standing is not asked of it: canDraftInvoice
+            // is is_company_portal_employee() and gates the whole block below,
+            // the way the server action gates on it before reading anything.
+            const deletion = canDeleteInvoice(
+              {
+                invoiceNumber: invoice.invoice_number,
+                status: invoice.status,
+                issuedAt: invoice.issued_at,
+                createdBy: invoice.created_by,
+              },
+              { userId: currentUserId ?? "", isAdmin },
+            );
+            const confirmingDelete = confirmDeleteId === invoice.id;
             const previewSubtotal = entry
               ? entry.lines.reduce((sum, line) => sum + previewLineTotal(line, lineDrafts[line.id]), 0)
               : 0;
@@ -730,6 +776,61 @@ export function InvoicePanel({
                     >
                       Void
                     </button>
+                  </div>
+                ) : null}
+
+                {/*
+                  DELETING, which is not voiding and is offered next to it so the
+                  difference is visible at the moment of choosing. An invoice that
+                  was never issued has never left the building — nobody holds a
+                  copy and no money is claimed — so removing it is honest
+                  bookkeeping. Anything ever issued keeps its row and gets voided;
+                  the reason is printed rather than the button greyed out, because
+                  a dead control teaches nobody the rule.
+                */}
+                {canDraftInvoice ? (
+                  <div className="wf-step-actions">
+                    {deletion.ok ? (
+                      confirmingDelete ? (
+                        <>
+                          <span className="wf-step-note">
+                            Delete {invoice.invoice_number} for good? The line items go with it, and the number stays
+                            spent.
+                          </span>
+                          <button
+                            className="button button-danger button-sm"
+                            disabled={pending}
+                            onClick={() =>
+                              run(() => deleteInvoice(invoice.id), `${invoice.invoice_number} deleted.`, () =>
+                                setConfirmDeleteId(null),
+                              )
+                            }
+                            type="button"
+                          >
+                            <Trash2 aria-hidden="true" size={13} /> Confirm delete
+                          </button>
+                          <button
+                            className="button button-neutral button-sm"
+                            disabled={pending}
+                            onClick={() => setConfirmDeleteId(null)}
+                            type="button"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="button button-neutral button-sm"
+                          disabled={pending}
+                          onClick={() => setConfirmDeleteId(invoice.id)}
+                          type="button"
+                        >
+                          <Trash2 aria-hidden="true" size={13} /> Delete
+                        </button>
+                      )
+                    ) : (
+                      <span className="wf-step-note">{deletion.reason}</span>
+                    )}
                   </div>
                 ) : null}
               </li>

@@ -36,6 +36,7 @@
 import { revalidatePath } from "next/cache";
 import { buildDataAuditEvent, recordAuditEvent } from "@/lib/audit/events";
 import { friendlyError } from "@/lib/friendly-error";
+import { canDeleteInvoice } from "@/lib/invoices/deletion";
 import { validateManualInvoice, type NewManualInvoiceInput } from "@/lib/invoices/manual";
 import { getPipelineAccess } from "@/lib/pipeline/access";
 import {
@@ -334,4 +335,168 @@ export async function createManualInvoice(input: NewManualInvoiceInput): Promise
 
   revalidateInvoiceSurfaces(invoice.clientId);
   return { ok: true, invoiceId: created.id, invoiceNumber: created.invoice_number };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Deleting an invoice that was never issued                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The result of a delete, in the same shape createManualInvoice returns.
+ *
+ * `invoiceNumber` is carried back because by the time the browser reads this,
+ * the row it names is gone — the caller cannot look it up again to say which
+ * invoice it just removed.
+ */
+export interface DeleteInvoiceResult {
+  ok: boolean;
+  error?: string;
+  invoiceNumber?: string;
+}
+
+/**
+ * Deletes an invoice that was NEVER ISSUED.
+ *
+ * DELETE WHAT WAS NEVER ISSUED; VOID WHAT WAS. A draft has never left the
+ * building: nobody holds a copy, no money is claimed against it, and erasing it
+ * is honest bookkeeping that keeps the ledger readable. An invoice that was ever
+ * issued is a document a client holds, and deleting the row would destroy the
+ * record of a claim that was really made — which is precisely what `void` plus
+ * `void_reason` exist for, and why settleInvoice, not this function, is the
+ * route for anything a client has seen.
+ *
+ * The rule and the whole of the reasoning live in lib/invoices/deletion.ts,
+ * which is pure and exhaustively tested. THE DECISION IS MADE AGAINST THE ROW
+ * THIS FUNCTION READS, never against anything the browser sent: the ledger and
+ * the workflow panel run the same check to decide whether to offer the control,
+ * but a control is a suggestion and this is the answer.
+ *
+ * NO SEQUENCE IS DECREMENTED HERE, and none ever should be — not
+ * client_proposals.invoice_seq, not client_invoice_year_counters.last_seq. A
+ * number that has been handed out is spent whatever becomes of the document
+ * that took it; handing one back would later mint an invoice bearing a number a
+ * previous invoice already carried, and a duplicate financial identifier is a
+ * far worse artefact than a gap in a sequence. Gaps are normal and readable;
+ * collisions are not.
+ *
+ * The line items need no delete of their own: client_invoice_line_items
+ * .invoice_id is `on delete cascade`, so they go with the parent row. A linked
+ * company_finance_transactions.related_invoice_id is `on delete set null`, so
+ * the finance record survives with its pointer cleared — correctly, because the
+ * money it describes did not stop having happened.
+ */
+export async function deleteInvoice(invoiceId: string): Promise<DeleteInvoiceResult> {
+  // The same coarse gate createManualInvoice uses, for the same reason:
+  // canDraftInvoice is this application's spelling of
+  // is_company_portal_employee(), which is the term the RLS delete policy names.
+  // canSettleInvoice would be wrong — that is the admin-only right to issue, pay
+  // and void, and discarding one's own untouched draft is ordinary work the
+  // policy explicitly permits to any employee who raised it.
+  const { supabase, userId, role, isAdmin, canDraftInvoice } = await getPipelineAccess();
+
+  if (!supabase || !userId) return { ok: false, error: SIGNED_OUT };
+  if (!canDraftInvoice) return { ok: false, error: "You do not have permission to delete invoices." };
+  if (!UUID.test(invoiceId)) return { ok: false, error: "Malformed invoice reference." };
+
+  const { data: invoice, error: readError } = await supabase
+    .from("client_invoices")
+    .select("id, client_id, invoice_number, status, total, currency, issued_at, created_by")
+    .eq("id", invoiceId)
+    .maybeSingle();
+
+  if (readError && isSchemaBehindError(readError)) return { ok: false, error: SCHEMA_BEHIND };
+  if (!invoice) return { ok: false, error: "That invoice could not be found, or you do not have permission to see it." };
+
+  const verdict = canDeleteInvoice(
+    {
+      invoiceNumber: invoice.invoice_number ?? "",
+      status: invoice.status,
+      issuedAt: invoice.issued_at ?? null,
+      createdBy: invoice.created_by ?? null,
+    },
+    { userId, isAdmin },
+  );
+  // The refusal is the module's own sentence, passed through verbatim: it
+  // already names the invoice and, where one exists, the supported route.
+  if (!verdict.ok) return { ok: false, error: verdict.reason };
+
+  // Read for the audit line only, and tolerant of failing. The point of this
+  // read is that the invoice is about to stop existing, so "which client was
+  // this against" has to be captured in words while it is still answerable.
+  const { data: client } = await supabase
+    .from("company_clients")
+    .select("id, name")
+    .eq("id", invoice.client_id)
+    .maybeSingle();
+
+  const clientName = ((client as { name?: string | null } | null)?.name ?? "").trim() || "an unknown client";
+  const total = Number(invoice.total) || 0;
+  const invoiceNumber = invoice.invoice_number ?? "";
+
+  // Compare-and-set, like every other write against this table: the status this
+  // function judged, and issued_at still null. Somebody issuing the invoice in
+  // the seconds between the read and the delete has to win that race, because
+  // the alternative is a document a client already holds vanishing.
+  const { data: removed, error: deleteError } = await supabase
+    .from("client_invoices")
+    .delete()
+    .eq("id", invoiceId)
+    .eq("status", invoice.status)
+    .is("issued_at", null)
+    .select("id");
+
+  if (deleteError) {
+    if (isSchemaBehindError(deleteError)) return { ok: false, error: SCHEMA_BEHIND };
+    return { ok: false, error: friendlyError(deleteError, "Could not delete the invoice.") };
+  }
+
+  // PostgREST reports NO ERROR for a DELETE that RLS filtered to zero rows, so
+  // an unchecked delete here would report success over an invoice still sitting
+  // on the ledger — the same trap the line-item rollback in createManualInvoice
+  // above is written around. Reported honestly instead, and no audit event is
+  // written, because nothing happened.
+  if (!Array.isArray(removed) || removed.length === 0) {
+    return {
+      ok: false,
+      error:
+        `${invoiceNumber} was not deleted — the database refused it, or the invoice changed while you were ` +
+        `looking at it. Reload and try again; if it persists, void it instead.`,
+    };
+  }
+
+  // THE LEDGER JUST LOST A ROW, so the audit trail has to be able to explain the
+  // hole. before_state carries the number, the client, the status and the total
+  // as they stood a moment ago — everything a later reader needs to answer "what
+  // was WONDFOUSA-2026-INV-07" long after nothing else can. The row goes; the
+  // fact that it existed does not.
+  //
+  // severity warn, not info: this is the one billing action that destroys a row
+  // rather than transitioning one, and it should stand out in the feed beside
+  // the voids it is deliberately not.
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "delete",
+      "client_invoice",
+      invoiceId,
+      userId,
+      `Deleted never-issued ${invoice.status} invoice ${invoiceNumber} for ${total.toFixed(2)} against ${clientName}`,
+      {
+        invoice_number: invoiceNumber,
+        status: invoice.status,
+        total,
+        currency: invoice.currency ?? null,
+        client_id: invoice.client_id,
+        client_name: clientName,
+        issued_at: null,
+        created_by: invoice.created_by ?? null,
+      },
+      null,
+    ),
+    event_category: "billing",
+    severity: "warn",
+    actor_role: role,
+  });
+
+  revalidateInvoiceSurfaces(invoice.client_id);
+  return { ok: true, invoiceNumber };
 }

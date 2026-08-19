@@ -21,6 +21,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { CalendarClock, FileText, Hourglass, ReceiptText, TriangleAlert } from "lucide-react";
+import { InvoiceDeleteButton } from "@/components/invoices/InvoiceDeleteButton";
 import { ManualInvoiceForm } from "@/components/invoices/ManualInvoiceForm";
 import { resolvePipelineRoleFlags } from "@/lib/pipeline/policy";
 import { createClient } from "@/lib/supabase/server";
@@ -67,6 +68,17 @@ interface InvoiceRow {
   issue_date: string | null;
   due_date: string | null;
   created_at: string;
+  /**
+   * The two columns lib/invoices/deletion.ts decides on, and the only reason
+   * they are selected here.
+   *
+   * `issued_at` — not `issue_date` — is what says whether a client has ever
+   * been sent this document: issue_date is a plain date an operator can set on
+   * a draft, while issued_at is stamped by settleInvoice at the moment of
+   * issue. `created_by` is the RLS policy's own term for "your own draft".
+   */
+  issued_at: string | null;
+  created_by: string | null;
 }
 
 interface ClientOption {
@@ -223,14 +235,24 @@ export default async function InvoiceLedgerPage() {
     );
   }
 
-  const { canDraftInvoice } = resolvePipelineRoleFlags(role?.role, role?.account_status === "active");
+  // isAdmin comes off the SAME resolver that already decides whether this page
+  // offers the new-invoice form — the one whose flags mirror
+  // is_company_portal_admin() — so the delete control cannot drift away from the
+  // rest of the page's idea of who is an admin. And canDraftInvoice is this
+  // application's spelling of is_company_portal_employee() — true for every
+  // active portal role, false for a finance-module account that holds none — so
+  // it is the standing the delete control is offered on, exactly as the server
+  // action gates on it.
+  const { canDraftInvoice, isAdmin } = resolvePipelineRoleFlags(role?.role, role?.account_status === "active");
 
   const [{ data: invoiceData, error: invoiceError }, { data: clientData }, { data: proposalData }] = await Promise.all([
     // Untyped handle: client_invoices postdates the last Supabase types regen,
     // the same escape hatch lib/pipeline/access.ts uses for every write to it.
     (supabase as LooseClient)
       .from("client_invoices")
-      .select("id, client_id, invoice_number, status, currency, total, issue_date, due_date, created_at")
+      .select(
+        "id, client_id, invoice_number, status, currency, total, issue_date, due_date, created_at, issued_at, created_by",
+      )
       .order("created_at", { ascending: false })
       .limit(invoiceLimit),
     supabase.from("company_clients").select("id, name, company_slug").order("name").limit(clientLimit),
@@ -419,7 +441,7 @@ export default async function InvoiceLedgerPage() {
                       <th scope="col">Issued</th>
                       <th scope="col">Due</th>
                       <th scope="col">Total</th>
-                      <th scope="col" aria-label="Documents" />
+                      <th scope="col" aria-label="Documents and actions" />
                     </tr>
                   </thead>
                   <tbody>
@@ -460,14 +482,41 @@ export default async function InvoiceLedgerPage() {
                             ) : null}
                           </td>
                           <td>{money(toNumber(row.total), row.currency ?? "USD")}</td>
+                          {/* .user-row-actions is the existing row-actions flex
+                              box from the user table — wrap, centre, 8px gap —
+                              and it is reused rather than duplicated under a new
+                              name so this ledger adds no CSS of its own. The PDF
+                              link and the delete control share the cell, and a
+                              refusal sentence wraps under them instead of
+                              stretching the column. */}
                           <td>
-                            <a
-                              className="button button-neutral button-sm"
-                              download
-                              href={`/employee/clients/${row.client_id}/workflow/invoices/${row.id}/pdf`}
-                            >
-                              <FileText aria-hidden="true" size={13} /> PDF
-                            </a>
+                            <div className="user-row-actions">
+                              <a
+                                className="button button-neutral button-sm"
+                                download
+                                href={`/employee/clients/${row.client_id}/workflow/invoices/${row.id}/pdf`}
+                              >
+                                <FileText aria-hidden="true" size={13} /> PDF
+                              </a>
+                              {/*
+                                An invoice that was never issued has never left
+                                the building, so it can go; anything a client has
+                                been sent keeps its row and is voided instead.
+                                The row that does not qualify says why rather than
+                                showing a button that would only ever fail.
+                              */}
+                              <InvoiceDeleteButton
+                                actor={{ userId: user.id, isAdmin }}
+                                canDelete={canDraftInvoice}
+                                invoice={{
+                                  invoiceNumber: row.invoice_number,
+                                  status: row.status,
+                                  issuedAt: row.issued_at,
+                                  createdBy: row.created_by,
+                                }}
+                                invoiceId={row.id}
+                              />
+                            </div>
                           </td>
                         </tr>
                       );

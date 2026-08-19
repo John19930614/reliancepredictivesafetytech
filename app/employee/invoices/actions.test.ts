@@ -20,7 +20,7 @@ import { recordAuditEvent } from "@/lib/audit/events";
 import { getPipelineAccess } from "@/lib/pipeline/access";
 import { resolvePipelineRoleFlags } from "@/lib/pipeline/policy";
 import type { NewManualInvoiceInput } from "@/lib/invoices/manual";
-import { createManualInvoice } from "./actions";
+import { createManualInvoice, deleteInvoice } from "./actions";
 
 const accessMock = vi.mocked(getPipelineAccess);
 const auditMock = vi.mocked(recordAuditEvent);
@@ -71,6 +71,13 @@ function createSupabaseMock(routes: Record<string, Route>) {
         return api;
       },
       eq(column: string, value: unknown) {
+        record.filters.push([column, value]);
+        return api;
+      },
+      // The delete path filters on `issued_at is null` as well as on the id, so
+      // the stand-in has to record that filter or the test cannot prove the
+      // compare-and-set is there.
+      is(column: string, value: unknown) {
         record.filters.push([column, value]);
         return api;
       },
@@ -371,5 +378,165 @@ describe("createManualInvoice — line descriptions", () => {
     const lines = findCall(supabase, "client_invoice_line_items", "insert")?.payload as Array<{ description: string }>;
     // Normalised (CRLF folded), not flattened.
     expect(lines[0].description).toBe("Training\nBiosafety Training: Classroom and Practical.");
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Deleting an invoice that was never issued                                  */
+/* -------------------------------------------------------------------------- */
+
+// lib/invoices/deletion.test.ts owns the rule itself, exhaustively. What is
+// tested here is the three things only the action can get wrong: that it judges
+// the row IT read rather than anything the caller sent, that it does not report
+// success over a delete RLS filtered to nothing, and that the audit trail can
+// still explain the hole the ledger is left with.
+
+const DELETED_INVOICE = "66666666-6666-4666-8666-666666666666";
+
+function invoiceRow(over: Record<string, unknown> = {}) {
+  return {
+    id: DELETED_INVOICE,
+    client_id: CLIENT_ID,
+    invoice_number: "WONDFOUSA-2026-INV-07",
+    status: "draft",
+    total: 1500,
+    currency: "USD",
+    issued_at: null,
+    created_by: "user-1",
+    ...over,
+  };
+}
+
+function deleteRoutes(over: { invoice?: QueryResult; removal?: Route } = {}): Record<string, Route> {
+  return {
+    "client_invoices:select": over.invoice ?? { data: invoiceRow() },
+    "company_clients:select": { data: { id: CLIENT_ID, name: "Wondfo USA" } },
+    "client_invoices:delete": over.removal ?? { data: [{ id: DELETED_INVOICE }] },
+  };
+}
+
+describe("deleteInvoice", () => {
+  it("removes a never-issued draft and records what it destroyed", async () => {
+    const supabase = createSupabaseMock(deleteRoutes());
+    signIn(supabase);
+
+    const result = await deleteInvoice(DELETED_INVOICE);
+
+    expect(result).toEqual({ ok: true, invoiceNumber: "WONDFOUSA-2026-INV-07" });
+
+    // The line items are NOT deleted by hand — the FK is `on delete cascade`,
+    // and a hand-rolled delete would be a second failure mode for no gain.
+    expect(supabase.calls.some((call) => call.table === "client_invoice_line_items")).toBe(false);
+
+    // The audit event is the only thing that will still be able to answer "what
+    // was WONDFOUSA-2026-INV-07" tomorrow, so it carries the whole row's story.
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    const event = auditMock.mock.calls[0][0];
+    expect(event.event_type).toBe("data.delete");
+    expect(event.event_category).toBe("billing");
+    expect(event.severity).toBe("warn");
+    expect(event.summary).toContain("WONDFOUSA-2026-INV-07");
+    expect(event.before_state).toMatchObject({
+      invoice_number: "WONDFOUSA-2026-INV-07",
+      status: "draft",
+      total: 1500,
+      client_name: "Wondfo USA",
+    });
+  });
+
+  it("filters the delete on issued_at being null, not just on the id", async () => {
+    const supabase = createSupabaseMock(deleteRoutes());
+    signIn(supabase);
+
+    await deleteInvoice(DELETED_INVOICE);
+
+    // Compare-and-set: somebody issuing the invoice between the read and the
+    // delete must win that race, because the alternative is a document a client
+    // already holds vanishing.
+    const removal = findCall(supabase, "client_invoices", "delete");
+    expect(removal?.filters).toEqual([
+      ["id", DELETED_INVOICE],
+      ["status", "draft"],
+      ["issued_at", null],
+    ]);
+  });
+
+  it("refuses an issued invoice, names it, and points at void instead", async () => {
+    const supabase = createSupabaseMock(
+      deleteRoutes({ invoice: { data: invoiceRow({ status: "issued", issued_at: "2026-08-14T16:20:00.000Z" }) } }),
+    );
+    signIn(supabase);
+
+    const result = await deleteInvoice(DELETED_INVOICE);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe(
+      "WONDFOUSA-2026-INV-07 has been issued, so a client holds a document bearing that number. " +
+        "Void it instead: that withdraws the claim, keeps the number spent, and records why.",
+    );
+    // Refused before any write, and with nothing written to the audit trail
+    // either: nothing happened, so nothing is recorded as having happened.
+    expect(findCall(supabase, "client_invoices", "delete")).toBeUndefined();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("judges the row it read, not the status a caller might wish for", async () => {
+    // A draft raised by somebody else, asked for by a non-admin employee. The
+    // RLS policy would filter this to zero rows; the action refuses it first so
+    // the operator gets a sentence rather than a silent no-op.
+    const supabase = createSupabaseMock(deleteRoutes({ invoice: { data: invoiceRow({ created_by: "user-2" }) } }));
+    signIn(supabase, "employee");
+
+    const result = await deleteInvoice(DELETED_INVOICE);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Only the employee who raised draft WONDFOUSA-2026-INV-07");
+    expect(findCall(supabase, "client_invoices", "delete")).toBeUndefined();
+  });
+
+  it("does NOT report success when the delete matched zero rows", async () => {
+    // PostgREST reports no error for a DELETE that RLS filtered to nothing, so
+    // an unchecked delete would claim to have removed an invoice still sitting
+    // on the ledger. This is the trap the whole `count` check exists for.
+    const supabase = createSupabaseMock(deleteRoutes({ removal: { data: [] } }));
+    signIn(supabase);
+
+    const result = await deleteInvoice(DELETED_INVOICE);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("WONDFOUSA-2026-INV-07 was not deleted");
+    // And nothing is recorded: an audit line saying the invoice was destroyed
+    // would be a lie about a row that is still there.
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses an invoice it cannot read at all", async () => {
+    const supabase = createSupabaseMock(deleteRoutes({ invoice: { data: null } }));
+    signIn(supabase);
+
+    const result = await deleteInvoice(DELETED_INVOICE);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/could not be found/i);
+  });
+
+  it("refuses a caller with no portal role before it reads anything", async () => {
+    const supabase = createSupabaseMock(deleteRoutes());
+    signIn(supabase, "client_user");
+
+    const result = await deleteInvoice(DELETED_INVOICE);
+
+    expect(result).toEqual({ ok: false, error: "You do not have permission to delete invoices." });
+    expect(supabase.calls).toHaveLength(0);
+  });
+
+  it("refuses a malformed invoice reference rather than querying on it", async () => {
+    const supabase = createSupabaseMock(deleteRoutes());
+    signIn(supabase);
+
+    const result = await deleteInvoice("not-a-uuid");
+
+    expect(result).toEqual({ ok: false, error: "Malformed invoice reference." });
+    expect(supabase.calls).toHaveLength(0);
   });
 });

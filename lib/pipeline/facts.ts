@@ -61,6 +61,14 @@ export interface WorkflowInvoice {
   due_date: string | null;
   proposal_id: string | null;
   created_at: string;
+  /**
+   * The moment the invoice was issued to the client, and who raised it — the
+   * two columns lib/invoices/deletion.ts decides on. Selected here so the
+   * billing panel can tell, without a second round trip, whether an invoice is
+   * a draft nobody has seen or a document a client is holding.
+   */
+  issued_at: string | null;
+  created_by: string | null;
 }
 
 /** Reads one list and normalises a missing-relation error into an empty result. */
@@ -126,7 +134,9 @@ export async function loadClientWorkflowFacts(
     readList<WorkflowInvoice>(
       supabase
         .from("client_invoices")
-        .select("id, invoice_number, status, total, currency, issue_date, due_date, proposal_id, created_at")
+        .select(
+          "id, invoice_number, status, total, currency, issue_date, due_date, proposal_id, created_at, issued_at, created_by",
+        )
         .eq("client_id", client.id)
         .order("created_at", { ascending: false })
         .limit(invoiceLimit),

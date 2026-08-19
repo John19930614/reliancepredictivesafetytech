@@ -79,7 +79,11 @@ export default async function ClientWorkflowPage({ params }: PageProps) {
   const { id } = await params;
   if (!UUID.test(id)) notFound();
 
-  const { supabase, canRead, canAdvance, canOverride, canDraftInvoice, canSettleInvoice } =
+  // userId and isAdmin are the two facts the invoice panel needs to decide
+  // whether a never-issued invoice may be deleted (lib/invoices/deletion.ts).
+  // Resolved here, from the same helper that already answers every other
+  // "may you act" question on this page, rather than in the browser.
+  const { supabase, userId, isAdmin, canRead, canAdvance, canOverride, canDraftInvoice, canSettleInvoice } =
     await getPipelineAccess();
 
   if (!supabase) {
@@ -214,7 +218,9 @@ export default async function ClientWorkflowPage({ params }: PageProps) {
             canDraftInvoice={canDraftInvoice}
             canSettleInvoice={canSettleInvoice}
             clientId={id}
+            currentUserId={userId}
             invoices={invoices}
+            isAdmin={isAdmin}
             proposals={acceptedProposals}
             unavailable={invoicesUnavailable}
           />
