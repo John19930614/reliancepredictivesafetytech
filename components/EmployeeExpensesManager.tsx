@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CheckCircle2, Download, FileUp, Plus, ReceiptText, Trash2, UploadCloud } from "lucide-react";
+import { CheckCircle2, Download, FileUp, Plus, ReceiptText, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import {
   employeeExpenseCategories,
   employeeExpenseStatuses,
@@ -30,11 +30,46 @@ type EmployeeExpensesManagerProps = {
 
 type MessageTone = "success" | "error";
 
+type ReceiptSuggestion = {
+  vendor: string | null;
+  amount: number | null;
+  expense_date: string | null;
+  category: string | null;
+  payment_method: string | null;
+  notes: string | null;
+};
+
+type AiAutofillState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "applied"; confidence: number | null }
+  | { status: "unavailable"; message: string };
+
+type ExpenseDraft = {
+  title: string;
+  category: string;
+  amount: string;
+  expense_date: string;
+  merchant: string;
+  payment_method: string;
+};
+
 const editableEmployeeStatuses = ["submitted", "needs_info"];
 const reviewStatuses = employeeExpenseStatuses.filter((status) => !["submitted", "cancelled"].includes(status));
 
 function todayIsoDate() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function emptyDraft(): ExpenseDraft {
+  return {
+    title: "",
+    category: employeeExpenseCategories[0],
+    amount: "",
+    expense_date: todayIsoDate(),
+    merchant: "",
+    payment_method: "",
+  };
 }
 
 function money(value: number) {
@@ -86,6 +121,9 @@ export function EmployeeExpensesManager({
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<MessageTone>("success");
   const [pendingAction, setPendingAction] = useState("");
+  const [draft, setDraft] = useState<ExpenseDraft>(() => emptyDraft());
+  const [touchedFields, setTouchedFields] = useState<Set<keyof ExpenseDraft>>(new Set());
+  const [aiAutofill, setAiAutofill] = useState<AiAutofillState>({ status: "idle" });
 
   const profileNameById = useMemo(
     () => new Map(profiles.map((profile) => [profile.user_id, profile.display_name || profile.email || profile.user_id.slice(0, 8)])),
@@ -126,6 +164,54 @@ export function EmployeeExpensesManager({
   function setStatusMessage(text: string, tone: MessageTone = "success") {
     setMessage(text);
     setMessageTone(tone);
+  }
+
+  function setDraftField<K extends keyof ExpenseDraft>(field: K, value: ExpenseDraft[K]) {
+    setTouchedFields((current) => new Set(current).add(field));
+    setDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  async function handleAutofillFromReceipt(file: File) {
+    setAiAutofill({ status: "loading" });
+
+    let response: Response;
+    try {
+      const body = new FormData();
+      body.set("receipt", file);
+      response = await fetch("/api/expenses/extract-receipt", { method: "POST", body });
+    } catch {
+      return setAiAutofill({ status: "unavailable", message: "AI autofill is unavailable right now — enter the expense details manually." });
+    }
+
+    const payload = (await response.json().catch(() => null)) as
+      | { suggestion: ReceiptSuggestion | null; message?: string; confidence?: number; error?: string }
+      | null;
+
+    if (!response.ok || !payload) {
+      return setAiAutofill({ status: "unavailable", message: payload?.error ?? payload?.message ?? "AI autofill is unavailable right now." });
+    }
+
+    if (!payload.suggestion) {
+      return setAiAutofill({ status: "unavailable", message: payload.message ?? "AI could not read that receipt — enter the expense details manually." });
+    }
+
+    const suggestion = payload.suggestion;
+    setDraft((current) => {
+      const next = { ...current };
+      if (suggestion.vendor && !touchedFields.has("merchant")) next.merchant = suggestion.vendor;
+      if (suggestion.amount != null && !touchedFields.has("amount")) next.amount = String(suggestion.amount);
+      if (suggestion.expense_date && !touchedFields.has("expense_date")) next.expense_date = suggestion.expense_date;
+      if (suggestion.category && employeeExpenseCategories.includes(suggestion.category as (typeof employeeExpenseCategories)[number]) && !touchedFields.has("category")) {
+        next.category = suggestion.category;
+      }
+      if (suggestion.payment_method && !touchedFields.has("payment_method")) next.payment_method = suggestion.payment_method;
+      if (!current.title && !touchedFields.has("title")) {
+        next.title = [suggestion.vendor, suggestion.category].filter(Boolean).join(" — ") || next.title;
+      }
+      return next;
+    });
+
+    setAiAutofill({ status: "applied", confidence: typeof payload.confidence === "number" ? payload.confidence : null });
   }
 
   async function uploadReceiptFile(file: File, expenseReportId: string) {
@@ -184,6 +270,9 @@ export function EmployeeExpensesManager({
     setReceiptRows((current) => [uploadResult.data!, ...current]);
     setStatusMessage("Expense submitted with receipt.");
     form.reset();
+    setDraft(emptyDraft());
+    setTouchedFields(new Set());
+    setAiAutofill({ status: "idle" });
   }
 
   async function handleAdditionalReceipt(event: React.FormEvent<HTMLFormElement>, reportId: string) {
@@ -481,22 +570,80 @@ export function EmployeeExpensesManager({
             <h2>Submit expense</h2>
             <div className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: 16 }}>
               <div className="field">
+                <label htmlFor="expense-receipt">Receipt</label>
+                <input
+                  accept="image/jpeg,image/png,image/webp,application/pdf,image/heic"
+                  id="expense-receipt"
+                  name="receipt"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file && ["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+                      void handleAutofillFromReceipt(file);
+                    } else {
+                      setAiAutofill({ status: "idle" });
+                    }
+                  }}
+                  required
+                  type="file"
+                />
+                {aiAutofill.status === "loading" ? (
+                  <small className="expense-ai-status">
+                    <Sparkles size={13} /> Reading receipt with AI…
+                  </small>
+                ) : null}
+                {aiAutofill.status === "applied" ? (
+                  <small className="expense-ai-status expense-ai-status-applied">
+                    <Sparkles size={13} /> AI suggested the fields below from your receipt — review and edit before submitting.
+                  </small>
+                ) : null}
+                {aiAutofill.status === "unavailable" ? <small className="expense-ai-status">{aiAutofill.message}</small> : null}
+              </div>
+              <div className="field">
                 <label htmlFor="expense-title">Title</label>
-                <input id="expense-title" name="title" placeholder="Client site flight, hotel, fuel..." required />
+                <input
+                  id="expense-title"
+                  name="title"
+                  onChange={(event) => setDraftField("title", event.target.value)}
+                  placeholder="Client site flight, hotel, fuel..."
+                  required
+                  value={draft.title}
+                />
               </div>
               <div className="form-grid">
                 <div className="field">
                   <label htmlFor="expense-amount">Amount</label>
-                  <input id="expense-amount" min="0.01" name="amount" required step="0.01" type="number" />
+                  <input
+                    id="expense-amount"
+                    min="0.01"
+                    name="amount"
+                    onChange={(event) => setDraftField("amount", event.target.value)}
+                    required
+                    step="0.01"
+                    type="number"
+                    value={draft.amount}
+                  />
                 </div>
                 <div className="field">
                   <label htmlFor="expense-date">Date</label>
-                  <input id="expense-date" name="expense_date" required type="date" defaultValue={todayIsoDate()} />
+                  <input
+                    id="expense-date"
+                    name="expense_date"
+                    onChange={(event) => setDraftField("expense_date", event.target.value)}
+                    required
+                    type="date"
+                    value={draft.expense_date}
+                  />
                 </div>
               </div>
               <div className="field">
                 <label htmlFor="expense-category">Category</label>
-                <select id="expense-category" name="category" required>
+                <select
+                  id="expense-category"
+                  name="category"
+                  onChange={(event) => setDraftField("category", event.target.value)}
+                  required
+                  value={draft.category}
+                >
                   {employeeExpenseCategories.map((category) => (
                     <option key={category}>{category}</option>
                   ))}
@@ -504,15 +651,17 @@ export function EmployeeExpensesManager({
               </div>
               <div className="field">
                 <label htmlFor="expense-merchant">Merchant</label>
-                <input id="expense-merchant" name="merchant" />
+                <input id="expense-merchant" name="merchant" onChange={(event) => setDraftField("merchant", event.target.value)} value={draft.merchant} />
               </div>
               <div className="field">
                 <label htmlFor="expense-payment">Payment method</label>
-                <input id="expense-payment" name="payment_method" placeholder="Personal card, company card, cash" />
-              </div>
-              <div className="field">
-                <label htmlFor="expense-receipt">Receipt</label>
-                <input id="expense-receipt" name="receipt" required type="file" />
+                <input
+                  id="expense-payment"
+                  name="payment_method"
+                  onChange={(event) => setDraftField("payment_method", event.target.value)}
+                  placeholder="Personal card, company card, cash"
+                  value={draft.payment_method}
+                />
               </div>
               <div className="field">
                 <label htmlFor="expense-purpose">Business purpose</label>

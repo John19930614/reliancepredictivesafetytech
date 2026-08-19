@@ -1992,6 +1992,18 @@ a.platform-card:hover {
   min-height: 86px;
 }
 
+.expense-ai-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--portal-muted);
+}
+
+.expense-ai-status-applied {
+  color: var(--portal-gold);
+}
+
 .expense-review-summary,
 .expense-review-form {
   display: grid;
