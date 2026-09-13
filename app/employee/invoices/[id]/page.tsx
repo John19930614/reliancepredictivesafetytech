@@ -49,7 +49,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     .maybeSingle();
   if (!invoice) notFound();
 
-  const [{ data: lineRows }, { data: client }, proposalResult] = await Promise.all([
+  const [{ data: lineRows }, { data: client }, proposalResult, provenanceResult] = await Promise.all([
     supabase
       .from("client_invoice_line_items")
       .select("id, description, quantity, unit_amount, line_total, unit, qty_basis, service_date, sort_order")
@@ -63,6 +63,12 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           .eq("id", invoice.proposal_id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
+    // Kept separate from the main line query so a deployment that reaches the
+    // app before the provenance migration still renders legacy invoices.
+    (supabase as LooseClient)
+      .from("client_invoice_line_items")
+      .select("id, source_proposal_line_key")
+      .eq("invoice_id", id),
   ]);
 
   const proposal = (proposalResult.data ?? null) as ProposalRow | null;
@@ -76,6 +82,10 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   }));
 
   const isDraft = invoice.status === "draft";
+  const hasProposalAllocations = !provenanceResult.error &&
+    ((provenanceResult.data ?? []) as Array<{ source_proposal_line_key?: string | null }>).some(
+      (row) => Boolean(row.source_proposal_line_key),
+    );
 
   return (
     <>
@@ -130,7 +140,12 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           <InvoiceLineItemsEditor
             invoiceId={invoice.id}
             initialLines={editableLines}
-            editable={isDraft}
+            editable={isDraft && !hasProposalAllocations}
+            lockedReason={
+              hasProposalAllocations
+                ? "These lines are fixed to the accepted proposal revision. Delete this draft and generate a new selection to change them."
+                : null
+            }
             taxAmount={Number(invoice.tax_amount ?? 0)}
             currency={invoice.currency}
           />

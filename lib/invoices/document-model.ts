@@ -56,7 +56,7 @@ export interface InvoiceDocumentSourceLine {
 export interface InvoiceDocumentSource {
   invoice_number: string | null;
   status: string;
-  kind: string;
+  kind: string | null;
   issue_date: string | null;
   due_date: string | null;
   currency: string;

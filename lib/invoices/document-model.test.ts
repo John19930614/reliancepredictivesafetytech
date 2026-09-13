@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildInvoiceDocumentModel, type InvoiceDocumentSource } from "./document-model";
+import { renderInvoiceDocx } from "./docx";
 import type { CompanyProfile } from "@/lib/company/profile";
 
 const seller = {
@@ -96,5 +97,15 @@ describe("buildInvoiceDocumentModel — the client-facing surface", () => {
   it("totals the invoice in its own currency", () => {
     const built = model([{ description: "x", quantity: 1, unit_amount: 880, line_total: 880 }]);
     expect(built.total).toBe("$880.00");
+  });
+});
+
+describe("renderInvoiceDocx — branding", () => {
+  it("embeds the Reliance seal in the Word invoice", async () => {
+    const built = model([{ description: "Safety consulting", quantity: 1, unit_amount: 880, line_total: 880 }]);
+    const bytes = await renderInvoiceDocx(built);
+
+    expect(bytes.subarray(0, 2).toString()).toBe("PK");
+    expect(bytes.includes(Buffer.from("word/media/"))).toBe(true);
   });
 });

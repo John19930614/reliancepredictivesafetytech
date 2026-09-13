@@ -5,6 +5,7 @@ import { getInvoiceAccess } from "@/lib/invoices/access";
 import { createInvoiceFromProposal } from "@/lib/invoices/create-from-proposal";
 import { updateDraftInvoiceLines, type DraftInvoiceLineInput } from "@/lib/invoices/draft";
 import { invoiceKinds, validateInvoice, type InvoiceKind, type InvoiceLine } from "@/lib/invoices/invoice";
+import type { ProposalBillingSelection } from "@/lib/invoices/proposal-billing";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
 
 export interface ActionResult {
@@ -28,19 +29,17 @@ function revalidateInvoices(invoiceId?: string, proposalId?: string | null) {
 
 export async function generateInvoiceFromProposal(
   proposalId: string,
-  kind: string,
+  generationKey: string,
+  selections: readonly ProposalBillingSelection[],
 ): Promise<ActionResult & { invoiceId?: string }> {
-  if (!invoiceKinds.includes(kind as InvoiceKind)) {
-    return { ok: false, error: "Unknown invoice kind." };
-  }
-
   const { userId, role, canSeeMoney } = await getInvoiceAccess();
   if (!userId) return { ok: false, error: "You must be signed in." };
   if (!canSeeMoney) return { ok: false, error: "Invoices are restricted to finance-authorised users and owners." };
 
   const result = await createInvoiceFromProposal({
     proposalId,
-    kind: kind as InvoiceKind,
+    generationKey,
+    selections,
     actorUserId: userId,
     actorRole: role,
   });
@@ -68,7 +67,7 @@ const EDITABLE_HEADER_FIELDS = [
 ] as const;
 
 export interface InvoiceHeaderPatch {
-  kind?: string;
+  kind?: string | null;
   issue_date?: string | null;
   due_date?: string | null;
   currency?: string;
@@ -99,8 +98,8 @@ export async function updateInvoiceHeader(invoiceId: string, patch: InvoiceHeade
   if (!canSeeMoney) return { ok: false, error: "Invoices are restricted to finance-authorised users and owners." };
   if (!isAdmin) return { ok: false, error: "Only a portal admin can edit invoice details." };
 
-  if (patch.kind !== undefined && !invoiceKinds.includes(patch.kind as InvoiceKind)) {
-    return { ok: false, error: "Kind must be deposit, full or balance." };
+  if (patch.kind !== undefined && patch.kind !== null && !invoiceKinds.includes(patch.kind as InvoiceKind)) {
+    return { ok: false, error: "Kind must be proposal billing, deposit, full or balance." };
   }
   if (patch.currency !== undefined && patch.currency.length !== 3) {
     return { ok: false, error: "Currency must be a three-letter code." };
@@ -155,6 +154,26 @@ export async function updateInvoiceLines(invoiceId: string, lines: DraftInvoiceL
   if (!before) return { ok: false, error: NO_ROWS_MESSAGE };
   if (before.status !== "draft") return { ok: false, error: "Only a draft invoice's line items can be changed." };
 
+  // Generated lines are reservations against an accepted proposal revision.
+  // The legacy editor replaces every row and would otherwise erase their
+  // provenance (and release/recreate quantities outside the atomic RPC).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: trackedLines, error: trackedLineError } = await (supabase as any)
+    .from("client_invoice_line_items")
+    .select("id")
+    .eq("invoice_id", invoiceId)
+    .not("source_proposal_line_key", "is", null)
+    .limit(1);
+  if (trackedLineError) {
+    return { ok: false, error: "Could not verify this invoice's proposal-line history. Refresh and try again." };
+  }
+  if ((trackedLines?.length ?? 0) > 0) {
+    return {
+      ok: false,
+      error: "Lines generated from an accepted proposal are fixed. Delete this draft and generate a new selection instead.",
+    };
+  }
+
   const problems = validateInvoice({
     status: "draft",
     kind: "full",
@@ -183,6 +202,64 @@ export async function updateInvoiceLines(invoiceId: string, lines: DraftInvoiceL
   });
 
   revalidateInvoices(invoiceId, before.proposal_id as string | null);
+  return { ok: true };
+}
+
+export async function issueInvoice(invoiceId: string): Promise<ActionResult> {
+  const { supabase, userId, role, canSeeMoney, isAdmin } = await getInvoiceAccess();
+  if (!supabase || !userId) return { ok: false, error: "You must be signed in." };
+  if (!canSeeMoney) return { ok: false, error: "Invoices are restricted to finance-authorised users and owners." };
+  if (!isAdmin) return { ok: false, error: "Only a portal admin can issue invoices." };
+
+  const { data: invoice } = await supabase
+    .from("client_invoices")
+    .select("id, proposal_id, status, kind, currency, issue_date, issued_at, paid_at, total")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!invoice) return { ok: false, error: NO_ROWS_MESSAGE };
+  if (invoice.status !== "draft") return { ok: false, error: "Only a draft invoice can be issued." };
+  if (Number(invoice.total ?? 0) <= 0) return { ok: false, error: "Invoice total must be greater than zero before issuing." };
+
+  const { data: lineRows } = await supabase
+    .from("client_invoice_line_items")
+    .select("description, quantity, unit_amount, line_total, unit, qty_basis")
+    .eq("invoice_id", invoiceId);
+  const issueDate = invoice.issue_date ?? new Date().toISOString().slice(0, 10);
+  const issuedAt = new Date().toISOString();
+  const problems = validateInvoice({
+    status: "issued",
+    kind: invoice.kind,
+    currency: invoice.currency,
+    issue_date: issueDate,
+    issued_at: issuedAt,
+    paid_at: invoice.paid_at,
+    lines: (lineRows ?? []) as InvoiceLine[],
+  });
+  if (problems.length > 0) return { ok: false, error: problems[0].message };
+
+  const { data: updated, error } = await supabase
+    .from("client_invoices")
+    .update({ status: "issued", issue_date: issueDate, issued_at: issuedAt, issued_by: userId })
+    .eq("id", invoiceId)
+    .eq("status", "draft")
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!updated || updated.length === 0) return { ok: false, error: NO_ROWS_MESSAGE };
+
+  await recordAuditEvent({
+    ...buildDataAuditEvent(
+      "update",
+      "client_invoice",
+      invoiceId,
+      userId,
+      `Issued invoice ${invoiceId}.`,
+      { status: "draft" },
+      { status: "issued", issue_date: issueDate, issued_at: issuedAt },
+    ),
+    actor_role: role,
+  });
+
+  revalidateInvoices(invoiceId, invoice.proposal_id as string | null);
   return { ok: true };
 }
 

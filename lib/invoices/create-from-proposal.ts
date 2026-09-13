@@ -1,10 +1,9 @@
 import "server-only";
 
-// Raises a draft invoice from a proposal, at whatever point in its life the
-// caller asks — not just at acceptance. Unlike acceptance-income.ts this is a
-// direct user action (there is a button for it), not a best-effort side
-// effect of another event, so it reports its errors instead of swallowing
-// them.
+// Raises a draft invoice exclusively from the proposal revision the client
+// accepted. Unlike acceptance-income.ts this is a direct user action (there is
+// a button for it), not a best-effort side effect of another event, so it
+// reports its errors instead of swallowing them.
 //
 // Runs on the service-role client for the same reason acceptance-income.ts
 // does: every value it writes is derived server-side from the proposal's own
@@ -18,7 +17,14 @@ import { isGeneratorState } from "@/lib/proposals/generator-state";
 import { computeProposalTotals, type ProposalLineItem, type ProposalTotals } from "@/lib/proposals/pricing";
 import { lookupService } from "@/lib/proposals/catalog";
 import { recordAuditEvent, buildDataAuditEvent } from "@/lib/audit/events";
-import { invoiceKinds, type InvoiceKind, type LineQtyBasis } from "@/lib/invoices/invoice";
+import { type InvoiceKind, type LineQtyBasis } from "@/lib/invoices/invoice";
+import {
+  buildProposalBillingSummary,
+  priceProposalBillingSelections,
+  proposalBillingLineKey,
+  roundInvoiceMoney,
+  type ProposalBillingSelection,
+} from "@/lib/invoices/proposal-billing";
 
 /**
  * Catalog group, shortened to a one-word (or short) heading. A line whose
@@ -54,10 +60,12 @@ function describeLine(row: ProposalLineItem): string {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LooseClient = any;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface CreateInvoiceFromProposalInput {
   proposalId: string;
-  kind: InvoiceKind;
+  generationKey: string;
+  selections: readonly ProposalBillingSelection[];
   actorUserId: string;
   actorRole: string | null;
 }
@@ -163,28 +171,33 @@ export function buildFullLines(totals: ProposalTotals, reference: string): { lin
   return { lines, subtotal, tax: totals.tax };
 }
 
-function buildSingleLine(description: string, amount: number): { lines: DraftLine[]; subtotal: number; tax: number } {
-  return {
-    lines: [{ description: description.slice(0, 500), quantity: 1, unit_amount: amount, line_total: amount, unit: "", qty_basis: "flat", sort_order: 100 }],
-    subtotal: amount,
-    tax: 0,
-  };
+interface ProposalInvoiceRpcLine extends DraftLine {
+  line_key: string;
+}
+
+function rpcInvoiceRow(value: unknown): Record<string, unknown> | null {
+  const row = Array.isArray(value) ? value[0] : value;
+  return row && typeof row === "object" ? (row as Record<string, unknown>) : null;
 }
 
 export async function createInvoiceFromProposal(
   input: CreateInvoiceFromProposalInput,
 ): Promise<CreateInvoiceFromProposalResult> {
-  if (!invoiceKinds.includes(input.kind)) {
-    return { ok: false, error: "Unknown invoice kind." };
+  const proposalId = typeof input.proposalId === "string" ? input.proposalId.trim() : "";
+  const generationKey = typeof input.generationKey === "string" ? input.generationKey.trim() : "";
+  if (!proposalId) return { ok: false, error: "A proposal is required." };
+  if (!UUID_PATTERN.test(generationKey)) {
+    return { ok: false, error: "Invoice generation key must be a UUID." };
   }
+  if (!Array.isArray(input.selections)) return { ok: false, error: "Select at least one proposal line to invoice." };
 
   const db: LooseClient | null = createAdminClient();
   if (!db) return { ok: false, error: "Service-role credentials are not configured." };
 
   const { data: proposal, error: proposalError } = await db
     .from("client_proposals")
-    .select("id, title, proposal_number, client_id, proposal_value, form_data")
-    .eq("id", input.proposalId)
+    .select("id, title, proposal_number, client_id, accepted_revision_id")
+    .eq("id", proposalId)
     .maybeSingle();
   if (proposalError || !proposal) {
     return { ok: false, error: proposalError?.message ?? "Proposal not found." };
@@ -195,97 +208,143 @@ export async function createInvoiceFromProposal(
     return { ok: false, error: "This proposal has no client assigned yet — assign one before raising an invoice." };
   }
 
-  const state = proposal.form_data;
-  const totals = isGeneratorState(state) ? computeProposalTotals(state) : null;
-  const fallbackTotal = proposal.proposal_value != null ? Number(proposal.proposal_value) : 0;
-  const amount = amountForKind(input.kind, totals, fallbackTotal);
-
-  if (!(amount > 0)) {
-    const error =
-      input.kind === "deposit"
-        ? "This proposal's fee table has no deposit percentage set, so there is nothing to bill as a deposit."
-        : input.kind === "balance"
-          ? "There is no balance left to bill — the deposit already covers the full amount, or the proposal has no saved fee table."
-          : "This proposal has no priced total yet, so there is nothing to invoice.";
-    return { ok: false, error };
+  const revisionId = typeof proposal.accepted_revision_id === "string" ? proposal.accepted_revision_id.trim() : "";
+  if (!revisionId) {
+    return {
+      ok: false,
+      error: "Billing is unavailable until this proposal has an accepted revision.",
+    };
   }
 
-  const reference = [proposal.proposal_number, proposal.title].filter(Boolean).join(" — ") || "Proposal";
+  const { data: revision, error: revisionError } = await db
+    .from("client_proposal_revisions")
+    .select("id, proposal_id, form_data")
+    .eq("id", revisionId)
+    .eq("proposal_id", proposalId)
+    .maybeSingle();
+  if (revisionError || !revision) {
+    return { ok: false, error: revisionError?.message ?? "The accepted proposal revision could not be found." };
+  }
+  if (!isGeneratorState(revision.form_data)) {
+    return { ok: false, error: "The accepted proposal revision has no billable fee table." };
+  }
 
-  const draft =
-    input.kind === "full" && totals
-      ? buildFullLines(totals, reference)
-      : buildSingleLine(`${input.kind === "deposit" ? "Deposit" : input.kind === "balance" ? "Balance due" : "Full amount"} — ${reference}`, amount);
-
-  const { data: invoice, error: insertError } = await db
+  // Idempotent browser retries must succeed even though the first successful
+  // request has now committed the selected quantities. Check request identity
+  // before remaining-quantity validation, after re-establishing that the
+  // proposal still has a real accepted revision.
+  const { data: existingInvoice, error: existingError } = await db
     .from("client_invoices")
-    .insert({
-      client_id: clientId,
-      proposal_id: input.proposalId,
-      status: "draft",
-      kind: input.kind,
-      currency: "USD",
-      subtotal: draft.subtotal,
-      tax_amount: draft.tax,
-      total: round2(draft.subtotal + draft.tax),
-      job_name: proposal.title ?? null,
-      /*
-       * Left EMPTY on purpose.
-       *
-       * `notes` is printed under a NOTES heading on the client's invoice, by
-       * both renderers. It used to be auto-filled with "Generated from
-       * <proposal>. Tax, if any, is already folded into the proposal's total —
-       * adjust the line items if this invoice needs its own tax treatment." —
-       * an internal provenance note and an instruction addressed to whoever was
-       * drafting, both landing in front of the client. That is what "the notes
-       * comment at the bottom of the invoice needs work" meant (Steve,
-       * 2026-08-31).
-       *
-       * The provenance is not lost: proposal_id links the two, the ledger and
-       * the invoice screen both show "Raised from <proposal>", and the audit
-       * trail records the creation. The tax caveat now sits beside the tax
-       * field in the editor, where the person who can act on it will read it.
-       * What remains here is a blank space for the seller to write something
-       * the client should actually read.
-       */
-      notes: null,
-      created_by: input.actorUserId,
-    })
     .select("id, invoice_number")
-    .single();
-
-  if (insertError) {
-    if (insertError.code === "23505") {
-      return {
-        ok: false,
-        error: `A live ${input.kind} invoice already exists for this proposal. Void it first, or generate a different kind.`,
-      };
-    }
-    return { ok: false, error: insertError.message };
+    .eq("proposal_id", proposalId)
+    .eq("generation_key", generationKey)
+    .maybeSingle();
+  if (existingError) return { ok: false, error: existingError.message };
+  if (existingInvoice?.id) {
+    return {
+      ok: true,
+      invoiceId: existingInvoice.id as string,
+      invoiceNumber: (existingInvoice.invoice_number as string | null) ?? null,
+    };
   }
 
-  const { error: lineError } = await db.from("client_invoice_line_items").insert(
-    draft.lines.map((line) => ({ ...line, invoice_id: invoice.id })),
+  const totals = computeProposalTotals(revision.form_data);
+  const lineKeys = totals.lineItems.map((_, index) => proposalBillingLineKey(revisionId, index));
+  if (lineKeys.length === 0) return { ok: false, error: "The accepted proposal revision has no billable lines." };
+
+  const { data: invoiceRows, error: invoiceError } = await db
+    .from("client_invoices")
+    .select("id, tax_amount")
+    .eq("proposal_id", proposalId)
+    .neq("status", "void");
+  if (invoiceError) return { ok: false, error: invoiceError.message };
+
+  const invoiceTax = new Map<string, number>();
+  for (const invoice of invoiceRows ?? []) {
+    if (typeof invoice.id === "string") invoiceTax.set(invoice.id, Number(invoice.tax_amount ?? 0));
+  }
+
+  const invoiceIds = [...invoiceTax.keys()];
+  let committedRows: Array<{ invoice_id: string; source_proposal_line_key: string; quantity: number | string }> = [];
+  if (invoiceIds.length > 0) {
+    const { data, error } = await db
+      .from("client_invoice_line_items")
+      .select("invoice_id, source_proposal_line_key, quantity")
+      .in("invoice_id", invoiceIds)
+      .in("source_proposal_line_key", lineKeys);
+    if (error) return { ok: false, error: error.message };
+    committedRows = data ?? [];
+  }
+
+  const committedInvoiceIds = new Set(committedRows.map((row) => row.invoice_id));
+  const committedTax = roundInvoiceMoney(
+    [...committedInvoiceIds].reduce((sum, invoiceId) => sum + (invoiceTax.get(invoiceId) ?? 0), 0),
   );
+  const billing = buildProposalBillingSummary(
+    revisionId,
+    totals,
+    committedRows.map((row) => ({ lineKey: row.source_proposal_line_key, quantity: row.quantity })),
+    committedTax,
+  );
+  const priced = priceProposalBillingSelections(billing, input.selections);
+  if (!priced.ok) return { ok: false, error: priced.problems[0]?.message ?? "The selected lines cannot be invoiced." };
 
-  if (lineError) {
-    // Don't leave a lineless invoice sitting in the ledger — undo the header too.
-    await db.from("client_invoices").delete().eq("id", invoice.id);
-    return { ok: false, error: lineError.message };
+  const rpcLines: ProposalInvoiceRpcLine[] = priced.lines.map((line) => {
+    const source = totals.lineItems[line.lineOrder];
+    return {
+      line_key: line.lineKey,
+      description: describeLine(source).slice(0, 500),
+      quantity: line.quantity,
+      unit_amount: line.unitAmount,
+      line_total: line.lineTotal,
+      unit: (source.unit || "").slice(0, 60),
+      // Whether a proposal line is divisible comes from the accepted source
+      // quantity, not the size of this invoice slice. One of ten hours is
+      // still an hourly charge; calling it flat would make later slices bill
+      // the full unit amount without multiplication.
+      qty_basis: qtyBasisFor(source.unit || "", source.qty),
+      sort_order: (line.lineOrder + 1) * 10,
+    };
+  });
+
+  const { data: rpcResult, error: rpcError } = await db.rpc("generate_client_invoice_from_proposal", {
+    p_proposal_id: proposalId,
+    p_revision_id: revisionId,
+    p_created_by: input.actorUserId,
+    p_generation_key: generationKey,
+    p_lines: rpcLines,
+    p_tax_amount: priced.tax,
+  });
+
+  if (rpcError) {
+    if (rpcError.code === "23514" || rpcError.code === "40001") {
+      return { ok: false, error: "Those quantities are no longer available. Refresh the proposal and try again." };
+    }
+    return { ok: false, error: rpcError.message };
   }
+
+  const invoice = rpcInvoiceRow(rpcResult);
+  const invoiceId = typeof invoice?.invoice_id === "string"
+    ? invoice.invoice_id
+    : typeof invoice?.id === "string"
+      ? invoice.id
+      : null;
+  if (!invoiceId) return { ok: false, error: "The invoice was created but its identifier was not returned." };
+  const invoiceNumber = typeof invoice?.invoice_number === "string" ? invoice.invoice_number : null;
+  const reference = [proposal.proposal_number, proposal.title].filter(Boolean).join(" — ") || "Proposal";
 
   await recordAuditEvent({
     ...buildDataAuditEvent(
       "create",
       "client_invoice",
-      invoice.id as string,
+      invoiceId,
       input.actorUserId,
-      `Raised a ${input.kind} invoice${invoice.invoice_number ? ` ${invoice.invoice_number}` : ""} from ${reference} (${draft.lines.length} line${draft.lines.length === 1 ? "" : "s"})`,
+      `Raised invoice${invoiceNumber ? ` ${invoiceNumber}` : ""} from accepted revision of ${reference} (${rpcLines.length} line${rpcLines.length === 1 ? "" : "s"})`,
       null,
-      { proposal_id: input.proposalId, client_id: clientId, kind: input.kind, amount, lines: draft.lines.length },
+      { proposal_id: proposalId, revision_id: revisionId, client_id: clientId, amount: priced.total, lines: rpcLines.length },
     ),
     actor_role: input.actorRole,
   });
 
-  return { ok: true, invoiceId: invoice.id as string, invoiceNumber: (invoice.invoice_number as string | null) ?? null };
+  return { ok: true, invoiceId, invoiceNumber };
 }

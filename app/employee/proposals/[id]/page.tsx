@@ -4,7 +4,12 @@ import { ChevronLeft, Download, FileText, PencilLine } from "lucide-react";
 import { getProposalAccess } from "@/lib/proposals/access";
 import { getInvoiceAccess } from "@/lib/invoices/access";
 import { invoiceKindLabel, invoiceStatusLabel } from "@/lib/invoices/invoice";
-import { GenerateInvoiceButton } from "@/components/invoices/GenerateInvoiceButton";
+import {
+  GenerateInvoiceButton,
+  type ProposalInvoiceLine,
+  type ProposalInvoiceTotals,
+} from "@/components/invoices/GenerateInvoiceButton";
+import { buildProposalBillingSummary, roundInvoiceMoney } from "@/lib/invoices/proposal-billing";
 import { canEditProposalContent, isProposalUuid } from "@/lib/proposals/policy";
 import { isGeneratorState, type GeneratorState } from "@/lib/proposals/generator-state";
 import { computeProposalTotals } from "@/lib/proposals/pricing";
@@ -65,7 +70,7 @@ export default async function ProposalDetailPage({
   // a junk URL is a clean 404 rather than a 500.
   if (!isProposalUuid(id)) notFound();
 
-  const [{ data: proposal }, { data: revisions }, { data: clients }] = await Promise.all([
+  const [{ data: proposal }, { data: revisions }, { data: clients }, invoiceAccess] = await Promise.all([
     supabase
       .from("client_proposals")
       .select(
@@ -81,21 +86,22 @@ export default async function ProposalDetailPage({
       .eq("proposal_id", id)
       .order("revision_number", { ascending: false }),
     supabase.from("company_clients").select("id, name").order("name").limit(500),
+    getInvoiceAccess(),
   ]);
 
   if (!proposal) notFound();
 
-  // Cheap: getSessionContext() is request-memoized, so this only adds the two
-  // finance-specific queries on top of the auth + role lookup already paid for
-  // by getProposalAccess() above.
-  const invoiceAccess = await getInvoiceAccess();
-  const { data: proposalInvoices } = invoiceAccess.canSeeMoney
+  // getSessionContext() is request-memoized; invoice access starts alongside
+  // the proposal reads so its two finance-specific queries do not create a
+  // second page-load waterfall.
+  const proposalInvoiceResult = invoiceAccess.canSeeMoney
     ? await supabase
         .from("client_invoices")
-        .select("id, invoice_number, status, kind, total, currency")
+        .select("id, invoice_number, status, kind, subtotal, tax_amount, total, currency")
         .eq("proposal_id", id)
         .order("created_at", { ascending: false })
-    : { data: [] };
+    : { data: [], error: null };
+  const proposalInvoices = proposalInvoiceResult.data ?? [];
 
   // ---------------------------------------------------------------------------
   // Share links + acceptance evidence.
@@ -162,6 +168,7 @@ export default async function ProposalDetailPage({
   const docusignAvailable = !docusignResult.error;
   const docusignConfig = getDocusignConfigStatus();
   const acceptanceRow = (acceptanceResult.data ?? null) as Record<string, unknown> | null;
+  const acceptedRevisionId = (acceptanceRow?.accepted_revision_id ?? null) as string | null;
   const shareLinkRows = (shareLinkResult.data ?? []) as Array<Record<string, unknown>>;
   const docusignRows = (docusignResult.data ?? []) as Array<Record<string, unknown>>;
 
@@ -212,6 +219,88 @@ export default async function ProposalDetailPage({
   const revisionRows = (revisions ?? []) as ProposalRevisionRow[];
   const revisionNumberById = new Map(revisionRows.map((revision) => [revision.id, revision.revision_number]));
 
+  let invoiceGenerationLines: ProposalInvoiceLine[] | null = null;
+  let invoiceGenerationTotals: ProposalInvoiceTotals | undefined;
+  let invoiceGenerationUnavailableReason: string | null = null;
+  if (invoiceAccess.canSeeMoney) {
+    const acceptedRevision = acceptedRevisionId
+      ? revisionRows.find((revision) => revision.id === acceptedRevisionId) ?? null
+      : null;
+    if (acceptanceResult.error) {
+      invoiceGenerationUnavailableReason = "Invoice generation is unavailable until the accepted-revision migration is applied.";
+    } else if (!acceptedRevisionId) {
+      invoiceGenerationUnavailableReason = "Accept a proposal revision before generating an invoice.";
+    } else if (!acceptedRevision || !isGeneratorState(acceptedRevision.form_data)) {
+      invoiceGenerationUnavailableReason = "The accepted revision has no billable fee table.";
+    } else if (proposalInvoiceResult.error) {
+      invoiceGenerationUnavailableReason = "Existing invoice allocations could not be checked. Refresh and try again.";
+    } else {
+      const activeInvoices = (proposalInvoices as Array<{ id: string; status: string; tax_amount?: number | string | null }>).filter(
+        (invoice) => invoice.status !== "void",
+      );
+      const activeInvoiceIds = activeInvoices.map((invoice) => invoice.id);
+      let committedRows: Array<{ invoice_id: string; source_proposal_line_key: string; quantity: number | string }> = [];
+      let provenanceError: { message?: string } | null = null;
+
+      if (activeInvoiceIds.length > 0) {
+        // Kept separate and loose-typed so the rest of the proposal page still
+        // works while the new provenance migration is staged but not applied.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await (supabase as any)
+          .from("client_invoice_line_items")
+          .select("invoice_id, source_proposal_line_key, quantity")
+          .in("invoice_id", activeInvoiceIds)
+          .not("source_proposal_line_key", "is", null);
+        committedRows = ((result.data ?? []) as typeof committedRows).filter((row) =>
+          row.source_proposal_line_key.startsWith(`${acceptedRevisionId}:`),
+        );
+        provenanceError = result.error;
+      } else {
+        // Feature probe: without existing invoices there is nothing to filter,
+        // but the button still must stay disabled until the provenance columns
+        // and atomic RPC have reached the database.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await (supabase as any)
+          .from("client_invoice_line_items")
+          .select("source_proposal_line_key")
+          .limit(1);
+        provenanceError = result.error;
+      }
+
+      if (provenanceError) {
+        invoiceGenerationUnavailableReason = "Selected-line billing is unavailable until its database migration is applied.";
+      } else {
+        const trackedInvoiceIds = new Set(committedRows.map((row) => row.invoice_id));
+        const committedTax = roundInvoiceMoney(
+          activeInvoices.reduce(
+            (sum, invoice) => sum + (trackedInvoiceIds.has(invoice.id) ? Number(invoice.tax_amount ?? 0) : 0),
+            0,
+          ),
+        );
+        const billing = buildProposalBillingSummary(
+          acceptedRevisionId,
+          computeProposalTotals(acceptedRevision.form_data),
+          committedRows.map((row) => ({ lineKey: row.source_proposal_line_key, quantity: row.quantity })),
+          committedTax,
+        );
+        invoiceGenerationLines = billing.lines.map((line) => ({
+          lineKey: line.lineKey,
+          description: line.name || line.description || `Proposal line ${line.lineOrder + 1}`,
+          unit: line.unit,
+          proposedQuantity: line.proposedQuantity,
+          committedQuantity: line.committedQuantity,
+          remainingQuantity: line.remainingQuantity,
+          unitAmount: line.approvedUnitAmount,
+        }));
+        invoiceGenerationTotals = {
+          proposedSubtotal: billing.proposedSubtotal,
+          proposedTax: billing.proposedTax,
+          remainingTax: billing.remainingTax,
+        };
+      }
+    }
+  }
+
   // Newest first for the picker, so "share the latest" is the default choice.
   const shareableRevisions: ShareableRevision[] = revisionRows.map((revision) => ({
     id: revision.id,
@@ -254,7 +343,6 @@ export default async function ProposalDetailPage({
     revoked_at: link.revoked_at,
   }));
 
-  const acceptedRevisionId = (acceptanceRow?.accepted_revision_id ?? null) as string | null;
   const acceptance: TimelineAcceptance | null = acceptanceRow
     ? {
         acceptedAt: (acceptanceRow.accepted_at ?? null) as string | null,
@@ -318,15 +406,29 @@ export default async function ProposalDetailPage({
               <PencilLine size={16} /> Edit in generator
             </Link>
           ) : null}
-          {invoiceAccess.canSeeMoney ? <GenerateInvoiceButton proposalId={normalized.id} /> : null}
+          {invoiceAccess.canSeeMoney && invoiceGenerationLines ? (
+            <GenerateInvoiceButton
+              proposalId={normalized.id}
+              lines={invoiceGenerationLines}
+              totals={invoiceGenerationTotals}
+            />
+          ) : invoiceAccess.canSeeMoney ? (
+            <button type="button" className="button button-light" disabled title={invoiceGenerationUnavailableReason ?? undefined}>
+              Generate invoice
+            </button>
+          ) : null}
         </div>
       </div>
 
-      {invoiceAccess.canSeeMoney && (proposalInvoices ?? []).length > 0 ? (
+      {invoiceAccess.canSeeMoney && invoiceGenerationUnavailableReason ? (
+        <div className="success-box portal-alert">{invoiceGenerationUnavailableReason}</div>
+      ) : null}
+
+      {invoiceAccess.canSeeMoney && proposalInvoices.length > 0 ? (
         <p style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ color: "var(--portal-muted)" }}>Invoices:</span>
           {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-          {(proposalInvoices ?? []).map((invoice: any) => (
+          {proposalInvoices.map((invoice: any) => (
             <Link key={invoice.id} className="grant-pill" href={`/employee/invoices/${invoice.id}`}>
               {invoice.invoice_number ?? "Draft"} · {invoiceKindLabel(invoice.kind)} ·{" "}
               {Number(invoice.total ?? 0).toLocaleString("en-US", {

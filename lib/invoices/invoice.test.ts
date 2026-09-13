@@ -50,6 +50,7 @@ describe("vocabulary mirrors the database CHECK constraints", () => {
   it("labels everything, and says so when it cannot", () => {
     for (const s of invoiceStatuses) expect(invoiceStatusLabel(s)).not.toBe("Unknown status");
     for (const k of invoiceKinds) expect(invoiceKindLabel(k)).not.toBe("Unknown kind");
+    expect(invoiceKindLabel(null)).toBe("Proposal billing");
     expect(invoiceStatusLabel("posted")).toBe("Unknown status");
     expect(invoiceKindLabel("partial")).toBe("Unknown kind");
   });
@@ -97,6 +98,10 @@ describe("validateInvoice", () => {
 
   it("passes a well-formed draft", () => {
     expect(validateInvoice(base)).toEqual([]);
+  });
+
+  it("accepts proposal billing after the legacy kind field was retired", () => {
+    expect(validateInvoice({ ...base, kind: null })).toEqual([]);
   });
 
   it("refuses an issued invoice with no dates, matching client_invoices_issued_has_date", () => {
