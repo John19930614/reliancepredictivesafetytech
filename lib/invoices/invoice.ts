@@ -52,7 +52,9 @@ export function invoiceStatusTone(status: string): string {
   return isInvoiceStatus(status) ? statusTones[status] : "muted";
 }
 
-export function invoiceKindLabel(kind: string): string {
+export function invoiceKindLabel(kind: string | null | undefined): string {
+  if (kind == null || kind === "") return "Proposal billing";
+
   return invoiceKinds.includes(kind as InvoiceKind) ? kindLabels[kind as InvoiceKind] : "Unknown kind";
 }
 
@@ -74,7 +76,7 @@ export type InvoiceRow = {
   id: string;
   invoice_number: string | null;
   status: string;
-  kind: string;
+  kind: string | null;
   issue_date: string | null;
   due_date: string | null;
   currency: string;
@@ -116,7 +118,7 @@ export type InvoiceProblem = { field: string; message: string };
  */
 export function validateInvoice(input: {
   status: string;
-  kind: string;
+  kind: string | null;
   currency: string;
   issue_date: string | null;
   issued_at: string | null;
@@ -129,8 +131,8 @@ export function validateInvoice(input: {
     problems.push({ field: "status", message: "Status must be draft, issued, paid or void." });
   }
 
-  if (!invoiceKinds.includes(input.kind as InvoiceKind)) {
-    problems.push({ field: "kind", message: "Kind must be deposit, full or balance." });
+  if (input.kind !== null && !invoiceKinds.includes(input.kind as InvoiceKind)) {
+    problems.push({ field: "kind", message: "Kind must be proposal billing, deposit, full or balance." });
   }
 
   if ((input.currency ?? "").length !== 3) {

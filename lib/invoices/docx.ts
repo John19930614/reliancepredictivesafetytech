@@ -1,5 +1,8 @@
 import "server-only";
 
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
 // Invoice DOCX rendering — the `docx` package, same library and color
 // constants as lib/proposals/docx.ts, so the two document families read as
 // one company's output even though this one is a single table rather than a
@@ -8,6 +11,7 @@ import "server-only";
 import {
   AlignmentType,
   Document,
+  ImageRun,
   Packer,
   Paragraph,
   ShadingType,
@@ -32,6 +36,20 @@ const TABLE_WIDTH = PAGE_WIDTH - MARGIN_X * 2;
 const COL_RATIOS = [0.46, 0.1, 0.16, 0.14, 0.14];
 const COL_WIDTHS = COL_RATIOS.map((r) => Math.round(TABLE_WIDTH * r));
 
+async function sealImageRun(): Promise<ImageRun | null> {
+  try {
+    const bytes = await readFile(path.join(process.cwd(), "public", "reliance-seal-transparent.png"));
+    return new ImageRun({
+      type: "png",
+      data: bytes,
+      transformation: { width: 54, height: 54 },
+      altText: { title: "Reliance seal", description: "Reliance seal", name: "Reliance seal" },
+    });
+  } catch {
+    return null;
+  }
+}
+
 function para(text: string, opts: { bold?: boolean; size?: number; color?: string; alignment?: (typeof AlignmentType)[keyof typeof AlignmentType]; spacingAfter?: number } = {}) {
   return new Paragraph({
     alignment: opts.alignment,
@@ -51,6 +69,7 @@ function cell(children: Paragraph[], opts: { width: number; shading?: string; bo
 }
 
 export async function renderInvoiceDocx(model: InvoiceDocumentModel): Promise<Buffer> {
+  const seal = await sealImageRun();
   const headerRow = new TableRow({
     children: ["Description", "Qty", "Unit", "Unit amount", "Amount"].map((label, i) =>
       cell([para(label, { bold: true, size: 18, color: NAVY })], { width: COL_WIDTHS[i], shading: BAND }),
@@ -108,6 +127,7 @@ export async function renderInvoiceDocx(model: InvoiceDocumentModel): Promise<Bu
   const children: Block[] = [
     new Paragraph({
       children: [
+        ...(seal ? [seal, new TextRun({ text: "  " })] : []),
         new TextRun({ text: model.seller.name, bold: true, size: 26, color: NAVY }),
         new TextRun({ text: "\tINVOICE", bold: true, size: 32, color: NAVY }),
       ],

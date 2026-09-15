@@ -6,7 +6,7 @@ import { updateInvoiceHeader } from "@/app/employee/invoices/actions";
 import { invoiceKindLabel, invoiceKinds } from "@/lib/invoices/invoice";
 
 export interface InvoiceHeaderFormValues {
-  kind: string;
+  kind: string | null;
   issue_date: string | null;
   due_date: string | null;
   currency: string;
@@ -67,7 +67,13 @@ export function InvoiceHeaderForm({
 
       <div className="field">
         <label htmlFor="invoice-kind">Kind</label>
-        <select id="invoice-kind" value={values.kind} disabled={!editable || isPending} onChange={(event) => set("kind", event.target.value)}>
+        <select
+          id="invoice-kind"
+          value={values.kind ?? ""}
+          disabled={!editable || isPending}
+          onChange={(event) => set("kind", event.target.value || null)}
+        >
+          <option value="">Proposal billing</option>
           {invoiceKinds.map((option) => (
             <option key={option} value={option}>
               {invoiceKindLabel(option)}

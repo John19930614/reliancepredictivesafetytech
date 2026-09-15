@@ -77,12 +77,14 @@ export function InvoiceLineItemsEditor({
   invoiceId,
   initialLines,
   editable,
+  lockedReason,
   taxAmount = 0,
   currency = "USD",
 }: {
   invoiceId: string;
   initialLines: EditableLine[];
   editable: boolean;
+  lockedReason?: string | null;
   /** From the invoice header, so the running figure is the one being committed to. */
   taxAmount?: number;
   currency?: string;
@@ -131,7 +133,7 @@ export function InvoiceLineItemsEditor({
       <h2>Line items</h2>
       {!editable ? (
         <p style={{ color: "var(--portal-muted)", fontSize: "0.9rem" }}>
-          Line items can only be changed while this invoice is a draft.
+          {lockedReason ?? "Line items can only be changed while this invoice is a draft."}
         </p>
       ) : null}
       {error ? <div className="success-box portal-alert portal-alert-error">{error}</div> : null}
